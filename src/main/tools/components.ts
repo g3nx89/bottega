@@ -1,6 +1,6 @@
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
-import type { ToolDeps } from './index.js';
+import { type ToolDeps, textResult } from './index.js';
 
 export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
@@ -22,7 +22,7 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
           const result = await connector.instantiateComponent(params.componentKey, {
             x: params.x, y: params.y, parentId: params.parentId,
           });
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -37,7 +37,7 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setInstanceProperties(params.nodeId, params.properties);
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -51,24 +51,26 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
-          const cols = params.columns ?? 4;
+          const nodeId = String(params.nodeId).replace(/[^0-9:]/g, '');
+          const cols = Math.max(1, Math.floor(Number(params.columns) || 4));
           const code = `
             (async () => {
-              const node = figma.getNodeById('${params.nodeId}');
+              const node = figma.getNodeById(${JSON.stringify(nodeId)});
               if (!node || node.type !== 'COMPONENT_SET') throw new Error('Not a component set');
               const children = [...node.children];
               const spacing = 20;
+              const cols = ${cols};
               let maxW = 0, maxH = 0;
               children.forEach(c => { maxW = Math.max(maxW, c.width); maxH = Math.max(maxH, c.height); });
               children.forEach((c, i) => {
-                c.x = (i % ${cols}) * (maxW + spacing);
-                c.y = Math.floor(i / ${cols}) * (maxH + spacing);
+                c.x = (i % cols) * (maxW + spacing);
+                c.y = Math.floor(i / cols) * (maxH + spacing);
               });
-              return { arranged: children.length, columns: ${cols} };
+              return { arranged: children.length, columns: cols };
             })()
           `;
           const result = await connector.executeCodeViaUI(code, 15000);
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },

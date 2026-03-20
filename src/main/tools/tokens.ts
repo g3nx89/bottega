@@ -1,6 +1,6 @@
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
-import type { ToolDeps } from './index.js';
+import { type ToolDeps, textResult } from './index.js';
 
 export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
@@ -53,25 +53,7 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
             createdVars.push({ name: v.name, id: varId });
           }
 
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ collectionId, modeIds, variables: createdVars }) }],
-            details: {},
-          };
-        });
-      },
-    },
-    {
-      name: 'figma_rename',
-      label: 'Rename Node',
-      description: 'Rename a node in the Figma layers panel.',
-      parameters: Type.Object({
-        nodeId: Type.String({ description: 'Node ID' }),
-        name: Type.String({ description: 'New name' }),
-      }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
-        return operationQueue.execute(async () => {
-          const result = await connector.renameNode(params.nodeId, params.name);
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult({ collectionId, modeIds, variables: createdVars });
         });
       },
     },
@@ -85,7 +67,7 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         const result = await connector.lintDesign(params.nodeId, params.rules);
-        return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+        return textResult(result);
       },
     },
   ];

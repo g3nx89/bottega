@@ -25,7 +25,7 @@ export class OperationQueue {
     this.running = true;
     while (this.queue.length > 0) {
       const task = this.queue.shift()!;
-      await task();
+      try { await task(); } catch { /* error already forwarded via reject */ }
     }
     this.running = false;
   }

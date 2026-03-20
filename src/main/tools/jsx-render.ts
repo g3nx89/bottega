@@ -1,8 +1,8 @@
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
-import type { ToolDeps } from './index.js';
+import { type ToolDeps, textResult } from './index.js';
 import { parseJsx } from '../jsx-parser.js';
-import { loadIconSvg, collectIconNodes, preloadIcons } from '../icon-loader.js';
+import { loadIconSvg, resolveIcons } from '../icon-loader.js';
 
 export function createJsxRenderTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
@@ -44,13 +44,8 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
           // 1. Parse JSX → TreeNode
           const tree = parseJsx(params.jsx);
 
-          // 2. Pre-fetch icons from Iconify
-          const icons = collectIconNodes(tree);
-          if (icons.length > 0) {
-            await preloadIcons(icons);
-            // Replace icon nodes with SVG content
-            await replaceIconNodesWithSvg(tree);
-          }
+          // 2. Resolve icons: single-pass collect + parallel fetch + in-place replace
+          await resolveIcons(tree);
 
           // 3. Send to plugin via WebSocket
           const result = await connector.createFromJsx(tree, {
@@ -58,7 +53,7 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
             y: params.y,
             parentId: params.parentId,
           });
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -81,7 +76,7 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
           const result = await connector.createIcon(svg, params.size ?? 24, params.color ?? '#000000', {
             x: params.x, y: params.y, parentId: params.parentId,
           });
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -98,25 +93,9 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           await connector.bindVariable(params.nodeId, params.variableName, params.property);
-          return { content: [{ type: 'text', text: JSON.stringify({ success: true }) }], details: {} };
+          return textResult({ success: true });
         });
       },
     },
   ];
-}
-
-// Helper: walk tree and replace Icon nodes with SVG type nodes
-async function replaceIconNodesWithSvg(tree: any): Promise<void> {
-  if (typeof tree === 'string') return;
-  if (tree.type === 'icon' || tree.type === 'Icon') {
-    const name = tree.props.name as string;
-    const size = (tree.props.size as number) || 24;
-    const svg = await loadIconSvg(name, size);
-    tree.type = 'svg';
-    tree.props = { ...tree.props, svg, w: size, h: size };
-    tree.children = [];
-  }
-  for (const child of tree.children) {
-    await replaceIconNodesWithSvg(child);
-  }
 }

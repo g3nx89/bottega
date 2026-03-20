@@ -1,6 +1,6 @@
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
-import type { ToolDeps } from './index.js';
+import { type ToolDeps, textResult } from './index.js';
 
 export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
@@ -17,7 +17,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setNodeFills(params.nodeId, params.fills);
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -33,7 +33,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setNodeStrokes(params.nodeId, params.strokes, params.weight);
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -56,7 +56,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
             fontSize: params.fontSize,
             fontWeight: params.fontWeight,
           });
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -76,7 +76,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
         return operationQueue.execute(async () => {
           const imageData = params.base64 ?? params.imageUrl ?? '';
           const result = await connector.setImageFill(params.nodeIds, imageData, params.scaleMode ?? 'FILL');
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -92,7 +92,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.resizeNode(params.nodeId, params.width, params.height);
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -108,7 +108,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.moveNode(params.nodeId, params.x, params.y);
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -125,7 +125,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.createChildNode(params.parentId, params.type, params.props);
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -139,7 +139,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.cloneNode(params.nodeId);
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -153,7 +153,22 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.deleteNode(params.nodeId);
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
+        });
+      },
+    },
+    {
+      name: 'figma_rename',
+      label: 'Rename Node',
+      description: 'Rename a node in the Figma layers panel.',
+      parameters: Type.Object({
+        nodeId: Type.String({ description: 'Node ID' }),
+        name: Type.String({ description: 'New name' }),
+      }),
+      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+        return operationQueue.execute(async () => {
+          const result = await connector.renameNode(params.nodeId, params.name);
+          return textResult(result);
         });
       },
     },

@@ -1,6 +1,7 @@
 import { iconToSVG, iconToHTML } from '@iconify/utils';
 import type { TreeNode } from '../figma/types.js';
 
+const MAX_ICON_CACHE = 500;
 const iconCache = new Map<string, string>();
 
 export async function loadIconSvg(name: string, size: number = 24): Promise<string> {
@@ -25,25 +26,37 @@ export async function loadIconSvg(name: string, size: number = 24): Promise<stri
   }, { height: size, width: size });
 
   const svg = iconToHTML(renderData.body, renderData.attributes);
+
+  // Evict oldest entry if cache is full
+  if (iconCache.size >= MAX_ICON_CACHE) {
+    const oldest = iconCache.keys().next().value!;
+    iconCache.delete(oldest);
+  }
   iconCache.set(cacheKey, svg);
   return svg;
 }
 
-export function collectIconNodes(tree: TreeNode): Array<{ name: string; size: number }> {
-  const icons: Array<{ name: string; size: number }> = [];
-  function walk(node: TreeNode | string) {
+/**
+ * Single-pass: collect all icon nodes, fetch SVGs in parallel, replace in-place.
+ * Replaces the previous two-pass approach (collectIconNodes + replaceIconNodesWithSvg).
+ */
+export async function resolveIcons(tree: TreeNode): Promise<void> {
+  const iconNodes: any[] = [];
+  (function walk(node: TreeNode | string) {
     if (typeof node === 'string') return;
-    if (node.type === 'icon' || node.type === 'Icon') {
-      icons.push({ name: node.props.name as string, size: (node.props.size as number) || 24 });
-    }
-    for (const child of node.children) {
-      walk(child);
-    }
-  }
-  walk(tree);
-  return icons;
-}
+    if (node.type === 'icon' || node.type === 'Icon') iconNodes.push(node);
+    for (const child of node.children) walk(child);
+  })(tree);
 
-export async function preloadIcons(icons: Array<{ name: string; size: number }>): Promise<void> {
-  await Promise.all(icons.map(i => loadIconSvg(i.name, i.size)));
+  if (iconNodes.length === 0) return;
+
+  const svgs = await Promise.all(
+    iconNodes.map(n => loadIconSvg(n.props.name as string, (n.props.size as number) || 24))
+  );
+  iconNodes.forEach((node, i) => {
+    const size = (node.props.size as number) || 24;
+    node.type = 'svg';
+    node.props = { ...node.props, svg: svgs[i], w: size, h: size };
+    node.children = [];
+  });
 }

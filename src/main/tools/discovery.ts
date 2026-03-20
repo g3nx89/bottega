@@ -1,6 +1,6 @@
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
-import type { ToolDeps } from './index.js';
+import { type ToolDeps, textResult } from './index.js';
 
 export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, figmaAPI } = deps;
@@ -20,7 +20,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
           depth: params.depth,
           ids: params.nodeId ? [params.nodeId] : undefined,
         });
-        return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+        return textResult(result);
       },
     },
     {
@@ -35,13 +35,13 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         if (params.libraryFileKey) {
           const result = await figmaAPI.searchComponents(params.libraryFileKey, params.query);
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         }
         const components = await connector.getLocalComponents();
         const filtered = Array.isArray(components)
           ? components.filter((c: any) => c.name?.toLowerCase().includes(params.query.toLowerCase()))
           : components;
-        return { content: [{ type: 'text', text: JSON.stringify(filtered) }], details: {} };
+        return textResult(filtered);
       },
     },
     {
@@ -56,7 +56,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
           figmaAPI.getComponents(params.fileKey),
           figmaAPI.getComponentSets(params.fileKey),
         ]);
-        return { content: [{ type: 'text', text: JSON.stringify({ components, componentSets }) }], details: {} };
+        return textResult({ components, componentSets });
       },
     },
     {
@@ -68,7 +68,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         const result = await connector.getComponentFromPluginUI(params.nodeId);
-        return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+        return textResult(result);
       },
     },
     {
@@ -82,7 +82,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
           connector.getVariables(),
           connector.getLocalComponents(),
         ]);
-        return { content: [{ type: 'text', text: JSON.stringify({ variables, components }) }], details: {} };
+        return textResult({ variables, components });
       },
     },
   ];

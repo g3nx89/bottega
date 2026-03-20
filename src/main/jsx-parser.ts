@@ -2,8 +2,19 @@ import { transformSync } from 'esbuild';
 import vm from 'node:vm';
 import type { TreeNode } from '../figma/types.js';
 
+// Hoisted: vm.createContext is expensive (~1-5ms per call).
+// The sandbox is identical every time so we create it once at module load.
+const tagNames = [
+  'Frame', 'View', 'Rectangle', 'Rect', 'Ellipse', 'Text',
+  'Line', 'Svg', 'Image', 'Icon', 'Fragment',
+];
+const sandbox: Record<string, string> = {};
+for (const tag of tagNames) {
+  sandbox[tag] = tag.toLowerCase();
+}
+const jsxContext = vm.createContext(sandbox);
+
 export function parseJsx(jsxString: string): TreeNode {
-  // Wrap the JSX in an IIFE with our custom createElement factory
   const wrappedCode = `
     (function() {
       function h(type, props) {
@@ -19,7 +30,6 @@ export function parseJsx(jsxString: string): TreeNode {
     })()
   `;
 
-  // Use esbuild to transform JSX → createElement calls
   const { code: compiled } = transformSync(wrappedCode, {
     jsx: 'transform',
     jsxFactory: 'h',
@@ -27,18 +37,5 @@ export function parseJsx(jsxString: string): TreeNode {
     loader: 'jsx',
   });
 
-  // Register all supported uppercase tag names as string identities in the sandbox.
-  // In JSX, <Frame> compiles to h(Frame, {}) — Frame must be a defined variable.
-  // We map each to its lowercase string so h() receives a string type.
-  const tagNames = [
-    'Frame', 'View', 'Rectangle', 'Rect', 'Ellipse', 'Text',
-    'Line', 'Svg', 'Image', 'Icon', 'Fragment',
-  ];
-  const sandbox: Record<string, string> = {};
-  for (const tag of tagNames) {
-    sandbox[tag] = tag.toLowerCase();
-  }
-
-  const context = vm.createContext(sandbox);
-  return vm.runInContext(compiled, context) as TreeNode;
+  return vm.runInContext(compiled, jsxContext) as TreeNode;
 }

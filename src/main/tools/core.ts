@@ -1,6 +1,6 @@
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
-import type { ToolDeps } from './index.js';
+import { type ToolDeps, textResult } from './index.js';
 
 export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, figmaAPI, operationQueue, wsServer } = deps;
@@ -18,7 +18,7 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.executeCodeViaUI(params.code, params.timeout ?? 30000);
-          return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+          return textResult(result);
         });
       },
     },
@@ -45,7 +45,7 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
             details: {},
           };
         }
-        return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+        return textResult(result);
       },
     },
     {
@@ -62,7 +62,7 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
           format: 'png',
           scale: params.scale ?? 2,
         });
-        return { content: [{ type: 'text', text: JSON.stringify(result) }], details: {} };
+        return textResult(result);
       },
     },
     {
@@ -75,10 +75,7 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
         const connected = wsServer.isClientConnected();
         const fileInfo = wsServer.getConnectedFileInfo();
         const files = wsServer.getConnectedFiles();
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ connected, fileInfo, files }) }],
-          details: {},
-        };
+        return textResult({ connected, fileInfo, files });
       },
     },
     {
@@ -89,7 +86,7 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
       parameters: Type.Object({}),
       async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
         const selection = wsServer.getCurrentSelection();
-        return { content: [{ type: 'text', text: JSON.stringify(selection) }], details: {} };
+        return textResult(selection);
       },
     },
   ];

@@ -36,7 +36,7 @@ app.whenReady().then(async () => {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   // 4. Setup IPC between agent and renderer
-  setupIpcHandlers(session, figmaCore, mainWindow);
+  setupIpcHandlers(session, mainWindow);
 
   // 5. Forward Figma connection events to the UI
   figmaCore.wsServer.on('fileConnected', (info: { fileKey: string; fileName: string }) => {

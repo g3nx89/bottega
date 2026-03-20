@@ -129,8 +129,13 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+let scrollRafId = null;
 function scrollToBottom() {
-  chatArea.scrollTop = chatArea.scrollHeight;
+  if (scrollRafId) return;
+  scrollRafId = requestAnimationFrame(() => {
+    chatArea.scrollTop = chatArea.scrollHeight;
+    scrollRafId = null;
+  });
 }
 
 function updateInputState() {

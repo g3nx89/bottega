@@ -8,13 +8,8 @@ export interface AgentSessionLike {
   subscribe(callback: (event: any) => void): void;
 }
 
-export interface FigmaCoreLike {
-  isConnected(): boolean;
-}
-
 export function setupIpcHandlers(
   session: AgentSessionLike,
-  figmaCore: FigmaCoreLike,
   mainWindow: BrowserWindow
 ) {
   // Subscribe to agent events → forward to renderer

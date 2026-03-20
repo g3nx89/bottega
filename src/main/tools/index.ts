@@ -17,6 +17,11 @@ export interface ToolDeps {
   wsServer: FigmaWebSocketServer;
 }
 
+/** Standard text result wrapper — avoids repeating the same shape in every tool. */
+export function textResult(data: unknown) {
+  return { content: [{ type: 'text' as const, text: JSON.stringify(data) }], details: {} };
+}
+
 export function createFigmaTools(deps: ToolDeps): ToolDefinition[] {
   return [
     ...createCoreTools(deps),
