@@ -45,4 +45,11 @@ contextBridge.exposeInMainWorld('api', {
 
   // Window opacity
   setOpacity: (opacity: number) => ipcRenderer.invoke('window:set-opacity', opacity),
+
+  // Auth & Model
+  getModels: () => ipcRenderer.invoke('auth:get-models'),
+  getProviders: () => ipcRenderer.invoke('auth:get-providers'),
+  setApiKey: (provider: string, key: string) => ipcRenderer.invoke('auth:set-key', provider, key),
+  hasApiKey: (provider: string) => ipcRenderer.invoke('auth:has-key', provider),
+  switchModel: (config: { provider: string; modelId: string }) => ipcRenderer.invoke('auth:switch-model', config),
 });

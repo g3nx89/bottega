@@ -2,7 +2,7 @@ import { app, BrowserWindow, crashReporter } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createFigmaCore } from './figma-core.js';
-import { createFigmaAgent } from './agent.js';
+import { createAgentInfra, createFigmaAgent } from './agent.js';
 import { setupIpcHandlers } from './ipc-handlers.js';
 import { createChildLogger, logFilePath } from '../figma/logger.js';
 
@@ -54,8 +54,9 @@ app.whenReady().then(async () => {
   await figmaCore.start();
   log.info({ port: 9223 }, 'Figma WebSocket server started');
 
-  // 2. Create agent
-  const { session } = await createFigmaAgent(figmaCore);
+  // 2. Create agent infrastructure (shared across session recreations)
+  const infra = await createAgentInfra(figmaCore);
+  const { session } = await createFigmaAgent(infra);
   log.info('Figma agent session created');
 
   // 3. Create window
@@ -88,7 +89,7 @@ app.whenReady().then(async () => {
   });
 
   // 4. Setup IPC between agent and renderer
-  setupIpcHandlers(session, mainWindow);
+  setupIpcHandlers(session as any, mainWindow, infra);
 
   // 5. Forward Figma connection events to the UI
   figmaCore.wsServer.on('fileConnected', (info: { fileKey: string; fileName: string }) => {

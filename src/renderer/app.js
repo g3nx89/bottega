@@ -256,6 +256,124 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ── Auth & Model ─────────────────────────
+
+const providerSelect = document.getElementById('provider-select');
+const modelSelect = document.getElementById('model-select');
+const apiKeyInput = document.getElementById('api-key-input');
+const saveKeyBtn = document.getElementById('save-key-btn');
+const keyStatus = document.getElementById('key-status');
+
+let availableModels = {};
+
+const PROVIDER_LABELS = {
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  google: 'Google',
+};
+
+const KEY_PLACEHOLDERS = {
+  anthropic: 'sk-ant-...',
+  openai: 'sk-...',
+  google: 'AIza...',
+};
+
+async function initAuthUI() {
+  availableModels = await window.api.getModels();
+  updateModelOptions();
+  await updateKeyStatus();
+
+  // Restore saved provider/model from localStorage
+  const savedProvider = localStorage.getItem('figma-companion:provider');
+  const savedModel = localStorage.getItem('figma-companion:model');
+  if (savedProvider && availableModels[savedProvider]) {
+    providerSelect.value = savedProvider;
+    updateModelOptions();
+  }
+  if (savedModel) {
+    modelSelect.value = savedModel;
+  }
+}
+
+function updateModelOptions() {
+  const provider = providerSelect.value;
+  const models = availableModels[provider] || [];
+  // Clear options safely (no innerHTML)
+  while (modelSelect.firstChild) modelSelect.removeChild(modelSelect.firstChild);
+  models.forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.label;
+    modelSelect.appendChild(opt);
+  });
+  apiKeyInput.placeholder = KEY_PLACEHOLDERS[provider] || 'API key';
+
+  // Restore saved model if it belongs to this provider
+  const savedModel = localStorage.getItem('figma-companion:model');
+  if (savedModel && models.some((m) => m.id === savedModel)) {
+    modelSelect.value = savedModel;
+  }
+}
+
+async function updateKeyStatus() {
+  const provider = providerSelect.value;
+  const hasKey = await window.api.hasApiKey(provider);
+  keyStatus.textContent = hasKey ? PROVIDER_LABELS[provider] + ' key configured' : 'No key set';
+  keyStatus.className = 'key-status' + (hasKey ? ' success' : '');
+}
+
+providerSelect.addEventListener('change', async () => {
+  updateModelOptions();
+  await updateKeyStatus();
+  apiKeyInput.value = '';
+});
+
+modelSelect.addEventListener('change', async () => {
+  const provider = providerSelect.value;
+  const modelId = modelSelect.value;
+  localStorage.setItem('figma-companion:provider', provider);
+  localStorage.setItem('figma-companion:model', modelId);
+
+  keyStatus.textContent = 'Switching model…';
+  keyStatus.className = 'key-status';
+  const result = await window.api.switchModel({ provider, modelId });
+  if (result.success) {
+    keyStatus.textContent = 'Using ' + modelSelect.options[modelSelect.selectedIndex].text;
+    keyStatus.className = 'key-status success';
+  } else {
+    keyStatus.textContent = result.error || 'Failed to switch';
+    keyStatus.className = 'key-status error';
+  }
+});
+
+saveKeyBtn.addEventListener('click', async () => {
+  const provider = providerSelect.value;
+  const key = apiKeyInput.value.trim();
+  if (!key) return;
+
+  saveKeyBtn.disabled = true;
+  await window.api.setApiKey(provider, key);
+  apiKeyInput.value = '';
+  await updateKeyStatus();
+  saveKeyBtn.disabled = false;
+
+  // Auto-switch to this provider's model
+  const modelId = modelSelect.value;
+  localStorage.setItem('figma-companion:provider', provider);
+  localStorage.setItem('figma-companion:model', modelId);
+  keyStatus.textContent = 'Key saved. Switching…';
+  const result = await window.api.switchModel({ provider, modelId });
+  if (result.success) {
+    keyStatus.textContent = 'Using ' + modelSelect.options[modelSelect.selectedIndex].text;
+    keyStatus.className = 'key-status success';
+  } else {
+    keyStatus.textContent = result.error || 'Switch failed';
+    keyStatus.className = 'key-status error';
+  }
+});
+
+initAuthUI();
+
 // ── Transparency control ─────────────────
 
 function applyTransparency(value) {
