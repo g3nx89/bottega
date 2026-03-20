@@ -30,17 +30,19 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
       promptSnippet: 'figma_screenshot: capture visual screenshot (ALWAYS use after any mutation to verify)',
       parameters: Type.Object({
         nodeId: Type.Optional(Type.String({ description: 'Node ID to capture. If omitted, captures current viewport.' })),
-        format: Type.Optional(StringEnum(['png', 'jpg'] as const, { default: 'png' })),
+        format: Type.Optional(StringEnum(['PNG', 'JPG'] as const, { default: 'PNG' })),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         const result = await connector.captureScreenshot(params.nodeId ?? '', {
-          format: params.format ?? 'png',
+          format: (params.format ?? 'PNG').toUpperCase(),
         });
-        if (result && result.imageData) {
+        // Plugin returns { success, image: { base64, format, scale, node, bounds } }
+        const base64 = result?.image?.base64 ?? result?.imageData;
+        if (base64) {
           return {
             content: [{
               type: 'image' as const,
-              data: result.imageData,
+              data: base64,
               mimeType: 'image/png',
             }],
             details: {},

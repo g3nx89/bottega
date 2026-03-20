@@ -15,6 +15,9 @@ function sendMessage() {
   const text = inputField.value.trim();
   if (!text || isStreaming) return;
 
+  // Hide prompt suggestions when sending
+  if (typeof hideSuggestions === 'function') hideSuggestions();
+
   // Add user bubble (with pasted images if any)
   addUserMessage(text, pastedImages.map((p) => p.dataUrl));
   pastedImages = [];
@@ -182,12 +185,36 @@ inputField.addEventListener('input', () => {
 
 // ── API event handlers ───────────────────
 
+// ── Thinking indicator ────────────────────
+
+let thinkingBubble = null;
+
+function showThinkingIndicator() {
+  if (thinkingBubble) return;
+  thinkingBubble = document.createElement('div');
+  thinkingBubble.className = 'thinking-bubble';
+  for (let i = 0; i < 3; i++) {
+    const dot = document.createElement('span');
+    dot.className = 'thinking-dot';
+    thinkingBubble.appendChild(dot);
+  }
+  chatArea.appendChild(thinkingBubble);
+  scrollToBottom();
+}
+
+function removeThinkingIndicator() {
+  if (thinkingBubble) {
+    thinkingBubble.remove();
+    thinkingBubble = null;
+  }
+}
+
 window.api.onTextDelta((text) => {
   appendToAssistant(text);
 });
 
 window.api.onThinking((_text) => {
-  // Thinking content is internal; streaming cursor in the bubble shows activity.
+  showThinkingIndicator();
 });
 
 window.api.onToolStart((toolName, toolCallId) => {
@@ -203,6 +230,7 @@ window.api.onScreenshot((base64) => {
 });
 
 window.api.onAgentEnd(() => {
+  removeThinkingIndicator();
   // Render markdown on the accumulated plain text.
   // renderMarkdown() calls escapeHtml() first, so innerHTML receives
   // only sanitized markup — no untrusted content is injected directly.
@@ -625,6 +653,50 @@ function renderPastePreview() {
 
 // Clear pasted images after sending
 const originalSendMessage = sendMessage;
+
+// ── Prompt suggestions ───────────────────
+
+const suggestionsContainer = document.getElementById('suggestions');
+
+function showSuggestions(suggestions) {
+  // Clear old suggestions
+  while (suggestionsContainer.firstChild) suggestionsContainer.removeChild(suggestionsContainer.firstChild);
+  if (!suggestions || suggestions.length === 0) {
+    suggestionsContainer.classList.add('hidden');
+    return;
+  }
+  suggestions.forEach((text) => {
+    const chip = document.createElement('button');
+    chip.className = 'suggestion-chip';
+    chip.textContent = text;
+    chip.addEventListener('click', () => {
+      inputField.value = text;
+      inputField.style.height = 'auto';
+      inputField.style.height = Math.min(inputField.scrollHeight, 120) + 'px';
+      hideSuggestions();
+      inputField.focus();
+    });
+    suggestionsContainer.appendChild(chip);
+  });
+  suggestionsContainer.classList.remove('hidden');
+  scrollToBottom();
+}
+
+function hideSuggestions() {
+  suggestionsContainer.classList.add('hidden');
+  while (suggestionsContainer.firstChild) suggestionsContainer.removeChild(suggestionsContainer.firstChild);
+}
+
+window.api.onSuggestions((suggestions) => {
+  showSuggestions(suggestions);
+});
+
+// Hide suggestions when user starts typing or sends
+inputField.addEventListener('input', () => {
+  if (suggestionsContainer.children.length > 0) {
+    hideSuggestions();
+  }
+});
 
 // Focus input on load
 inputField.focus();

@@ -34,6 +34,11 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('agent:retry', (_event, active) => cb(active));
   },
 
+  // Prompt suggestions
+  onSuggestions: (cb: (suggestions: string[]) => void) => {
+    ipcRenderer.on('agent:suggestions', (_event, suggestions) => cb(suggestions));
+  },
+
   // Figma status
   onFigmaConnected: (cb: (fileKey: string) => void) => {
     ipcRenderer.on('figma:connected', (_event, key) => cb(key));

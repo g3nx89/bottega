@@ -732,19 +732,20 @@ html, body {
 ────────────────────────────────────────── */
 .screenshot {
   display: block;
-  max-width: 100%;
-  width: 100%;
-  border-radius: var(--radius-md);
+  max-width: 220px;
+  max-height: 160px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-sm);
   margin-top: 4px;
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .screenshot:hover {
-  transform: scale(1.01);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  transform: scale(1.03);
+  box-shadow: var(--shadow-md);
 }
 
 /* ──────────────────────────────────────────
@@ -1039,4 +1040,51 @@ html, body {
   opacity: 0.55;
   padding: 0 4px;
   user-select: none;
+}
+
+/* ──────────────────────────────────────────
+   Prompt suggestions
+────────────────────────────────────────── */
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 16px 2px;
+  flex-shrink: 0;
+  animation: fadeSlideIn 0.25s ease-out;
+}
+
+.suggestions.hidden {
+  display: none;
+}
+
+.suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+  max-width: 100%;
+  text-align: left;
+  word-break: break-word;
+}
+
+.suggestion-chip:hover {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(162, 89, 255, 0.3);
+}
+
+.suggestion-chip:active {
+  transform: scale(0.97);
 }

@@ -1,5 +1,6 @@
 import { ipcMain, type BrowserWindow } from 'electron';
 import { createFigmaAgent, AVAILABLE_MODELS, CONTEXT_SIZES, DEFAULT_MODEL, type AgentInfra, type ModelConfig } from './agent.js';
+import { PromptSuggester } from './prompt-suggester.js';
 import { createChildLogger } from '../figma/logger.js';
 
 const log = createChildLogger({ component: 'ipc' });
@@ -17,6 +18,10 @@ export function setupIpcHandlers(
 ) {
   let session = initialSession;
   let isStreaming = false;
+  let currentModelConfig: ModelConfig = DEFAULT_MODEL;
+
+  // Prompt suggester — generates follow-up suggestions after each agent turn
+  const suggester = new PromptSuggester(infra.authStorage, infra.modelRegistry);
 
   function subscribeToSession(s: AgentSessionLike) {
     s.subscribe((event: any) => {
@@ -25,23 +30,42 @@ export function setupIpcHandlers(
         case 'message_update':
           if (event.assistantMessageEvent?.type === 'text_delta') {
             wc.send('agent:text-delta', event.assistantMessageEvent.delta);
+            suggester.appendAssistantText(event.assistantMessageEvent.delta);
           }
           if (event.assistantMessageEvent?.type === 'thinking_delta') {
             wc.send('agent:thinking', event.assistantMessageEvent.delta);
           }
           break;
         case 'tool_execution_start':
+          log.info({ tool: event.toolName, callId: event.toolCallId, params: event.toolParams }, 'Tool start');
           wc.send('agent:tool-start', event.toolName, event.toolCallId);
           break;
-        case 'tool_execution_end':
+        case 'tool_execution_end': {
+          const resultPreview = event.result?.content
+            ? event.result.content.map((c: any) => ({
+                type: c.type,
+                ...(c.type === 'text' ? { text: (c.text || '').slice(0, 200) } : {}),
+                ...(c.type === 'image' ? { hasData: !!c.data, dataLen: c.data?.length } : {}),
+              }))
+            : 'no content';
+          log.info({
+            tool: event.toolName,
+            callId: event.toolCallId,
+            isError: event.isError,
+            resultContent: resultPreview,
+          }, 'Tool end');
           wc.send('agent:tool-end', event.toolName, event.toolCallId, !event.isError, event.result);
           if (event.toolName === 'figma_screenshot' && !event.isError && event.result?.content) {
             const imageContent = event.result.content.find((c: any) => c.type === 'image');
             if (imageContent) {
+              log.info({ dataLen: imageContent.data?.length }, 'Screenshot image forwarded to renderer');
               wc.send('agent:screenshot', imageContent.data);
+            } else {
+              log.warn({ content: resultPreview }, 'Screenshot tool succeeded but no image content found');
             }
           }
           break;
+        }
         case 'message_end': {
           // Forward token usage for context bar
           const msg = event.message;
@@ -53,6 +77,13 @@ export function setupIpcHandlers(
         case 'agent_end':
           isStreaming = false;
           wc.send('agent:end');
+          // Generate suggestions asynchronously — don't block the UI
+          suggester.suggest(currentModelConfig).then(suggestions => {
+            if (suggestions.length > 0) {
+              wc.send('agent:suggestions', suggestions);
+            }
+            suggester.resetAssistantText();
+          });
           break;
         case 'auto_compaction_start':
           wc.send('agent:compaction', true);
@@ -75,6 +106,8 @@ export function setupIpcHandlers(
 
   // ── Agent prompt/abort ─────────────────
   ipcMain.handle('agent:prompt', async (_event, text: string) => {
+    suggester.trackUserPrompt(text);
+    suggester.resetAssistantText();
     if (isStreaming) {
       await session.prompt(text, { streamingBehavior: 'followUp' });
     } else {
@@ -156,6 +189,8 @@ export function setupIpcHandlers(
       const result = await createFigmaAgent(infra, config);
       session = result.session as unknown as AgentSessionLike;
       subscribeToSession(session);
+      currentModelConfig = config;
+      suggester.reset();
       log.info({ provider: config.provider, model: config.modelId }, 'Model switched');
       return { success: true };
     } catch (err: any) {
