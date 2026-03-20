@@ -62,4 +62,9 @@ export function setupIpcHandlers(
   ipcMain.handle('window:is-pinned', () => {
     return mainWindow.isAlwaysOnTop();
   });
+
+  // Window opacity (0.1 – 1.0, floor at 0.1 so window is always visible)
+  ipcMain.handle('window:set-opacity', (_event, opacity: number) => {
+    mainWindow.setOpacity(Math.max(0.1, Math.min(1, opacity)));
+  });
 }

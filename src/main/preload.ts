@@ -36,4 +36,7 @@ contextBridge.exposeInMainWorld('api', {
   // Window pin (always-on-top)
   togglePin: () => ipcRenderer.invoke('window:toggle-pin') as Promise<boolean>,
   isPinned: () => ipcRenderer.invoke('window:is-pinned') as Promise<boolean>,
+
+  // Window opacity
+  setOpacity: (opacity: number) => ipcRenderer.invoke('window:set-opacity', opacity),
 });

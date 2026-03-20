@@ -211,6 +211,62 @@ window.api.onFigmaDisconnected(() => {
   statusText.textContent = 'Disconnected';
 });
 
+// ── Settings ─────────────────────────────
+
+const settingsBtn = document.getElementById('settings-btn');
+const settingsOverlay = document.getElementById('settings-overlay');
+const settingsClose = document.getElementById('settings-close');
+const transparencySlider = document.getElementById('transparency-slider');
+const transparencyValue = document.getElementById('transparency-value');
+
+function openSettings() {
+  settingsOverlay.classList.remove('hidden');
+  settingsBtn.classList.add('active');
+}
+
+function closeSettings() {
+  settingsOverlay.classList.add('hidden');
+  settingsBtn.classList.remove('active');
+}
+
+settingsBtn.addEventListener('click', () => {
+  settingsOverlay.classList.contains('hidden') ? openSettings() : closeSettings();
+});
+
+settingsClose.addEventListener('click', closeSettings);
+
+// Close on overlay background click
+settingsOverlay.addEventListener('click', (e) => {
+  if (e.target === settingsOverlay) closeSettings();
+});
+
+// Close on Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !settingsOverlay.classList.contains('hidden')) {
+    closeSettings();
+  }
+});
+
+// ── Transparency control ─────────────────
+
+function applyTransparency(value) {
+  // 0% = fully opaque (opacity 1.0), 100% = max usable transparency (opacity 0.775)
+  const opacity = 1 - (value / 100) * 0.225; // maps 0→1.0, 100→0.775
+  window.api.setOpacity(opacity);
+  transparencyValue.textContent = value + '%';
+  localStorage.setItem('figma-companion:transparency', value);
+}
+
+transparencySlider.addEventListener('input', () => {
+  applyTransparency(Number(transparencySlider.value));
+});
+
+// Restore saved transparency (or default 0 = fully opaque)
+const savedTransparency = localStorage.getItem('figma-companion:transparency');
+const initialTransparency = savedTransparency !== null ? Number(savedTransparency) : 0;
+transparencySlider.value = initialTransparency;
+applyTransparency(initialTransparency);
+
 // ── Pin (always-on-top) ─────────────────
 
 pinBtn.addEventListener('click', async () => {

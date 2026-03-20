@@ -18,6 +18,11 @@
             <path d="M10.5 1.5L14.5 5.5L11 9L12 13L8 9L4 13L5 9L1.5 5.5L5.5 1.5L8 5L10.5 1.5Z" fill="currentColor"/>
           </svg>
         </button>
+        <button id="settings-btn" class="settings-btn" title="Settings">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M6.5 1L6 3L4.5 3.5L3 2L1.5 3.5L3 5L2.5 6.5L0.5 7V9L2.5 9.5L3 11L1.5 12.5L3 14L5 12.5L6.5 13L7 15H9L9.5 13L11 12.5L12.5 14L14 12.5L12.5 11L13 9.5L15 9V7L13 6.5L12.5 5L14 3.5L12.5 2L11 3.5L9.5 3L9 1H7L6.5 1ZM8 5.5C9.38 5.5 10.5 6.62 10.5 8S9.38 10.5 8 10.5S5.5 9.38 5.5 8S6.62 5.5 8 5.5Z" fill="currentColor"/>
+          </svg>
+        </button>
         <span id="status-dot" class="status-dot disconnected"></span>
         <span id="status-text" class="status-text">Disconnected</span>
       </div>
@@ -42,6 +47,24 @@
       </div>
       <p class="input-hint">Enter to send · Shift+Enter for new line</p>
     </footer>
+
+    <div id="settings-overlay" class="settings-overlay hidden">
+      <div id="settings-panel" class="settings-panel">
+        <div class="settings-header">
+          <span class="settings-title">Settings</span>
+          <button id="settings-close" class="settings-close" title="Close">&times;</button>
+        </div>
+        <div class="settings-body">
+          <div class="setting-group">
+            <label class="setting-label" for="transparency-slider">Background transparency</label>
+            <div class="slider-row">
+              <input type="range" id="transparency-slider" min="0" max="100" value="50" class="setting-slider">
+              <span id="transparency-value" class="slider-value">50%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
