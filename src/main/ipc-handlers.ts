@@ -3,7 +3,7 @@ import { ipcMain, type BrowserWindow } from 'electron';
 // The actual AgentSession type will come from pi-coding-agent
 // For now use a minimal interface matching what we need
 export interface AgentSessionLike {
-  prompt(text: string): Promise<void>;
+  prompt(text: string, options?: { streamingBehavior?: 'steer' | 'followUp' }): Promise<void>;
   abort(): Promise<void>;
   subscribe(callback: (event: any) => void): void;
 }
@@ -12,6 +12,8 @@ export function setupIpcHandlers(
   session: AgentSessionLike,
   mainWindow: BrowserWindow
 ) {
+  let isStreaming = false;
+
   // Subscribe to agent events → forward to renderer
   session.subscribe((event: any) => {
     const wc = mainWindow.webContents;
@@ -38,18 +40,39 @@ export function setupIpcHandlers(
         }
         break;
       case 'agent_end':
+        isStreaming = false;
         wc.send('agent:end');
+        break;
+      // SDK lifecycle events — notify renderer for UX feedback
+      case 'auto_compaction_start':
+        wc.send('agent:compaction', true);
+        break;
+      case 'auto_compaction_end':
+        wc.send('agent:compaction', false);
+        break;
+      case 'auto_retry_start':
+        wc.send('agent:retry', true);
+        break;
+      case 'auto_retry_end':
+        wc.send('agent:retry', false);
         break;
     }
   });
 
   // IPC handlers from renderer
   ipcMain.handle('agent:prompt', async (_event, text: string) => {
-    await session.prompt(text);
+    if (isStreaming) {
+      // Agent is busy — queue as follow-up instead of throwing
+      await session.prompt(text, { streamingBehavior: 'followUp' });
+    } else {
+      isStreaming = true;
+      await session.prompt(text);
+    }
   });
 
   ipcMain.handle('agent:abort', async () => {
     await session.abort();
+    isStreaming = false;
   });
 
   // Window pin (always-on-top) — macOS only

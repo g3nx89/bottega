@@ -1,4 +1,5 @@
 import { Type } from '@sinclair/typebox';
+import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { type ToolDeps, textResult } from './index.js';
 import { parseJsx } from '../jsx-parser.js';
@@ -88,7 +89,7 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
         variableName: Type.String({ description: 'Variable name (e.g. "colors/primary")' }),
-        property: Type.Union([Type.Literal('fill'), Type.Literal('stroke')], { description: 'Which property to bind' }),
+        property: StringEnum(['fill', 'stroke'] as const, { description: 'Which property to bind' }),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {

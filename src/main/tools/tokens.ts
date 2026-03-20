@@ -1,4 +1,5 @@
 import { Type } from '@sinclair/typebox';
+import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -16,7 +17,7 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
         modes: Type.Array(Type.String(), { description: 'Mode names (e.g. ["Light", "Dark"])' }),
         variables: Type.Array(Type.Object({
           name: Type.String({ description: 'Variable name (e.g. "colors/primary")' }),
-          type: Type.Union([Type.Literal('COLOR'), Type.Literal('FLOAT'), Type.Literal('STRING')]),
+          type: StringEnum(['COLOR', 'FLOAT', 'STRING'] as const),
           values: Type.Record(Type.String(), Type.Any(), { description: 'Mode name → value mapping' }),
         })),
       }),

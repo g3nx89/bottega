@@ -24,6 +24,12 @@ contextBridge.exposeInMainWorld('api', {
   onScreenshot: (cb: (base64: string) => void) => {
     ipcRenderer.on('agent:screenshot', (_event, base64) => cb(base64));
   },
+  onCompaction: (cb: (active: boolean) => void) => {
+    ipcRenderer.on('agent:compaction', (_event, active) => cb(active));
+  },
+  onRetry: (cb: (active: boolean) => void) => {
+    ipcRenderer.on('agent:retry', (_event, active) => cb(active));
+  },
 
   // Figma status
   onFigmaConnected: (cb: (fileKey: string) => void) => {

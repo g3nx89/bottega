@@ -201,6 +201,15 @@ window.api.onAgentEnd(() => {
   updateInputState();
 });
 
+// SDK lifecycle: compaction / retry indicators
+window.api.onCompaction((active) => {
+  statusText.textContent = active ? 'Compacting…' : (statusDot.classList.contains('connected') ? 'Connected' : 'Disconnected');
+});
+
+window.api.onRetry((active) => {
+  statusText.textContent = active ? 'Retrying…' : (statusDot.classList.contains('connected') ? 'Connected' : 'Disconnected');
+});
+
 window.api.onFigmaConnected((fileKey) => {
   statusDot.className = 'status-dot connected';
   statusText.textContent = fileKey || 'Connected';

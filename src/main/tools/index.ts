@@ -22,8 +22,22 @@ export function textResult(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data) }], details: {} };
 }
 
+/** Wrap tool execute to check abort signal before running. */
+function withAbortCheck(tool: ToolDefinition): ToolDefinition {
+  const original = tool.execute;
+  return {
+    ...tool,
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      if (signal?.aborted) {
+        throw new Error('Aborted');
+      }
+      return original.call(tool, toolCallId, params, signal, onUpdate, ctx);
+    },
+  };
+}
+
 export function createFigmaTools(deps: ToolDeps): ToolDefinition[] {
-  return [
+  const tools = [
     ...createCoreTools(deps),
     ...createDiscoveryTools(deps),
     ...createComponentTools(deps),
@@ -31,4 +45,5 @@ export function createFigmaTools(deps: ToolDeps): ToolDefinition[] {
     ...createTokenTools(deps),
     ...createJsxRenderTools(deps),
   ];
+  return tools.map(withAbortCheck);
 }

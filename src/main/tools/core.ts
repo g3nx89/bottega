@@ -1,4 +1,5 @@
 import { Type } from '@sinclair/typebox';
+import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -29,7 +30,7 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
       promptSnippet: 'figma_screenshot: capture visual screenshot (ALWAYS use after any mutation to verify)',
       parameters: Type.Object({
         nodeId: Type.Optional(Type.String({ description: 'Node ID to capture. If omitted, captures current viewport.' })),
-        format: Type.Optional(Type.Union([Type.Literal('png'), Type.Literal('jpg')], { default: 'png' })),
+        format: Type.Optional(StringEnum(['png', 'jpg'] as const, { default: 'png' })),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         const result = await connector.captureScreenshot(params.nodeId ?? '', {
