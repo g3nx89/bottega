@@ -3,9 +3,42 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
   <title>Figma Companion</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <h1>Figma Companion</h1>
+  <div id="app">
+    <header id="titlebar">
+      <div class="traffic-light-offset"></div>
+      <span id="app-title">Figma Companion</span>
+      <div class="status-area">
+        <span id="status-dot" class="status-dot disconnected"></span>
+        <span id="status-text" class="status-text">Disconnected</span>
+      </div>
+    </header>
+
+    <main id="chat-area"></main>
+
+    <footer id="input-area">
+      <div class="input-wrapper">
+        <textarea
+          id="input-field"
+          placeholder="Describe what you want to design…"
+          rows="1"
+          autocomplete="off"
+          spellcheck="true"
+        ></textarea>
+        <button id="send-btn" title="Send (Enter)">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M14 8L2 2L5 8L2 14L14 8Z" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+      <p class="input-hint">Enter to send · Shift+Enter for new line</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
 </body>
 </html>

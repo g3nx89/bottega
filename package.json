@@ -10,31 +10,38 @@
     "package": "npm run build && npx electron-builder --mac"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.60.0",
+    "@iconify/core": "^2.0.0",
+    "@iconify/utils": "^2.0.0",
     "@mariozechner/pi-ai": "^0.60.0",
+    "@mariozechner/pi-coding-agent": "^0.60.0",
     "@sinclair/typebox": "^0.34.0",
-    "ws": "^8.19.0",
+    "esbuild": "^0.25.0",
     "pino": "^9.5.0",
     "pino-pretty": "^13.0.0",
-    "@iconify/utils": "^2.0.0",
-    "@iconify/core": "^2.0.0",
-    "esbuild": "^0.25.0"
+    "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.0",
     "electron": "^33.0.0",
     "electron-builder": "^26.0.0",
-    "typescript": "^5.8.0",
-    "@types/ws": "^8.18.0",
-    "@types/node": "^22.0.0"
+    "typescript": "^5.8.0"
   },
   "build": {
     "appId": "com.figma-companion",
     "productName": "Figma Companion",
     "mac": {
       "category": "public.app-category.developer-tools",
-      "target": ["dmg"]
+      "target": [
+        "dmg"
+      ]
     },
-    "files": ["dist/**/*"],
-    "extraResources": ["figma-desktop-bridge/**/*"]
+    "files": [
+      "dist/**/*"
+    ],
+    "extraResources": [
+      "figma-desktop-bridge/**/*"
+    ]
   }
 }

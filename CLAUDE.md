@@ -8,51 +8,98 @@ Figma Companion — a macOS Electron desktop app for design pair-programming. Us
 
 ## Architecture
 
-- **Electron Main Process**: Hosts a WebSocket server (port 9223) that communicates with a Figma Desktop Bridge Plugin. The Pi SDK `AgentSession` runs in main, with ~28 custom Figma tools (no coding tools). Mutations are serialized through an `OperationQueue` (mutex).
-- **Figma Core** (`src/figma/`): Embedded from `figma-console-mcp` (MIT). Contains WebSocket server, connector, Figma REST API client, and types. Track upstream in `src/figma/UPSTREAM.md`.
-- **Desktop Bridge Plugin** (`figma-desktop-bridge/`): Fork of figma-console-mcp plugin + handlers from figma-use (`CREATE_FROM_JSX`, `CREATE_ICON`, `BIND_VARIABLE`). Track upstream in `figma-desktop-bridge/UPSTREAM.md`.
-- **Tools** (`src/main/tools/`): ~28 tool definitions for Pi SDK split by category: core, discovery, components, manipulation, tokens, jsx-render. Mutation tools go through `OperationQueue`.
-- **Renderer** (`src/renderer/`): Vanilla HTML/CSS/JS chat UI with streaming text, tool execution cards, and inline screenshots. macOS-native look, Figma purple accent `#A259FF`.
+```
+Electron Main Process (src/main/)
+├── index.ts              — App entry: Electron window + WS server + agent startup
+├── agent.ts              — Pi SDK AgentSession with custom system prompt, no coding tools
+├── figma-core.ts         — Wires FigmaWebSocketServer + WebSocketConnector + FigmaAPI
+├── operation-queue.ts    — Promise-based mutex for serializing Figma mutations
+├── ipc-handlers.ts       — Bridges agent events → renderer via IPC
+├── preload.ts            — contextBridge exposing window.api (MUST be built as CJS)
+├── system-prompt.ts      — LLM system prompt with tool reference and design patterns
+├── jsx-parser.ts         — JSX string → TreeNode via esbuild transform + vm sandbox
+├── icon-loader.ts        — Iconify API fetch with in-memory cache
+└── tools/                — 28 ToolDefinition[] for Pi SDK (TypeBox schemas)
+    ├── core.ts           — execute, screenshot, screenshot_rest, status, get_selection
+    ├── discovery.ts      — get_file_data, search_components, get_library_components, get_component_details, design_system
+    ├── components.ts     — instantiate, set_instance_properties, arrange_component_set
+    ├── manipulation.ts   — set_fills, set_strokes, set_text, set_image_fill, resize, move, create_child, clone, delete
+    ├── tokens.ts         — setup_tokens, rename, lint
+    └── jsx-render.ts     — render_jsx, create_icon, bind_variable
+
+Figma Core (src/figma/)           — Embedded from figma-console-mcp (MIT), cloud relay removed
+├── websocket-server.ts           — WS server on port 9223, sendCommand with Promise correlation
+├── websocket-connector.ts        — IFigmaConnector impl + 3 figma-use methods
+├── figma-connector.ts            — IFigmaConnector interface
+├── figma-api.ts                  — Figma REST API client
+├── types.ts                      — Shared types + TreeNode
+├── config.ts, logger.ts, port-discovery.ts
+
+Desktop Bridge Plugin (figma-desktop-bridge/)   — Fork of figma-console-mcp plugin
+├── code.js               — Plugin main thread (upstream + CREATE_FROM_JSX/ICON/BIND_VARIABLE)
+├── ui.html               — WebSocket relay bridge
+└── manifest.json          — Plugin config (name: "Figma Companion Bridge")
+
+Renderer (src/renderer/)          — Vanilla HTML/CSS/JS, no framework
+├── index.html             — Chat layout with CSP headers
+├── styles.css             — macOS-native design, #A259FF accent, dark mode
+└── app.js                 — Streaming text, tool cards, screenshots, markdown
+```
 
 ## Build & Development
 
 ```bash
 npm install
-node scripts/build.mjs          # esbuild: main + preload → dist/
+node scripts/build.mjs          # esbuild: main (ESM) + preload (CJS) → dist/
 npx electron dist/main.js       # run the app
-npx electron-builder --mac      # package .dmg
 npx tsc --noEmit                # type check only
+npx electron-builder --mac      # package .dmg
+```
+
+**Debug mode** (attach Playwright or DevTools):
+```bash
+npx electron --remote-debugging-port=9222 dist/main.js
+```
+
+**Smoke test** (Playwright-Electron):
+```bash
+node tests/electron-smoke.mjs
 ```
 
 ## Key Dependencies
 
-- `@mariozechner/pi-coding-agent` / `@mariozechner/pi-ai` — Agent SDK
-- `@sinclair/typebox` — Tool parameter schemas (TypeBox, not Zod)
-- `ws` — WebSocket for Figma bridge communication
-- `@iconify/utils` — Icon loading for `figma_create_icon` / `figma_render_jsx`
-
-## Tool Categories
-
-Tools are the core of this app. Each tool is a `ToolDefinition` for Pi SDK with TypeBox schemas:
-
-- **Core**: `figma_execute` (Plugin API escape hatch), `figma_screenshot` (visual validation — ALWAYS after mutations), `figma_status`, `figma_get_selection`
-- **Discovery**: file data, search components (local or library), component details, design system overview
-- **Components**: instantiate (local or published library via `importComponentByKeyAsync`), set instance properties, arrange
-- **Manipulation**: fills, strokes, text, image, resize, move, create, clone, delete
-- **Tokens**: setup token collections, rename, lint/audit
-- **JSX Render** (from figma-use): `figma_render_jsx` (client-side JSX→TreeNode parse + Iconify prefetch, then single plugin roundtrip), `figma_create_icon` (Iconify API → SVG → vector node), `figma_bind_variable` (link node to design token)
+- `@mariozechner/pi-coding-agent` / `@mariozechner/pi-ai` — Pi SDK (AgentSession, ToolDefinition, DefaultResourceLoader)
+- `@sinclair/typebox` — Tool parameter schemas (TypeBox, NOT Zod)
+- `ws` — WebSocket server for Figma Desktop Bridge communication
+- `esbuild` — Build tool AND runtime dep (JSX transform in jsx-parser.ts)
+- `@iconify/utils` / `@iconify/core` — Icon SVG generation for figma_create_icon / figma_render_jsx
+- `pino` — Structured logging
 
 ## Important Patterns
 
-- **Mutation serialization**: All mutation tools must go through `OperationQueue.execute()` to prevent concurrent Figma modifications.
-- **JSX rendering flow**: LLM generates JSX with Tailwind-like shorthand → `jsx-parser.ts` parses to TreeNode → icons pre-fetched from Iconify → sent to plugin as one `CREATE_FROM_JSX` command → plugin creates entire node tree in single roundtrip.
-- **Library component workflow**: `figma_get_library_components(fileKey)` → get component keys → `figma_instantiate(componentKey)` uses `importComponentByKeyAsync` for cross-file instantiation.
-- **Upstream sync**: `src/figma/` and `figma-desktop-bridge/` are embedded/forked. Use `scripts/check-upstream.sh` to diff against upstream repos. Always update UPSTREAM.md files when syncing.
+- **Mutation serialization**: All mutation tools go through `OperationQueue.execute()` to prevent concurrent Figma modifications.
+- **JSX rendering flow**: LLM generates JSX → `jsx-parser.ts` (esbuild transform + vm sandbox with tag name mappings) → TreeNode → icons pre-fetched from Iconify → single `CREATE_FROM_JSX` plugin roundtrip.
+- **Preload MUST be CJS**: Electron's sandbox requires CommonJS for preload scripts. The build produces `format: 'cjs'` for preload only, `format: 'esm'` for main.
+- **node_modules are external**: `packages: 'external'` in esbuild — all npm deps resolve at runtime from node_modules, not bundled.
+- **WS events emit objects**: `fileConnected` emits `{ fileKey, fileName }`, not a plain string.
+- **Pi SDK system prompt**: Injected via `DefaultResourceLoader({ systemPrompt })` with `noExtensions/noSkills/noPromptTemplates/noThemes: true`.
+- **Tool params typed as `any`**: ToolDefinition generic inference doesn't work when returning `ToolDefinition[]`. Params are cast to `any` in execute — runtime validation is via TypeBox schemas.
+- **Upstream sync**: `src/figma/` and `figma-desktop-bridge/` are embedded/forked. Track in respective `UPSTREAM.md` files.
+
+## Tool Categories (28 tools)
+
+- **Core** (5): `figma_execute`, `figma_screenshot`, `figma_screenshot_rest`, `figma_status`, `figma_get_selection`
+- **Discovery** (5): `figma_get_file_data`, `figma_search_components`, `figma_get_library_components`, `figma_get_component_details`, `figma_design_system`
+- **Components** (3): `figma_instantiate`, `figma_set_instance_properties`, `figma_arrange_component_set`
+- **Manipulation** (9): `figma_set_fills`, `figma_set_strokes`, `figma_set_text`, `figma_set_image_fill`, `figma_resize`, `figma_move`, `figma_create_child`, `figma_clone`, `figma_delete`
+- **Tokens** (3): `figma_setup_tokens`, `figma_rename`, `figma_lint`
+- **JSX Render** (3): `figma_render_jsx`, `figma_create_icon`, `figma_bind_variable`
 
 ## Language & Conventions
 
-- TypeScript with ESM modules
+- TypeScript with ESM modules (main process), CJS (preload only)
 - esbuild for bundling (not webpack/vite)
+- Vanilla JS renderer (no React/Vue)
 - Project documentation and PLAN.md are in Italian
 
 <!-- OMC:START -->
