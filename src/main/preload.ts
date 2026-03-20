@@ -32,4 +32,8 @@ contextBridge.exposeInMainWorld('api', {
   onFigmaDisconnected: (cb: () => void) => {
     ipcRenderer.on('figma:disconnected', () => cb());
   },
+
+  // Window pin (always-on-top)
+  togglePin: () => ipcRenderer.invoke('window:toggle-pin') as Promise<boolean>,
+  isPinned: () => ipcRenderer.invoke('window:is-pinned') as Promise<boolean>,
 });

@@ -594,10 +594,6 @@
       // Multi-connection state: plugin connects to ALL active MCP servers
       // so that every Claude tab/CLI instance gets Figma access.
       var activeConnections = []; // Array of { port, ws }
-      var wsReconnectDelay = 500;
-      var wsMaxReconnectDelay = 5000;
-      var wsReconnectAttempts = 0;
-      var wsMaxReconnectAttempts = 50;
       var isScanning = false;
 
       // Backward-compat: ws and wsConnected reflect "at least one connection"
@@ -726,7 +722,7 @@
        * Falls back to retry with backoff if no servers found at all.
        */
       // Maximum scan attempts on initial load (prevents infinite error loops).
-      // After connecting, disconnect-triggered retries have their own limit.
+      // After connecting, disconnect-triggered retries use per-port exponential backoff (no cap).
       var initialScanAttempts = 0;
       var MAX_INITIAL_SCANS = 3;
 
@@ -765,8 +761,6 @@
               pending--;
               if (pending <= 0) {
                 isScanning = false;
-                wsReconnectDelay = 500;
-                wsReconnectAttempts = 0;
               }
             };
 
@@ -800,10 +794,17 @@
 
       /**
        * Reconnect a specific port that disconnected.
-       * Tries the same port first (server may have just restarted),
-       * then does a full rescan to pick up any new servers.
+       * Uses exponential backoff (1s → 30s cap) and retries indefinitely
+       * so the plugin survives app restarts without manual re-launch.
        */
+      var portReconnectAttempts = {}; // per-port attempt counters
+
       function wsReconnectPort(port) {
+        if (isPortConnected(port)) return;
+
+        var attempts = portReconnectAttempts[port] || 0;
+        portReconnectAttempts[port] = attempts + 1;
+
         try {
           var testWs = new WebSocket('ws://localhost:' + port);
           var timeout = setTimeout(function() {
@@ -812,8 +813,12 @@
 
           testWs.onopen = function() {
             clearTimeout(timeout);
+            // Guard against duplicate connections from concurrent reconnect loops
+            if (isPortConnected(port)) { testWs.close(); return; }
+            portReconnectAttempts[port] = 0; // reset on success
             activeConnections.push({ port: port, ws: testWs });
             updateCompatState();
+            updateStatus('ready', true, false);
             console.log('[MCP Bridge] Reconnected to port ' + port + ' (' + activeConnections.length + ' server(s) total)');
             attachWsHandlers(testWs, port);
             initializeConnection(testWs, port);
@@ -822,8 +827,20 @@
           testWs.onerror = function() {
             clearTimeout(timeout);
           };
+
+          testWs.onclose = function() {
+            clearTimeout(timeout);
+            // Schedule next retry with exponential backoff (1s → 30s cap)
+            if (!isPortConnected(port)) {
+              var delay = Math.min(1000 * Math.pow(2, portReconnectAttempts[port] - 1), 30000);
+              console.log('[MCP Bridge] Reconnect to port ' + port + ' in ' + (delay/1000) + 's (attempt ' + portReconnectAttempts[port] + ')');
+              setTimeout(function() { wsReconnectPort(port); }, delay);
+            }
+          };
         } catch (e) {
-          // Port gone — no further scanning to avoid console spam
+          // Schedule retry even on construction error
+          var delay = Math.min(1000 * Math.pow(2, portReconnectAttempts[port] - 1), 30000);
+          setTimeout(function() { wsReconnectPort(port); }, delay);
         }
       }
 
@@ -885,12 +902,14 @@
             return;
           }
 
-          // Retry the specific port with limited attempts (no full rescan)
-          wsReconnectAttempts++;
-          if (wsReconnectAttempts <= 5) {
-            var delay = Math.min(1000 * wsReconnectAttempts, 5000);
-            setTimeout(function() { wsReconnectPort(port); }, delay);
+          // Update UI to show reconnecting state
+          if (activeConnections.length === 0) {
+            updateStatus('reconnecting', false, false);
           }
+
+          // Persistent reconnect with per-port exponential backoff
+          portReconnectAttempts[port] = 0;
+          wsReconnectPort(port);
         };
 
         activeWs.onerror = function() {

@@ -8,6 +8,7 @@ const inputField = document.getElementById('input-field');
 const sendBtn = document.getElementById('send-btn');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
+const pinBtn = document.getElementById('pin-btn');
 
 // Send message
 function sendMessage() {
@@ -208,6 +209,20 @@ window.api.onFigmaConnected((fileKey) => {
 window.api.onFigmaDisconnected(() => {
   statusDot.className = 'status-dot disconnected';
   statusText.textContent = 'Disconnected';
+});
+
+// ── Pin (always-on-top) ─────────────────
+
+pinBtn.addEventListener('click', async () => {
+  const pinned = await window.api.togglePin();
+  pinBtn.classList.toggle('pinned', pinned);
+  pinBtn.title = pinned ? 'Unpin from top' : 'Keep on top';
+});
+
+// Sync initial pin state
+window.api.isPinned().then((pinned) => {
+  pinBtn.classList.toggle('pinned', pinned);
+  pinBtn.title = pinned ? 'Unpin from top' : 'Keep on top';
 });
 
 // Focus input on load

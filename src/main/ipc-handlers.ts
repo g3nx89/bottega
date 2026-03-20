@@ -51,4 +51,15 @@ export function setupIpcHandlers(
   ipcMain.handle('agent:abort', async () => {
     await session.abort();
   });
+
+  // Window pin (always-on-top) — macOS only
+  ipcMain.handle('window:toggle-pin', () => {
+    const next = !mainWindow.isAlwaysOnTop();
+    mainWindow.setAlwaysOnTop(next, 'floating');
+    return next;
+  });
+
+  ipcMain.handle('window:is-pinned', () => {
+    return mainWindow.isAlwaysOnTop();
+  });
 }

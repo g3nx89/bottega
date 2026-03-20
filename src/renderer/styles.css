@@ -160,6 +160,37 @@ html, body {
   white-space: nowrap;
 }
 
+/* Pin (always-on-top) button */
+.pin-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  opacity: 0.7;
+}
+
+.pin-btn:hover {
+  background: var(--accent-dim);
+  color: var(--text);
+  opacity: 1;
+}
+
+.pin-btn.pinned {
+  background: var(--accent-dim);
+  color: var(--accent);
+  opacity: 1;
+  transform: rotate(45deg);
+}
+
 /* ──────────────────────────────────────────
    Chat area
 ────────────────────────────────────────── */
