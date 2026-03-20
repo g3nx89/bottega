@@ -1,7 +1,8 @@
 import { createAgentSession, type CreateAgentSessionResult, SessionManager, AuthStorage, DefaultResourceLoader, ModelRegistry } from '@mariozechner/pi-coding-agent';
 import { getModel } from '@mariozechner/pi-ai';
 import { createFigmaTools } from './tools/index.js';
-import { FIGMA_SYSTEM_PROMPT } from './system-prompt.js';
+import { buildSystemPrompt } from './system-prompt.js';
+import os from 'os';
 import type { FigmaCore } from './figma-core.js';
 import { OperationQueue } from './operation-queue.js';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
@@ -12,6 +13,19 @@ export interface ModelConfig {
 }
 
 export const DEFAULT_MODEL: ModelConfig = { provider: 'anthropic', modelId: 'claude-sonnet-4-6' };
+
+/** Context window sizes in tokens per model ID */
+export const CONTEXT_SIZES: Record<string, number> = {
+  'claude-opus-4-6':   1_000_000,
+  'claude-sonnet-4-6': 1_000_000,
+  'claude-haiku-4-5':    200_000,
+  'gpt-4o':              128_000,
+  'gpt-4o-mini':         128_000,
+  'o4-mini':             200_000,
+  'o3-mini':             200_000,
+  'gemini-2.5-pro':    1_000_000,
+  'gemini-2.5-flash':  1_000_000,
+};
 
 export const AVAILABLE_MODELS: Record<string, { id: string; label: string }[]> = {
   anthropic: [
@@ -39,7 +53,6 @@ export interface AgentInfra {
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
   figmaTools: ToolDefinition[];
-  resourceLoader: DefaultResourceLoader;
 }
 
 export async function createAgentInfra(figmaCore: FigmaCore): Promise<AgentInfra> {
@@ -55,16 +68,7 @@ export async function createAgentInfra(figmaCore: FigmaCore): Promise<AgentInfra
   const authStorage = AuthStorage.create();
   const modelRegistry = new ModelRegistry(authStorage);
 
-  const resourceLoader = new DefaultResourceLoader({
-    systemPrompt: FIGMA_SYSTEM_PROMPT,
-    noExtensions: true,
-    noSkills: true,
-    noPromptTemplates: true,
-    noThemes: true,
-  });
-  await resourceLoader.reload();
-
-  return { authStorage, modelRegistry, figmaTools, resourceLoader };
+  return { authStorage, modelRegistry, figmaTools };
 }
 
 export async function createFigmaAgent(
@@ -74,13 +78,29 @@ export async function createFigmaAgent(
   // getModel() expects typed literals; cast for dynamic provider/model selection
   const model = getModel(modelConfig.provider as any, modelConfig.modelId as any);
 
+  // Find human-readable label for the system prompt
+  const allModels = AVAILABLE_MODELS[modelConfig.provider] || [];
+  const modelLabel = allModels.find(m => m.id === modelConfig.modelId)?.label || modelConfig.modelId;
+
+  // Build resource loader per session with model-specific system prompt.
+  // Use os.tmpdir() as cwd so DefaultResourceLoader doesn't load project CLAUDE.md files.
+  const resourceLoader = new DefaultResourceLoader({
+    cwd: os.tmpdir(),
+    systemPrompt: buildSystemPrompt(modelLabel),
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+  });
+  await resourceLoader.reload();
+
   const result = await createAgentSession({
-    cwd: process.cwd(),
+    cwd: os.tmpdir(),
     model,
     thinkingLevel: 'medium',
     tools: [],
     customTools: infra.figmaTools,
-    resourceLoader: infra.resourceLoader,
+    resourceLoader,
     sessionManager: SessionManager.inMemory(),
     authStorage: infra.authStorage,
     modelRegistry: infra.modelRegistry,

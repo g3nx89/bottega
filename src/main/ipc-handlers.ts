@@ -1,5 +1,5 @@
 import { ipcMain, type BrowserWindow } from 'electron';
-import { createFigmaAgent, AVAILABLE_MODELS, DEFAULT_MODEL, type AgentInfra, type ModelConfig } from './agent.js';
+import { createFigmaAgent, AVAILABLE_MODELS, CONTEXT_SIZES, DEFAULT_MODEL, type AgentInfra, type ModelConfig } from './agent.js';
 import { createChildLogger } from '../figma/logger.js';
 
 const log = createChildLogger({ component: 'ipc' });
@@ -42,6 +42,14 @@ export function setupIpcHandlers(
             }
           }
           break;
+        case 'message_end': {
+          // Forward token usage for context bar
+          const msg = event.message;
+          if (msg?.usage) {
+            wc.send('agent:usage', { input: msg.usage.input, output: msg.usage.output, total: msg.usage.totalTokens });
+          }
+          break;
+        }
         case 'agent_end':
           isStreaming = false;
           wc.send('agent:end');
@@ -101,6 +109,10 @@ export function setupIpcHandlers(
     return AVAILABLE_MODELS;
   });
 
+  ipcMain.handle('auth:get-context-sizes', () => {
+    return CONTEXT_SIZES;
+  });
+
   ipcMain.handle('auth:get-providers', () => {
     // Return which providers have keys configured
     const providers = ['anthropic', 'openai', 'google'];
@@ -124,6 +136,11 @@ export function setupIpcHandlers(
 
   ipcMain.handle('auth:has-key', (_event, provider: string) => {
     return infra.authStorage.hasAuth(provider);
+  });
+
+  ipcMain.handle('agent:set-thinking', (_event, level: string) => {
+    (session as any).setThinkingLevel?.(level);
+    log.info({ level }, 'Thinking level changed');
   });
 
   ipcMain.handle('auth:switch-model', async (_event, config: ModelConfig) => {

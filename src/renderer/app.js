@@ -15,8 +15,10 @@ function sendMessage() {
   const text = inputField.value.trim();
   if (!text || isStreaming) return;
 
-  // Add user bubble
-  addUserMessage(text);
+  // Add user bubble (with pasted images if any)
+  addUserMessage(text, pastedImages.map((p) => p.dataUrl));
+  pastedImages = [];
+  renderPastePreview();
   inputField.value = '';
   inputField.style.height = 'auto';
 
@@ -29,10 +31,24 @@ function sendMessage() {
   window.api.sendPrompt(text);
 }
 
-function addUserMessage(text) {
+function addUserMessage(text, images) {
   const msg = document.createElement('div');
   msg.className = 'message user-message';
-  msg.textContent = text;
+  if (images && images.length > 0) {
+    const imgRow = document.createElement('div');
+    imgRow.className = 'user-images';
+    images.forEach((dataUrl) => {
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.alt = 'Attached image';
+      img.className = 'user-attached-img';
+      imgRow.appendChild(img);
+    });
+    msg.appendChild(imgRow);
+  }
+  const textEl = document.createElement('span');
+  textEl.textContent = text;
+  msg.appendChild(textEl);
   chatArea.appendChild(msg);
   scrollToBottom();
 }
@@ -201,6 +217,36 @@ window.api.onAgentEnd(() => {
   updateInputState();
 });
 
+// ── Context usage bar ────────────────────
+
+const contextFill = document.getElementById('context-fill');
+const contextLabel = document.getElementById('context-label');
+let contextSizes = {};
+let lastInputTokens = 0;
+
+function updateContextBar(inputTokens) {
+  lastInputTokens = inputTokens;
+  const modelId = localStorage.getItem('figma-companion:model') || 'claude-sonnet-4-6';
+  const maxTokens = contextSizes[modelId] || 200000;
+  const pct = Math.min(100, (inputTokens / maxTokens) * 100);
+  contextFill.style.width = pct.toFixed(1) + '%';
+  contextFill.className = 'context-fill' + (pct > 90 ? ' critical' : pct > 70 ? ' warn' : '');
+
+  // Format: "125K / 1M" or "12K / 200K"
+  const fmt = (n) => n >= 1_000_000 ? (n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1) + 'M' : Math.round(n / 1000) + 'K';
+  contextLabel.textContent = fmt(inputTokens) + ' / ' + fmt(maxTokens);
+}
+
+window.api.onUsage((usage) => {
+  updateContextBar(usage.input);
+});
+
+// Load context sizes and init bar
+(async () => {
+  contextSizes = await window.api.getContextSizes();
+  updateContextBar(0);
+})();
+
 // SDK lifecycle: compaction / retry indicators
 window.api.onCompaction((active) => {
   statusText.textContent = active ? 'Compacting…' : (statusDot.classList.contains('connected') ? 'Connected' : 'Disconnected');
@@ -292,6 +338,13 @@ async function initAuthUI() {
   }
   if (savedModel) {
     modelSelect.value = savedModel;
+  }
+
+  // Switch session to saved model if it differs from the default (claude-sonnet-4-6)
+  const targetProvider = savedProvider || 'anthropic';
+  const targetModel = savedModel || 'claude-sonnet-4-6';
+  if (targetProvider !== 'anthropic' || targetModel !== 'claude-sonnet-4-6') {
+    await window.api.switchModel({ provider: targetProvider, modelId: targetModel });
   }
 }
 
@@ -407,6 +460,171 @@ window.api.isPinned().then((pinned) => {
   pinBtn.classList.toggle('pinned', pinned);
   pinBtn.title = pinned ? 'Unpin from top' : 'Keep on top';
 });
+
+// ── Input bar: Model & Effort selectors ──
+
+const barModelBtn = document.getElementById('bar-model-btn');
+const barModelLabel = document.getElementById('bar-model-label');
+const barEffortBtn = document.getElementById('bar-effort-btn');
+const barEffortLabel = document.getElementById('bar-effort-label');
+
+const EFFORT_LEVELS = [
+  { id: 'off', label: 'Off' },
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+];
+
+let currentEffort = localStorage.getItem('figma-companion:effort') || 'medium';
+barEffortLabel.textContent = EFFORT_LEVELS.find((e) => e.id === currentEffort)?.label || 'Medium';
+
+// Generic dropdown factory
+function createDropdown(anchorBtn, items, onSelect) {
+  // Close any existing dropdown
+  const existing = anchorBtn.querySelector('.toolbar-dropdown');
+  if (existing) { existing.remove(); anchorBtn.classList.remove('open'); return; }
+  closeAllDropdowns();
+
+  const menu = document.createElement('div');
+  menu.className = 'toolbar-dropdown';
+  items.forEach((item) => {
+    const btn = document.createElement('button');
+    btn.className = 'dropdown-item' + (item.active ? ' active' : '');
+    const label = document.createElement('span');
+    label.textContent = item.label;
+    const check = document.createElement('span');
+    check.className = 'check';
+    check.textContent = '\u2713';
+    btn.appendChild(label);
+    btn.appendChild(check);
+    btn.addEventListener('click', () => {
+      menu.remove();
+      anchorBtn.classList.remove('open');
+      onSelect(item);
+    });
+    menu.appendChild(btn);
+  });
+  anchorBtn.classList.add('open');
+  anchorBtn.appendChild(menu);
+
+  // Close on outside click
+  setTimeout(() => {
+    function onOutside(e) {
+      if (!anchorBtn.contains(e.target)) {
+        menu.remove();
+        anchorBtn.classList.remove('open');
+        document.removeEventListener('click', onOutside);
+      }
+    }
+    document.addEventListener('click', onOutside);
+  }, 0);
+}
+
+function closeAllDropdowns() {
+  document.querySelectorAll('.toolbar-dropdown').forEach((d) => d.remove());
+  document.querySelectorAll('.toolbar-chip.open').forEach((c) => c.classList.remove('open'));
+}
+
+// Model picker
+barModelBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  const models = await window.api.getModels();
+  const provider = localStorage.getItem('figma-companion:provider') || 'anthropic';
+  const currentModel = localStorage.getItem('figma-companion:model') || 'claude-sonnet-4-6';
+  const allModels = [];
+  for (const [prov, list] of Object.entries(models)) {
+    list.forEach((m) => allModels.push({ id: m.id, label: m.label, provider: prov, active: m.id === currentModel }));
+  }
+  createDropdown(barModelBtn, allModels, async (item) => {
+    barModelLabel.textContent = item.label.replace(/ \(.*\)/, '');
+    localStorage.setItem('figma-companion:provider', item.provider);
+    localStorage.setItem('figma-companion:model', item.id);
+    // Also update settings panel selectors if open
+    if (providerSelect) providerSelect.value = item.provider;
+    updateModelOptions();
+    if (modelSelect) modelSelect.value = item.id;
+    await window.api.switchModel({ provider: item.provider, modelId: item.id });
+    updateContextBar(0);
+  });
+});
+
+// Effort picker
+barEffortBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const items = EFFORT_LEVELS.map((l) => ({ ...l, active: l.id === currentEffort }));
+  createDropdown(barEffortBtn, items, (item) => {
+    currentEffort = item.id;
+    barEffortLabel.textContent = item.label;
+    localStorage.setItem('figma-companion:effort', item.id);
+    window.api.setThinking(item.id);
+  });
+});
+
+// Sync model label on init
+(async () => {
+  const models = await window.api.getModels();
+  const provider = localStorage.getItem('figma-companion:provider') || 'anthropic';
+  const modelId = localStorage.getItem('figma-companion:model') || 'claude-sonnet-4-6';
+  const allModels = Object.values(models).flat();
+  const match = allModels.find((m) => m.id === modelId);
+  if (match) barModelLabel.textContent = match.label.replace(/ \(.*\)/, '');
+})();
+
+// Apply saved effort on load
+window.api.setThinking(currentEffort);
+
+// ── Paste screenshot support ─────────────
+
+const pastePreview = document.getElementById('paste-preview');
+let pastedImages = []; // Array of { dataUrl, blob }
+
+inputField.addEventListener('paste', (e) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const blob = item.getAsFile();
+      if (!blob) continue;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        pastedImages.push({ dataUrl, blob });
+        renderPastePreview();
+      };
+      reader.readAsDataURL(blob);
+    }
+  }
+});
+
+function renderPastePreview() {
+  while (pastePreview.firstChild) pastePreview.removeChild(pastePreview.firstChild);
+  if (pastedImages.length === 0) {
+    pastePreview.classList.add('hidden');
+    return;
+  }
+  pastePreview.classList.remove('hidden');
+  pastedImages.forEach((img, i) => {
+    const thumb = document.createElement('div');
+    thumb.className = 'paste-thumb';
+    const imgEl = document.createElement('img');
+    imgEl.src = img.dataUrl;
+    imgEl.alt = 'Pasted image';
+    thumb.appendChild(imgEl);
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'paste-thumb-remove';
+    removeBtn.textContent = '\u00d7';
+    removeBtn.addEventListener('click', () => {
+      pastedImages.splice(i, 1);
+      renderPastePreview();
+    });
+    thumb.appendChild(removeBtn);
+    pastePreview.appendChild(thumb);
+  });
+}
+
+// Clear pasted images after sending
+const originalSendMessage = sendMessage;
 
 // Focus input on load
 inputField.focus();

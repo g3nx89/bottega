@@ -31,7 +31,12 @@
     <main id="chat-area"></main>
 
     <footer id="input-area">
+      <div id="context-bar" class="context-bar">
+        <div class="context-fill" id="context-fill"></div>
+        <span class="context-label" id="context-label">0%</span>
+      </div>
       <div class="input-wrapper">
+        <div id="paste-preview" class="paste-preview hidden"></div>
         <textarea
           id="input-field"
           placeholder="Describe what you want to design…"
@@ -45,7 +50,19 @@
           </svg>
         </button>
       </div>
-      <p class="input-hint">Enter to send · Shift+Enter for new line</p>
+      <div class="input-toolbar">
+        <div class="toolbar-left">
+          <button id="bar-model-btn" class="toolbar-chip" title="Switch model">
+            <span id="bar-model-label">Sonnet 4.6</span>
+            <svg width="8" height="5" viewBox="0 0 8 5" fill="none"><path d="M1 1L4 4L7 1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          </button>
+          <button id="bar-effort-btn" class="toolbar-chip" title="Thinking effort">
+            <span id="bar-effort-label">Medium</span>
+            <svg width="8" height="5" viewBox="0 0 8 5" fill="none"><path d="M1 1L4 4L7 1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <span class="input-hint">Enter to send</span>
+      </div>
     </footer>
 
     <div id="settings-overlay" class="settings-overlay hidden">
