@@ -7,23 +7,6 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
 
   return [
     {
-      name: 'figma_get_file_data',
-      label: 'Get File Data',
-      description: 'Get the document structure of a Figma file via REST API.',
-      parameters: Type.Object({
-        fileKey: Type.String({ description: 'Figma file key' }),
-        depth: Type.Optional(Type.Number({ description: 'Max depth to traverse (default: 2)' })),
-        nodeId: Type.Optional(Type.String({ description: 'Specific node ID to fetch' })),
-      }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
-        const result = await figmaAPI.getFile(params.fileKey, {
-          depth: params.depth,
-          ids: params.nodeId ? [params.nodeId] : undefined,
-        });
-        return textResult(result);
-      },
-    },
-    {
       name: 'figma_search_components',
       label: 'Search Components',
       description: 'Search for components by name. Searches local components or a library file.',
@@ -47,7 +30,8 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_get_library_components',
       label: 'Get Library Components',
-      description: 'Get all components and component sets from a library file.',
+      description: 'Get all published components and component sets from an external library file. Requires the library file key. Use this to discover available components before instantiating with figma_instantiate.',
+      promptSnippet: 'figma_get_library_components: list all components in an external library file (requires file key)',
       parameters: Type.Object({
         fileKey: Type.String({ description: 'File key of the library' }),
       }),
@@ -62,7 +46,8 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_get_component_details',
       label: 'Get Component Details',
-      description: 'Get detailed information about a specific component by node ID.',
+      description: 'Get detailed information about a specific component: properties, variants, and nested layer structure.',
+      promptSnippet: 'figma_get_component_details: inspect component properties, variants, and structure',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID of the component' }),
       }),

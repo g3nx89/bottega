@@ -4,7 +4,7 @@ import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { type ToolDeps, textResult } from './index.js';
 
 export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
-  const { connector, figmaAPI, operationQueue, wsServer } = deps;
+  const { connector, operationQueue, wsServer } = deps;
 
   return [
     {
@@ -46,23 +46,6 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
             details: {},
           };
         }
-        return textResult(result);
-      },
-    },
-    {
-      name: 'figma_screenshot_rest',
-      label: 'Screenshot (REST API)',
-      description: 'Export a node as an image via the Figma REST API. Requires a file key and node ID.',
-      parameters: Type.Object({
-        fileKey: Type.String({ description: 'Figma file key' }),
-        nodeId: Type.String({ description: 'Node ID to export' }),
-        scale: Type.Optional(Type.Number({ description: 'Export scale (default: 2)', default: 2 })),
-      }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
-        const result = await figmaAPI.getImages(params.fileKey, [params.nodeId], {
-          format: 'png',
-          scale: params.scale ?? 2,
-        });
         return textResult(result);
       },
     },

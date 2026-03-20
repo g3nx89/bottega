@@ -61,7 +61,8 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_lint',
       label: 'Lint Design',
-      description: 'Run design linting rules on a node or the entire page.',
+      description: 'Run design linting rules on a node or the entire page. Checks naming conventions, spacing consistency, and other design quality rules.',
+      promptSnippet: 'figma_lint: check design quality (naming, spacing, consistency)',
       parameters: Type.Object({
         nodeId: Type.Optional(Type.String({ description: 'Node ID to lint. If omitted, lints entire page.' })),
         rules: Type.Optional(Type.Array(Type.String(), { description: 'Specific rule names to check' })),

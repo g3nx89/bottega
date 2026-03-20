@@ -9,7 +9,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_set_fills',
       label: 'Set Fills',
-      description: 'Set the fill colors of a node. Accepts hex colors or gradient definitions.',
+      description: 'Set the fill colors of a node. Accepts hex colors. SOLID fills only — gradients and image fills require figma_execute.',
+      promptSnippet: 'figma_set_fills: set solid fill colors on a node (SOLID only — gradients need figma_execute)',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
         fills: Type.Array(Type.Any(), { description: 'Array of fill paints. Simple: [{ type: "SOLID", color: "#FF0000" }]' }),
@@ -24,7 +25,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_set_strokes',
       label: 'Set Strokes',
-      description: 'Set the stroke colors and weight of a node.',
+      description: 'Set the stroke colors and weight of a node. SOLID strokes only — gradient strokes require figma_execute.',
+      promptSnippet: 'figma_set_strokes: set solid stroke colors and weight (SOLID only)',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
         strokes: Type.Array(Type.Any(), { description: 'Array of stroke paints' }),
@@ -63,7 +65,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_set_image_fill',
       label: 'Set Image Fill',
-      description: 'Set an image as the fill of one or more nodes.',
+      description: 'Set an image as the fill of one or more nodes. Provide either a URL or base64-encoded image data.',
+      promptSnippet: 'figma_set_image_fill: apply an image fill to nodes (from URL or base64)',
       parameters: Type.Object({
         nodeIds: Type.Array(Type.String(), { description: 'Node IDs to apply image fill to' }),
         imageUrl: Type.Optional(Type.String({ description: 'Image URL to fetch and apply' })),
@@ -83,7 +86,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_resize',
       label: 'Resize Node',
-      description: 'Resize a node to specific dimensions.',
+      description: 'Resize a node to specific dimensions. Note: width/height are read-only in the Plugin API — this tool uses resize() internally.',
+      promptSnippet: 'figma_resize: change a node width and height',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
         width: Type.Number({ description: 'New width in px' }),
@@ -99,7 +103,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_move',
       label: 'Move Node',
-      description: 'Move a node to a specific position.',
+      description: 'Move a node to a specific x/y position. For reparenting (moving into a different parent), use figma_execute with appendChild().',
+      promptSnippet: 'figma_move: reposition a node (position only — reparenting needs figma_execute)',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
         x: Type.Number({ description: 'X position' }),
@@ -132,7 +137,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_clone',
       label: 'Clone Node',
-      description: 'Create a duplicate of a node.',
+      description: 'Create a duplicate of a node. Preserves all visual properties including image fills — prefer over building from scratch.',
+      promptSnippet: 'figma_clone: duplicate a node (preserves image fills and all visual properties)',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID to clone' }),
       }),
@@ -146,7 +152,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_delete',
       label: 'Delete Node',
-      description: 'Delete a node from the Figma document.',
+      description: 'Delete a node and its children from the Figma document. Irreversible.',
+      promptSnippet: 'figma_delete: remove a node (irreversible)',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID to delete' }),
       }),
@@ -160,7 +167,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_rename',
       label: 'Rename Node',
-      description: 'Rename a node in the Figma layers panel.',
+      description: 'Rename a node in the Figma layers panel. Use semantic names with slash convention (e.g. "Card/Body").',
+      promptSnippet: 'figma_rename: rename a layer (use semantic slash naming like "Card/Body")',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
         name: Type.String({ description: 'New name' }),

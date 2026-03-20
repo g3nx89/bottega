@@ -29,7 +29,8 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_set_instance_properties',
       label: 'Set Instance Properties',
-      description: 'Set properties on a component instance (text overrides, boolean toggles, swap instances).',
+      description: 'Set properties on a component instance (text overrides, boolean toggles, swap instances). Use base property name (e.g. "label"), not the disambiguated key.',
+      promptSnippet: 'figma_set_instance_properties: override instance properties (text, boolean, instance swap)',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Instance node ID' }),
         properties: Type.Record(Type.String(), Type.Any(), { description: 'Property name → value map' }),
@@ -44,7 +45,8 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_arrange_component_set',
       label: 'Arrange Component Set',
-      description: 'Arrange variants in a component set into a grid layout.',
+      description: 'Arrange variants in a component set into an organized grid layout with consistent spacing.',
+      promptSnippet: 'figma_arrange_component_set: organize component variants into a grid',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Component set node ID' }),
         columns: Type.Optional(Type.Number({ description: 'Number of columns (default: auto)' })),
@@ -54,19 +56,25 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
           const nodeId = String(params.nodeId).replace(/[^0-9:]/g, '');
           const cols = Math.max(1, Math.floor(Number(params.columns) || 4));
           const code = `
-            (async () => {
-              const node = figma.getNodeById(${JSON.stringify(nodeId)});
-              if (!node || node.type !== 'COMPONENT_SET') throw new Error('Not a component set');
-              const children = [...node.children];
-              const spacing = 20;
-              const cols = ${cols};
-              let maxW = 0, maxH = 0;
-              children.forEach(c => { maxW = Math.max(maxW, c.width); maxH = Math.max(maxH, c.height); });
-              children.forEach((c, i) => {
-                c.x = (i % cols) * (maxW + spacing);
-                c.y = Math.floor(i / cols) * (maxH + spacing);
-              });
-              return { arranged: children.length, columns: cols };
+            return (async () => {
+              try {
+                const node = await figma.getNodeByIdAsync(${JSON.stringify(nodeId)});
+                if (!node || node.type !== 'COMPONENT_SET') {
+                  return JSON.stringify({ success: false, error: 'Not a component set' });
+                }
+                const children = [...node.children];
+                const spacing = 20;
+                const cols = ${cols};
+                let maxW = 0, maxH = 0;
+                children.forEach(c => { maxW = Math.max(maxW, c.width); maxH = Math.max(maxH, c.height); });
+                children.forEach((c, i) => {
+                  c.x = (i % cols) * (maxW + spacing);
+                  c.y = Math.floor(i / cols) * (maxH + spacing);
+                });
+                return JSON.stringify({ success: true, arranged: children.length, columns: cols });
+              } catch (e) {
+                return JSON.stringify({ success: false, error: e.message });
+              }
             })()
           `;
           const result = await connector.executeCodeViaUI(code, 15000);
