@@ -1,9 +1,9 @@
-import { Type } from '@sinclair/typebox';
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
-import { type ToolDeps, textResult } from './index.js';
-import { parseJsx } from '../jsx-parser.js';
+import { Type } from '@sinclair/typebox';
 import { loadIconSvg, resolveIcons } from '../icon-loader.js';
+import { parseJsx } from '../jsx-parser.js';
+import { type ToolDeps, textResult } from './index.js';
 
 export function createJsxRenderTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
@@ -28,7 +28,8 @@ export function createJsxRenderTools(deps: ToolDeps): ToolDefinition[] {
 - name="Layer Name" → node name
 
 For icons, use <Icon name="prefix:name" size={24} />.`,
-      promptSnippet: 'figma_render_jsx: create complex UI from JSX with Tailwind-like shorthand (bg, p, flex, rounded, etc.)',
+      promptSnippet:
+        'figma_render_jsx: create complex UI from JSX with Tailwind-like shorthand (bg, p, flex, rounded, etc.)',
       promptGuidelines: [
         'Use figma_render_jsx for creating complex multi-element layouts. It creates the entire tree in one roundtrip.',
         'Always wrap layouts in a <Frame> with flex="col" or flex="row" for auto layout.',
@@ -75,7 +76,9 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
         return operationQueue.execute(async () => {
           const svg = await loadIconSvg(params.name, params.size ?? 24);
           const result = await connector.createIcon(svg, params.size ?? 24, params.color ?? '#000000', {
-            x: params.x, y: params.y, parentId: params.parentId,
+            x: params.x,
+            y: params.y,
+            parentId: params.parentId,
           });
           return textResult(result);
         });

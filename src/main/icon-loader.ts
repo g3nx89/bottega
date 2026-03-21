@@ -1,4 +1,4 @@
-import { iconToSVG, iconToHTML } from '@iconify/utils';
+import { iconToHTML, iconToSVG } from '@iconify/utils';
 import type { TreeNode } from '../figma/types.js';
 
 const MAX_ICON_CACHE = 500;
@@ -19,11 +19,14 @@ export async function loadIconSvg(name: string, size: number = 24): Promise<stri
   const iconData = data.icons?.[iconName];
   if (!iconData) throw new Error(`Icon "${name}" not found on Iconify`);
 
-  const renderData = iconToSVG({
-    ...iconData,
-    width: data.width ?? iconData.width ?? 24,
-    height: data.height ?? iconData.height ?? 24,
-  }, { height: size, width: size });
+  const renderData = iconToSVG(
+    {
+      ...iconData,
+      width: data.width ?? iconData.width ?? 24,
+      height: data.height ?? iconData.height ?? 24,
+    },
+    { height: size, width: size },
+  );
 
   const svg = iconToHTML(renderData.body, renderData.attributes);
 
@@ -51,7 +54,7 @@ export async function resolveIcons(tree: TreeNode): Promise<void> {
   if (iconNodes.length === 0) return;
 
   const svgs = await Promise.all(
-    iconNodes.map(n => loadIconSvg(n.props.name as string, (n.props.size as number) || 24))
+    iconNodes.map((n) => loadIconSvg(n.props.name as string, (n.props.size as number) || 24)),
   );
   iconNodes.forEach((node, i) => {
     const size = (node.props.size as number) || 24;

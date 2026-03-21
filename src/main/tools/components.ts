@@ -1,5 +1,5 @@
-import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
 export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
@@ -9,7 +9,8 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_instantiate',
       label: 'Instantiate Component',
-      description: 'Create an instance of a component. Use component key from figma_search_components or figma_get_library_components. For library components, uses importComponentByKeyAsync.',
+      description:
+        'Create an instance of a component. Use component key from figma_search_components or figma_get_library_components. For library components, uses importComponentByKeyAsync.',
       promptSnippet: 'figma_instantiate: create instance of a component (local or library)',
       parameters: Type.Object({
         componentKey: Type.String({ description: 'Component key' }),
@@ -20,7 +21,9 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.instantiateComponent(params.componentKey, {
-            x: params.x, y: params.y, parentId: params.parentId,
+            x: params.x,
+            y: params.y,
+            parentId: params.parentId,
           });
           return textResult(result);
         });
@@ -29,7 +32,8 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_set_instance_properties',
       label: 'Set Instance Properties',
-      description: 'Set properties on a component instance (text overrides, boolean toggles, swap instances). Use base property name (e.g. "label"), not the disambiguated key.',
+      description:
+        'Set properties on a component instance (text overrides, boolean toggles, swap instances). Use base property name (e.g. "label"), not the disambiguated key.',
       promptSnippet: 'figma_set_instance_properties: override instance properties (text, boolean, instance swap)',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Instance node ID' }),

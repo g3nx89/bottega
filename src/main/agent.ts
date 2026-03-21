@@ -1,16 +1,24 @@
-import { createAgentSession, type CreateAgentSessionResult, SessionManager, AuthStorage, DefaultResourceLoader, ModelRegistry } from '@mariozechner/pi-coding-agent';
 import { getModel } from '@mariozechner/pi-ai';
-import { createFigmaTools } from './tools/index.js';
-import { buildSystemPrompt } from './system-prompt.js';
+import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import {
+  AuthStorage,
+  type CreateAgentSessionResult,
+  createAgentSession,
+  DefaultResourceLoader,
+  ModelRegistry,
+  SessionManager,
+} from '@mariozechner/pi-coding-agent';
 import os from 'os';
 import path from 'path';
 import type { FigmaCore } from './figma-core.js';
+import type { ImageGenerator } from './image-gen/image-generator.js';
 import { OperationQueue } from './operation-queue.js';
-import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { buildSystemPrompt } from './system-prompt.js';
+import { createFigmaTools } from './tools/index.js';
 
 export interface ModelConfig {
-  provider: string;  // Pi SDK provider ID: 'anthropic' | 'openai' | 'openai-codex' | 'google' | 'google-gemini-cli'
-  modelId: string;   // e.g. 'claude-sonnet-4-6', 'gpt-4o', 'gpt-5.1', 'gemini-2.5-pro'
+  provider: string; // Pi SDK provider ID: 'anthropic' | 'openai' | 'openai-codex' | 'google' | 'google-gemini-cli'
+  modelId: string; // e.g. 'claude-sonnet-4-6', 'gpt-4o', 'gpt-5.1', 'gemini-2.5-pro'
 }
 
 export const DEFAULT_MODEL: ModelConfig = { provider: 'anthropic', modelId: 'claude-sonnet-4-6' };
@@ -35,17 +43,17 @@ export const OAUTH_PROVIDER_INFO: Record<string, { label: string; description: s
 
 /** Context window sizes in tokens per model ID */
 export const CONTEXT_SIZES: Record<string, number> = {
-  'claude-opus-4-6':     1_000_000,
-  'claude-sonnet-4-6':   1_000_000,
-  'claude-haiku-4-5':      200_000,
-  'gpt-4o':                128_000,
-  'gpt-4o-mini':           128_000,
-  'o4-mini':               200_000,
-  'o3-mini':               200_000,
-  'gpt-5.1':            1_000_000,
+  'claude-opus-4-6': 1_000_000,
+  'claude-sonnet-4-6': 1_000_000,
+  'claude-haiku-4-5': 200_000,
+  'gpt-4o': 128_000,
+  'gpt-4o-mini': 128_000,
+  'o4-mini': 200_000,
+  'o3-mini': 200_000,
+  'gpt-5.1': 1_000_000,
   'gpt-5.1-codex-mini': 1_000_000,
-  'gemini-2.5-pro':      1_000_000,
-  'gemini-2.5-flash':    1_000_000,
+  'gemini-2.5-pro': 1_000_000,
+  'gemini-2.5-flash': 1_000_000,
 };
 
 /**
@@ -94,7 +102,17 @@ export interface AgentInfra {
  */
 const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), '.figma-cowork', 'sessions');
 
-export async function createAgentInfra(figmaCore: FigmaCore, sessionsDir?: string): Promise<AgentInfra> {
+export interface AgentInfraOptions {
+  sessionsDir?: string;
+  getImageGenerator?: () => ImageGenerator | null;
+}
+
+export async function createAgentInfra(
+  figmaCore: FigmaCore,
+  options?: AgentInfraOptions | string,
+): Promise<AgentInfra> {
+  // Backwards-compatible: accept string (sessionsDir) or options object
+  const opts: AgentInfraOptions = typeof options === 'string' ? { sessionsDir: options } : options || {};
   const operationQueue = new OperationQueue();
 
   const figmaTools = createFigmaTools({
@@ -102,11 +120,12 @@ export async function createAgentInfra(figmaCore: FigmaCore, sessionsDir?: strin
     figmaAPI: figmaCore.figmaAPI,
     operationQueue,
     wsServer: figmaCore.wsServer,
+    getImageGenerator: opts.getImageGenerator,
   });
 
   const authStorage = AuthStorage.create();
   const modelRegistry = new ModelRegistry(authStorage);
-  const sessionManager = SessionManager.create(os.tmpdir(), sessionsDir || DEFAULT_SESSIONS_DIR);
+  const sessionManager = SessionManager.create(os.tmpdir(), opts.sessionsDir || DEFAULT_SESSIONS_DIR);
 
   return { authStorage, modelRegistry, sessionManager, figmaTools };
 }
@@ -121,7 +140,7 @@ export async function createFigmaAgent(
 
   // Find human-readable label for the system prompt (search all groups)
   const allModels = Object.values(AVAILABLE_MODELS).flat();
-  const entry = allModels.find(m => m.sdkProvider === modelConfig.provider && m.id === modelConfig.modelId);
+  const entry = allModels.find((m) => m.sdkProvider === modelConfig.provider && m.id === modelConfig.modelId);
   const modelLabel = entry?.label || modelConfig.modelId;
 
   // Build resource loader per session with model-specific system prompt.

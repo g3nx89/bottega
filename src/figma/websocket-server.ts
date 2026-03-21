@@ -13,8 +13,8 @@
  * Data flow: Main Process ←WebSocket→ ui.html ←postMessage→ code.js ←figma.*→ Figma
  */
 
-import { WebSocketServer as WSServer, WebSocket } from 'ws';
 import { EventEmitter } from 'events';
+import { WebSocket, WebSocketServer as WSServer } from 'ws';
 import { createChildLogger } from './logger.js';
 import type { ConsoleLogEntry } from './types.js';
 
@@ -116,8 +116,8 @@ export class FigmaWebSocketServer extends EventEmitter {
             // Reject connections from unexpected browser origins.
             const origin = info.origin;
             const allowed =
-              !origin ||                           // No origin — local process (e.g. Node.js client)
-              origin === 'null' ||                  // Sandboxed iframe / Figma Desktop plugin UI
+              !origin || // No origin — local process (e.g. Node.js client)
+              origin === 'null' || // Sandboxed iframe / Figma Desktop plugin UI
               origin.startsWith('https://www.figma.com') ||
               origin.startsWith('https://figma.com');
             if (allowed) {
@@ -133,7 +133,7 @@ export class FigmaWebSocketServer extends EventEmitter {
           this._isStarted = true;
           logger.info(
             { port: this.options.port, host: this.options.host || 'localhost' },
-            'WebSocket bridge server started'
+            'WebSocket bridge server started',
           );
           resolve();
         });
@@ -159,7 +159,7 @@ export class FigmaWebSocketServer extends EventEmitter {
 
           logger.info(
             { totalClients: this.clients.size, pendingClients: this._pendingClients.size },
-            'New WebSocket connection (pending file identification)'
+            'New WebSocket connection (pending file identification)',
           );
 
           ws.on('message', (data: import('ws').RawData) => {
@@ -326,10 +326,7 @@ export class FigmaWebSocketServer extends EventEmitter {
       if (this._activeFileKey === previousEntry.fileKey) {
         this._activeFileKey = null;
       }
-      logger.info(
-        { oldFileKey: previousEntry.fileKey, newFileKey: fileKey },
-        'WebSocket client switched files'
-      );
+      logger.info({ oldFileKey: previousEntry.fileKey, newFileKey: fileKey }, 'WebSocket client switched files');
     }
 
     // If same fileKey already connected with a DIFFERENT ws, clean up old connection
@@ -371,7 +368,7 @@ export class FigmaWebSocketServer extends EventEmitter {
         totalClients: this.clients.size,
         isActive: this._activeFileKey === fileKey,
       },
-      'File connected via WebSocket'
+      'File connected via WebSocket',
     );
 
     this.emit('connected');
@@ -401,10 +398,7 @@ export class FigmaWebSocketServer extends EventEmitter {
     }
 
     const { fileKey, client } = found;
-    logger.info(
-      { fileKey, fileName: client.fileInfo.fileName, code, reason },
-      'File disconnected from WebSocket'
-    );
+    logger.info({ fileKey, fileName: client.fileInfo.fileName, code, reason }, 'File disconnected from WebSocket');
 
     // Start grace period — keep state but clean up if not reconnected
     client.gracePeriodTimer = setTimeout(() => {
@@ -435,7 +429,12 @@ export class FigmaWebSocketServer extends EventEmitter {
    * Send a command to a plugin UI and wait for the response.
    * By default targets the active file. Pass targetFileKey to target a specific file.
    */
-  sendCommand(method: string, params: Record<string, any> = {}, timeoutMs = 15000, targetFileKey?: string): Promise<any> {
+  sendCommand(
+    method: string,
+    params: Record<string, any> = {},
+    timeoutMs = 15000,
+    targetFileKey?: string,
+  ): Promise<any> {
     return new Promise((resolve, reject) => {
       const fileKey = targetFileKey || this._activeFileKey;
 
@@ -474,7 +473,11 @@ export class FigmaWebSocketServer extends EventEmitter {
       } catch (sendError) {
         this.pendingRequests.delete(id);
         clearTimeout(timeoutId);
-        reject(new Error(`Failed to send WebSocket command ${method}: ${sendError instanceof Error ? sendError.message : String(sendError)}`));
+        reject(
+          new Error(
+            `Failed to send WebSocket command ${method}: ${sendError instanceof Error ? sendError.message : String(sendError)}`,
+          ),
+        );
         return;
       }
       client.lastActivity = Date.now();

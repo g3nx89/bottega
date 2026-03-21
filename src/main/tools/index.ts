@@ -1,20 +1,23 @@
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
-import type { WebSocketConnector } from '../../figma/websocket-connector.js';
 import type { FigmaAPI } from '../../figma/figma-api.js';
-import type { OperationQueue } from '../operation-queue.js';
+import type { WebSocketConnector } from '../../figma/websocket-connector.js';
 import type { FigmaWebSocketServer } from '../../figma/websocket-server.js';
+import type { ImageGenerator } from '../image-gen/image-generator.js';
+import type { OperationQueue } from '../operation-queue.js';
+import { createComponentTools } from './components.js';
 import { createCoreTools } from './core.js';
 import { createDiscoveryTools } from './discovery.js';
-import { createComponentTools } from './components.js';
+import { createImageGenTools } from './image-gen.js';
+import { createJsxRenderTools } from './jsx-render.js';
 import { createManipulationTools } from './manipulation.js';
 import { createTokenTools } from './tokens.js';
-import { createJsxRenderTools } from './jsx-render.js';
 
 export interface ToolDeps {
   connector: WebSocketConnector;
   figmaAPI: FigmaAPI;
   operationQueue: OperationQueue;
   wsServer: FigmaWebSocketServer;
+  getImageGenerator?: () => ImageGenerator | null;
 }
 
 /** Standard text result wrapper — avoids repeating the same shape in every tool. */
@@ -44,6 +47,7 @@ export function createFigmaTools(deps: ToolDeps): ToolDefinition[] {
     ...createManipulationTools(deps),
     ...createTokenTools(deps),
     ...createJsxRenderTools(deps),
+    ...(deps.getImageGenerator ? createImageGenTools(deps) : []),
   ];
   return tools.map(withAbortCheck);
 }

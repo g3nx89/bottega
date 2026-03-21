@@ -1,5 +1,5 @@
-import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
 export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
@@ -13,7 +13,9 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       promptSnippet: 'figma_search_components: search for components by name (local or library)',
       parameters: Type.Object({
         query: Type.String({ description: 'Search query for component names' }),
-        libraryFileKey: Type.Optional(Type.String({ description: 'File key of a library to search. If omitted, searches local components.' })),
+        libraryFileKey: Type.Optional(
+          Type.String({ description: 'File key of a library to search. If omitted, searches local components.' }),
+        ),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         if (params.libraryFileKey) {
@@ -30,8 +32,10 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_get_library_components',
       label: 'Get Library Components',
-      description: 'Get all published components and component sets from an external library file. Requires the library file key. Use this to discover available components before instantiating with figma_instantiate.',
-      promptSnippet: 'figma_get_library_components: list all components in an external library file (requires file key)',
+      description:
+        'Get all published components and component sets from an external library file. Requires the library file key. Use this to discover available components before instantiating with figma_instantiate.',
+      promptSnippet:
+        'figma_get_library_components: list all components in an external library file (requires file key)',
       parameters: Type.Object({
         fileKey: Type.String({ description: 'File key of the library' }),
       }),
@@ -46,7 +50,8 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_get_component_details',
       label: 'Get Component Details',
-      description: 'Get detailed information about a specific component: properties, variants, and nested layer structure.',
+      description:
+        'Get detailed information about a specific component: properties, variants, and nested layer structure.',
       promptSnippet: 'figma_get_component_details: inspect component properties, variants, and structure',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID of the component' }),
@@ -63,10 +68,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       promptSnippet: 'figma_design_system: get design system overview (variables + local components)',
       parameters: Type.Object({}),
       async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
-        const [variables, components] = await Promise.all([
-          connector.getVariables(),
-          connector.getLocalComponents(),
-        ]);
+        const [variables, components] = await Promise.all([connector.getVariables(), connector.getLocalComponents()]);
         return textResult({ variables, components });
       },
     },

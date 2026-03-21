@@ -96,19 +96,19 @@ export class FigmaAPI {
 
     const isOAuthToken = this.accessToken.startsWith('figu_');
 
-    const tokenPreview = this.accessToken ? `${this.accessToken.substring(0, 10)}...` : 'NO TOKEN';
-    logger.info({
-      url,
-      tokenPreview,
-      hasToken: !!this.accessToken,
-      tokenLength: this.accessToken?.length,
-      isOAuthToken,
-      authMethod: isOAuthToken ? 'Bearer' : 'X-Figma-Token'
-    }, 'Making Figma API request with token');
+    logger.info(
+      {
+        url,
+        hasToken: !!this.accessToken,
+        isOAuthToken,
+        authMethod: isOAuthToken ? 'Bearer' : 'X-Figma-Token',
+      },
+      'Making Figma API request',
+    );
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(options.headers as Record<string, string> || {}),
+      ...((options.headers as Record<string, string>) || {}),
     };
 
     if (isOAuthToken) {
@@ -126,7 +126,7 @@ export class FigmaAPI {
       const errorText = await response.text();
       logger.error(
         { status: response.status, statusText: response.statusText, body: errorText },
-        'Figma API request failed'
+        'Figma API request failed',
       );
       throw new Error(`Figma API error (${response.status}): ${errorText}`);
     }
@@ -138,14 +138,17 @@ export class FigmaAPI {
   /**
    * GET /v1/files/:file_key
    */
-  async getFile(fileKey: string, options?: {
-    version?: string;
-    ids?: string[];
-    depth?: number;
-    geometry?: 'paths' | 'screen';
-    plugin_data?: string;
-    branch_data?: boolean;
-  }): Promise<any> {
+  async getFile(
+    fileKey: string,
+    options?: {
+      version?: string;
+      ids?: string[];
+      depth?: number;
+      geometry?: 'paths' | 'screen';
+      plugin_data?: string;
+      branch_data?: boolean;
+    },
+  ): Promise<any> {
     let endpoint = `/files/${fileKey}`;
 
     const params = new URLSearchParams();
@@ -176,9 +179,7 @@ export class FigmaAPI {
       const fileData = await this.getFile(fileKey, { branch_data: true });
       const branches = fileData.branches || [];
 
-      const branch = branches.find((b: { key?: string; name?: string }) =>
-        b.key === branchId || b.name === branchId
-      );
+      const branch = branches.find((b: { key?: string; name?: string }) => b.key === branchId || b.name === branchId);
 
       if (branch?.key) {
         logger.info({ fileKey, branchId, branchKey: branch.key, branchName: branch.name }, 'Resolved branch key');
@@ -191,8 +192,12 @@ export class FigmaAPI {
       }
 
       logger.warn(
-        { fileKey, branchId, availableBranches: branches.map((b: { key?: string; name?: string }) => ({ key: b.key, name: b.name })) },
-        'Branch not found in file, using main file key'
+        {
+          fileKey,
+          branchId,
+          availableBranches: branches.map((b: { key?: string; name?: string }) => ({ key: b.key, name: b.name })),
+        },
+        'Branch not found in file, using main file key',
       );
       return fileKey;
     } catch (error) {
@@ -220,12 +225,16 @@ export class FigmaAPI {
   /**
    * GET /v1/files/:file_key/nodes
    */
-  async getNodes(fileKey: string, nodeIds: string[], options?: {
-    version?: string;
-    depth?: number;
-    geometry?: 'paths' | 'screen';
-    plugin_data?: string;
-  }): Promise<any> {
+  async getNodes(
+    fileKey: string,
+    nodeIds: string[],
+    options?: {
+      version?: string;
+      depth?: number;
+      geometry?: 'paths' | 'screen';
+      plugin_data?: string;
+    },
+  ): Promise<any> {
     let endpoint = `/files/${fileKey}/nodes`;
 
     const params = new URLSearchParams();
@@ -275,7 +284,7 @@ export class FigmaAPI {
       svg_include_node_id?: boolean;
       svg_simplify_stroke?: boolean;
       contents_only?: boolean;
-    }
+    },
   ): Promise<{ images: Record<string, string | null> }> {
     const params = new URLSearchParams();
 
@@ -284,16 +293,13 @@ export class FigmaAPI {
 
     if (options?.scale !== undefined) params.append('scale', options.scale.toString());
     if (options?.format) params.append('format', options.format);
-    if (options?.svg_outline_text !== undefined)
-      params.append('svg_outline_text', options.svg_outline_text.toString());
-    if (options?.svg_include_id !== undefined)
-      params.append('svg_include_id', options.svg_include_id.toString());
+    if (options?.svg_outline_text !== undefined) params.append('svg_outline_text', options.svg_outline_text.toString());
+    if (options?.svg_include_id !== undefined) params.append('svg_include_id', options.svg_include_id.toString());
     if (options?.svg_include_node_id !== undefined)
       params.append('svg_include_node_id', options.svg_include_node_id.toString());
     if (options?.svg_simplify_stroke !== undefined)
       params.append('svg_simplify_stroke', options.svg_simplify_stroke.toString());
-    if (options?.contents_only !== undefined)
-      params.append('contents_only', options.contents_only.toString());
+    if (options?.contents_only !== undefined) params.append('contents_only', options.contents_only.toString());
 
     const endpoint = `/images/${fileKey}?${params.toString()}`;
 
@@ -363,8 +369,8 @@ export class FigmaAPI {
     return {
       local: 'error' in localResult ? { meta: { variables: {}, variableCollections: {} } } : localResult,
       published: 'error' in publishedResult ? { variables: {} } : publishedResult,
-      ...(('error' in localResult) && { localError: localResult.error }),
-      ...(('error' in publishedResult) && { publishedError: publishedResult.error }),
+      ...('error' in localResult && { localError: localResult.error }),
+      ...('error' in publishedResult && { publishedError: publishedResult.error }),
     };
   }
 
@@ -383,9 +389,7 @@ export class FigmaAPI {
     const { meta } = await this.getComponents(fileKey);
     const components = meta?.components || [];
 
-    return components.filter((comp: any) =>
-      comp.name?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    return components.filter((comp: any) => comp.name?.toLowerCase().includes(searchTerm.toLowerCase()));
   }
 }
 
@@ -408,26 +412,27 @@ export function formatVariables(variablesData: any): {
       key: collection.key,
       modes: collection.modes,
       variableIds: collection.variableIds,
-    })
+    }),
   );
 
-  const variables = Object.entries(variablesData.variables || {}).map(
-    ([id, variable]: [string, any]) => ({
-      id,
-      name: variable.name,
-      key: variable.key,
-      resolvedType: variable.resolvedType,
-      valuesByMode: variable.valuesByMode,
-      variableCollectionId: variable.variableCollectionId,
-      scopes: variable.scopes,
-      description: variable.description,
-    })
-  );
+  const variables = Object.entries(variablesData.variables || {}).map(([id, variable]: [string, any]) => ({
+    id,
+    name: variable.name,
+    key: variable.key,
+    resolvedType: variable.resolvedType,
+    valuesByMode: variable.valuesByMode,
+    variableCollectionId: variable.variableCollectionId,
+    scopes: variable.scopes,
+    description: variable.description,
+  }));
 
-  const variablesByType = variables.reduce((acc, v) => {
-    acc[v.resolvedType] = (acc[v.resolvedType] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  const variablesByType = variables.reduce(
+    (acc, v) => {
+      acc[v.resolvedType] = (acc[v.resolvedType] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
 
   return {
     collections,

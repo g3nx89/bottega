@@ -63,6 +63,10 @@ contextBridge.exposeInMainWorld('api', {
   setApiKey: (provider: string, key: string) => ipcRenderer.invoke('auth:set-key', provider, key),
   switchModel: (config: { provider: string; modelId: string }) => ipcRenderer.invoke('auth:switch-model', config),
 
+  // Image generation settings
+  getImageGenConfig: () => ipcRenderer.invoke('imagegen:get-config'),
+  setImageGenConfig: (config: { apiKey?: string; model?: string }) => ipcRenderer.invoke('imagegen:set-config', config),
+
   // OAuth login
   getAuthStatus: () => ipcRenderer.invoke('auth:get-auth-status'),
   login: (provider: string) => ipcRenderer.invoke('auth:login', provider),

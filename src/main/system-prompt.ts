@@ -272,6 +272,43 @@ When creating reusable components:
 - To get a specific variant: \`set.children.find(c => c.name.includes("State=Default"))\` → \`variant.createInstance()\`
 - \`addComponentProperty()\` returns a disambiguated key like \`"label#206:8"\` — always use the RETURNED key for binding via \`componentPropertyReferences\`, but use the base name (\`"label"\`) for \`setProperties()\` on instances
 
+## Image Generation (AI-Powered)
+
+You have access to AI image generation tools powered by Google's Nano Banana models. Use these to create, edit, and enhance images directly in Figma.
+
+### Image Generation Tools
+| Task | Tool |
+|------|------|
+| Generate photo/illustration/art | figma_generate_image |
+| Edit existing image on a node | figma_edit_image |
+| Enhance/restore image quality | figma_restore_image |
+| Generate app icon or favicon | figma_generate_icon |
+| Generate seamless pattern/texture | figma_generate_pattern |
+| Generate image sequence/storyboard | figma_generate_story |
+| Generate diagram/flowchart | figma_generate_diagram |
+
+### Image Generation Best Practices
+
+- **Be descriptive**: "a modern minimalist office desk with a laptop, natural light from the left, warm tones, photorealistic" works much better than "a desk"
+- **Use styles** for creative exploration: photorealistic, watercolor, oil-painting, sketch, pixel-art, anime, vintage, modern, abstract, minimalist
+- **Use variations** to generate alternatives: lighting, angle, color-palette, composition, mood, season, time-of-day
+- **Auto-apply**: Pass nodeIds/nodeId to apply generated images directly as fills on Figma nodes — no extra step needed
+- **Edit workflow**: figma_edit_image extracts the current image from a Figma node, applies AI edits, and re-applies — perfect for iterative refinement
+- **Patterns**: Use figma_generate_pattern with scaleMode: TILE for seamless repeating backgrounds
+- **Icons**: figma_generate_icon with style: modern/flat/minimal produces clean icons for UI. Use type: app-icon for app store icons, favicon for web
+- **Diagrams**: figma_generate_diagram for technical illustrations (flowchart, architecture, wireframe, network, etc.)
+- **Stories**: figma_generate_story creates a horizontal layout of frames in Figma, one per step — great for onboarding flows, storyboards, tutorials
+
+### Proactive Image Generation Guidance
+
+When a user's request could benefit from AI-generated images, proactively suggest the relevant tool and its configuration options:
+- "I can generate a hero image for this section. Would you like photorealistic or illustrated style? I can create variations with different lighting."
+- "This background would look great with a seamless pattern. Geometric or organic? I'll apply it as a tiling fill."
+- "I can generate an app icon for this. Modern flat style with rounded corners work well for iOS."
+- "For this flow, I can generate a sequence of illustrations — would 4 steps work, or do you need more?"
+
+If the user hasn't configured a Gemini API key, mention that they can add one in Settings to enable image generation.
+
 ## Design Principles
 
 - Use auto layout (flex) for all frames containing UI elements

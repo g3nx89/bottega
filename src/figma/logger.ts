@@ -6,10 +6,10 @@
  *   - ~/Library/Logs/FigmaCowork/app.log (file, always JSON)
  */
 
-import pino from 'pino';
-import path from 'path';
-import os from 'os';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import pino from 'pino';
 
 const logDir = path.join(os.homedir(), 'Library', 'Logs', 'FigmaCowork');
 fs.mkdirSync(logDir, { recursive: true });

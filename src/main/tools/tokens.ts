@@ -1,6 +1,6 @@
-import { Type } from '@sinclair/typebox';
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
 export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
@@ -15,11 +15,13 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
       parameters: Type.Object({
         collectionName: Type.String({ description: 'Name for the variable collection' }),
         modes: Type.Array(Type.String(), { description: 'Mode names (e.g. ["Light", "Dark"])' }),
-        variables: Type.Array(Type.Object({
-          name: Type.String({ description: 'Variable name (e.g. "colors/primary")' }),
-          type: StringEnum(['COLOR', 'FLOAT', 'STRING'] as const),
-          values: Type.Record(Type.String(), Type.Any(), { description: 'Mode name → value mapping' }),
-        })),
+        variables: Type.Array(
+          Type.Object({
+            name: Type.String({ description: 'Variable name (e.g. "colors/primary")' }),
+            type: StringEnum(['COLOR', 'FLOAT', 'STRING'] as const),
+            values: Type.Record(Type.String(), Type.Any(), { description: 'Mode name → value mapping' }),
+          }),
+        ),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
@@ -61,7 +63,8 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_lint',
       label: 'Lint Design',
-      description: 'Run design linting rules on a node or the entire page. Checks naming conventions, spacing consistency, and other design quality rules.',
+      description:
+        'Run design linting rules on a node or the entire page. Checks naming conventions, spacing consistency, and other design quality rules.',
       promptSnippet: 'figma_lint: check design quality (naming, spacing, consistency)',
       parameters: Type.Object({
         nodeId: Type.Optional(Type.String({ description: 'Node ID to lint. If omitted, lints entire page.' })),

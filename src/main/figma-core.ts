@@ -1,6 +1,6 @@
-import { FigmaWebSocketServer } from '../figma/websocket-server.js';
-import { WebSocketConnector } from '../figma/websocket-connector.js';
 import { FigmaAPI } from '../figma/figma-api.js';
+import { WebSocketConnector } from '../figma/websocket-connector.js';
+import { FigmaWebSocketServer } from '../figma/websocket-server.js';
 
 export interface FigmaCore {
   wsServer: FigmaWebSocketServer;
@@ -17,9 +17,17 @@ export async function createFigmaCore(config: { port: number; figmaToken?: strin
   const figmaAPI = new FigmaAPI(config.figmaToken);
 
   return {
-    wsServer, connector, figmaAPI,
-    async start() { await wsServer.start(); },
-    async stop() { await wsServer.stop(); },
-    isConnected() { return wsServer.isClientConnected(); }
+    wsServer,
+    connector,
+    figmaAPI,
+    async start() {
+      await wsServer.start();
+    },
+    async stop() {
+      await wsServer.stop();
+    },
+    isConnected() {
+      return wsServer.isClientConnected();
+    },
   };
 }

@@ -7,9 +7,15 @@
     "build": "node scripts/build.mjs",
     "start": "npm run build && npx electron dist/main.js",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check src/ tests/",
+    "lint:fix": "biome check --write src/ tests/",
+    "check": "npm run typecheck && npm run lint && npm run test",
     "package": "npm run build && npx electron-builder --mac"
   },
   "dependencies": {
+    "@google/genai": "^1.46.0",
     "@iconify/core": "^2.0.0",
     "@iconify/utils": "^2.0.0",
     "@mariozechner/pi-ai": "^0.61.0",
@@ -21,12 +27,14 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
     "@playwright/test": "^1.58.2",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.0",
     "electron": "^33.0.0",
     "electron-builder": "^26.0.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vitest": "^4.1.0"
   },
   "build": {
     "appId": "com.figma-cowork",

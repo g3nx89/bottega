@@ -1,5 +1,5 @@
-import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
 export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
@@ -9,11 +9,14 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_set_fills',
       label: 'Set Fills',
-      description: 'Set the fill colors of a node. Accepts hex colors. SOLID fills only — gradients and image fills require figma_execute.',
+      description:
+        'Set the fill colors of a node. Accepts hex colors. SOLID fills only — gradients and image fills require figma_execute.',
       promptSnippet: 'figma_set_fills: set solid fill colors on a node (SOLID only — gradients need figma_execute)',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
-        fills: Type.Array(Type.Any(), { description: 'Array of fill paints. Simple: [{ type: "SOLID", color: "#FF0000" }]' }),
+        fills: Type.Array(Type.Any(), {
+          description: 'Array of fill paints. Simple: [{ type: "SOLID", color: "#FF0000" }]',
+        }),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
@@ -25,7 +28,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_set_strokes',
       label: 'Set Strokes',
-      description: 'Set the stroke colors and weight of a node. SOLID strokes only — gradient strokes require figma_execute.',
+      description:
+        'Set the stroke colors and weight of a node. SOLID strokes only — gradient strokes require figma_execute.',
       promptSnippet: 'figma_set_strokes: set solid stroke colors and weight (SOLID only)',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
@@ -71,9 +75,11 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
         nodeIds: Type.Array(Type.String(), { description: 'Node IDs to apply image fill to' }),
         imageUrl: Type.Optional(Type.String({ description: 'Image URL to fetch and apply' })),
         base64: Type.Optional(Type.String({ description: 'Base64-encoded image data' })),
-        scaleMode: Type.Optional(Type.Union([
-          Type.Literal('FILL'), Type.Literal('FIT'), Type.Literal('CROP'), Type.Literal('TILE'),
-        ], { default: 'FILL' })),
+        scaleMode: Type.Optional(
+          Type.Union([Type.Literal('FILL'), Type.Literal('FIT'), Type.Literal('CROP'), Type.Literal('TILE')], {
+            default: 'FILL',
+          }),
+        ),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
@@ -86,7 +92,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_resize',
       label: 'Resize Node',
-      description: 'Resize a node to specific dimensions. Note: width/height are read-only in the Plugin API — this tool uses resize() internally.',
+      description:
+        'Resize a node to specific dimensions. Note: width/height are read-only in the Plugin API — this tool uses resize() internally.',
       promptSnippet: 'figma_resize: change a node width and height',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
@@ -103,7 +110,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_move',
       label: 'Move Node',
-      description: 'Move a node to a specific x/y position. For reparenting (moving into a different parent), use figma_execute with appendChild().',
+      description:
+        'Move a node to a specific x/y position. For reparenting (moving into a different parent), use figma_execute with appendChild().',
       promptSnippet: 'figma_move: reposition a node (position only — reparenting needs figma_execute)',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
@@ -125,7 +133,9 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       parameters: Type.Object({
         parentId: Type.String({ description: 'Parent node ID' }),
         type: Type.String({ description: 'Node type: FRAME, RECTANGLE, ELLIPSE, TEXT, LINE' }),
-        props: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: 'Initial properties (width, height, fills, etc.)' })),
+        props: Type.Optional(
+          Type.Record(Type.String(), Type.Any(), { description: 'Initial properties (width, height, fills, etc.)' }),
+        ),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
@@ -137,7 +147,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_clone',
       label: 'Clone Node',
-      description: 'Create a duplicate of a node. Preserves all visual properties including image fills — prefer over building from scratch.',
+      description:
+        'Create a duplicate of a node. Preserves all visual properties including image fills — prefer over building from scratch.',
       promptSnippet: 'figma_clone: duplicate a node (preserves image fills and all visual properties)',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID to clone' }),
@@ -167,7 +178,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_rename',
       label: 'Rename Node',
-      description: 'Rename a node in the Figma layers panel. Use semantic names with slash convention (e.g. "Card/Body").',
+      description:
+        'Rename a node in the Figma layers panel. Use semantic names with slash convention (e.g. "Card/Body").',
       promptSnippet: 'figma_rename: rename a layer (use semantic slash naming like "Card/Body")',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),

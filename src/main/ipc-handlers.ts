@@ -1,7 +1,18 @@
-import { ipcMain, shell, type BrowserWindow } from 'electron';
-import { createFigmaAgent, AVAILABLE_MODELS, CONTEXT_SIZES, DEFAULT_MODEL, OAUTH_PROVIDER_MAP, OAUTH_PROVIDER_INFO, type AgentInfra, type ModelConfig } from './agent.js';
-import { PromptSuggester } from './prompt-suggester.js';
+import { type BrowserWindow, ipcMain, shell } from 'electron';
 import { createChildLogger } from '../figma/logger.js';
+import {
+  type AgentInfra,
+  AVAILABLE_MODELS,
+  CONTEXT_SIZES,
+  createFigmaAgent,
+  DEFAULT_MODEL,
+  type ModelConfig,
+  OAUTH_PROVIDER_INFO,
+  OAUTH_PROVIDER_MAP,
+} from './agent.js';
+import { type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
+import { DEFAULT_IMAGE_MODEL, IMAGE_GEN_MODELS, ImageGenerator } from './image-gen/image-generator.js';
+import { PromptSuggester } from './prompt-suggester.js';
 
 const log = createChildLogger({ component: 'ipc' });
 
@@ -11,10 +22,16 @@ export interface AgentSessionLike {
   subscribe(callback: (event: any) => void): void;
 }
 
+export interface ImageGenState {
+  generator: ImageGenerator | null;
+  settings: ImageGenSettings;
+}
+
 export function setupIpcHandlers(
   initialSession: AgentSessionLike,
   mainWindow: BrowserWindow,
   infra: AgentInfra,
+  imageGenState?: ImageGenState,
 ) {
   let session = initialSession;
   let isStreaming = false;
@@ -48,12 +65,15 @@ export function setupIpcHandlers(
                 ...(c.type === 'image' ? { hasData: !!c.data, dataLen: c.data?.length } : {}),
               }))
             : 'no content';
-          log.info({
-            tool: event.toolName,
-            callId: event.toolCallId,
-            isError: event.isError,
-            resultContent: resultPreview,
-          }, 'Tool end');
+          log.info(
+            {
+              tool: event.toolName,
+              callId: event.toolCallId,
+              isError: event.isError,
+              resultContent: resultPreview,
+            },
+            'Tool end',
+          );
           wc.send('agent:tool-end', event.toolName, event.toolCallId, !event.isError, event.result);
           if (event.toolName === 'figma_screenshot' && !event.isError && event.result?.content) {
             const imageContent = event.result.content.find((c: any) => c.type === 'image');
@@ -78,15 +98,18 @@ export function setupIpcHandlers(
           isStreaming = false;
           wc.send('agent:end');
           // Generate suggestions asynchronously — don't block the UI
-          suggester.suggest(currentModelConfig).then(suggestions => {
-            if (suggestions.length > 0) {
-              wc.send('agent:suggestions', suggestions);
-            }
-            suggester.resetAssistantText();
-          }).catch(err => {
-            log.warn({ err }, 'Failed to generate suggestions');
-            suggester.resetAssistantText();
-          });
+          suggester
+            .suggest(currentModelConfig)
+            .then((suggestions) => {
+              if (suggestions.length > 0) {
+                wc.send('agent:suggestions', suggestions);
+              }
+              suggester.resetAssistantText();
+            })
+            .catch((err) => {
+              log.warn({ err }, 'Failed to generate suggestions');
+              suggester.resetAssistantText();
+            });
           break;
         case 'auto_compaction_start':
           wc.send('agent:compaction', true);
@@ -113,7 +136,10 @@ export function setupIpcHandlers(
     // Without this, the SDK may hang indefinitely on an unauthenticated API call.
     const apiKey = await infra.authStorage.getApiKey(currentModelConfig.provider);
     if (!apiKey) {
-      mainWindow.webContents.send('agent:text-delta', 'No credentials configured for this model. Open Settings to log in or add an API key.');
+      mainWindow.webContents.send(
+        'agent:text-delta',
+        'No credentials configured for this model. Open Settings to log in or add an API key.',
+      );
       mainWindow.webContents.send('agent:end');
       return;
     }
@@ -130,7 +156,10 @@ export function setupIpcHandlers(
     } catch (err: any) {
       log.error({ err }, 'Prompt failed');
       isStreaming = false;
-      mainWindow.webContents.send('agent:text-delta', `\n\nError: ${err.message || 'Request failed. Check your credentials in Settings.'}`);
+      mainWindow.webContents.send(
+        'agent:text-delta',
+        `\n\nError: ${err.message || 'Request failed. Check your credentials in Settings.'}`,
+      );
       mainWindow.webContents.send('agent:end');
     }
   });
@@ -165,10 +194,7 @@ export function setupIpcHandlers(
     return CONTEXT_SIZES;
   });
 
-  const VALID_PROVIDERS = new Set([
-    ...Object.keys(OAUTH_PROVIDER_MAP),
-    ...Object.values(OAUTH_PROVIDER_MAP),
-  ]);
+  const VALID_PROVIDERS = new Set([...Object.keys(OAUTH_PROVIDER_MAP), ...Object.values(OAUTH_PROVIDER_MAP)]);
 
   ipcMain.handle('auth:set-key', (_event, provider: string, apiKey: string) => {
     if (!VALID_PROVIDERS.has(provider)) return false;
@@ -324,5 +350,43 @@ export function setupIpcHandlers(
       log.error({ err }, 'Failed to switch model');
       return { success: false, error: err.message };
     }
+  });
+
+  // ── Image Generation settings ────────────
+
+  ipcMain.handle('imagegen:get-config', () => {
+    return {
+      hasApiKey: !!imageGenState?.settings.apiKey,
+      model: imageGenState?.settings.model || DEFAULT_IMAGE_MODEL,
+      models: IMAGE_GEN_MODELS,
+    };
+  });
+
+  ipcMain.handle('imagegen:set-config', async (_event, config: { apiKey?: string; model?: string }) => {
+    if (!imageGenState) return { success: false, error: 'Image generation not initialized' };
+
+    if (config.apiKey !== undefined) {
+      imageGenState.settings.apiKey = config.apiKey || undefined;
+    }
+    if (config.model) {
+      imageGenState.settings.model = config.model;
+    }
+
+    // Persist to disk
+    await saveImageGenSettings(imageGenState.settings);
+
+    // Recreate generator with updated config
+    if (imageGenState.settings.apiKey) {
+      imageGenState.generator = new ImageGenerator({
+        apiKey: imageGenState.settings.apiKey,
+        model: imageGenState.settings.model,
+      });
+      log.info({ model: imageGenState.generator.model }, 'Image generator updated');
+    } else {
+      imageGenState.generator = null;
+      log.info('Image generator disabled (no API key)');
+    }
+
+    return { success: true, hasApiKey: !!imageGenState.settings.apiKey };
   });
 }

@@ -32,7 +32,10 @@
 
     <div id="suggestions" class="suggestions hidden"></div>
 
+    <div id="slash-help" class="slash-help hidden"></div>
+
     <footer id="input-area">
+      <div id="slash-menu" class="slash-menu hidden"></div>
       <div id="context-bar" class="context-bar">
         <div class="context-fill" id="context-fill"></div>
         <span class="context-label" id="context-label">0%</span>
@@ -41,7 +44,7 @@
         <div id="paste-preview" class="paste-preview hidden"></div>
         <textarea
           id="input-field"
-          placeholder="Describe what you want to design…"
+          placeholder="Type / for image commands, or describe what you want…"
           rows="1"
           autocomplete="off"
           spellcheck="true"
@@ -95,6 +98,18 @@
           <div class="setting-group">
             <label class="setting-label">Model</label>
             <select id="model-select" class="setting-select"></select>
+          </div>
+          <div class="setting-divider"></div>
+          <div class="setting-group">
+            <label class="setting-label">Image Generation</label>
+            <span class="setting-hint">Powered by Google Nano Banana. Requires a <a href="https://aistudio.google.com/apikey" class="setting-link-inline" target="_blank">Gemini API key</a>.</span>
+            <div class="key-input-row">
+              <input type="password" id="imagegen-key-input" class="setting-input" placeholder="AIza..." autocomplete="off">
+              <button id="imagegen-save-key-btn" class="setting-btn-sm">Save</button>
+            </div>
+            <span id="imagegen-key-status" class="key-status"></span>
+            <label class="setting-sublabel" for="imagegen-model-select">Model</label>
+            <select id="imagegen-model-select" class="setting-select"></select>
           </div>
           <div class="setting-divider"></div>
           <div class="setting-group">

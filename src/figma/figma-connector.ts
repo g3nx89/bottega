@@ -19,12 +19,7 @@ export interface IFigmaConnector {
 
   // Variable operations
   updateVariable(variableId: string, modeId: string, value: any): Promise<any>;
-  createVariable(
-    name: string,
-    collectionId: string,
-    resolvedType: string,
-    options?: any
-  ): Promise<any>;
+  createVariable(name: string, collectionId: string, resolvedType: string, options?: any): Promise<any>;
   deleteVariable(variableId: string): Promise<any>;
   refreshVariables(): Promise<any>;
   renameVariable(variableId: string, newName: string): Promise<any>;
@@ -42,7 +37,13 @@ export interface IFigmaConnector {
   getComponentFromPluginUI(nodeId: string): Promise<any>;
   getLocalComponents(): Promise<any>;
   setNodeDescription(nodeId: string, description: string, descriptionMarkdown?: string): Promise<any>;
-  addComponentProperty(nodeId: string, propertyName: string, type: string, defaultValue: any, options?: any): Promise<any>;
+  addComponentProperty(
+    nodeId: string,
+    propertyName: string,
+    type: string,
+    defaultValue: any,
+    options?: any,
+  ): Promise<any>;
   editComponentProperty(nodeId: string, propertyName: string, newValue: any): Promise<any>;
   deleteComponentProperty(nodeId: string, propertyName: string): Promise<any>;
   instantiateComponent(componentKey: string, options?: any): Promise<any>;
@@ -74,7 +75,15 @@ export interface IFigmaConnector {
   clearFrameCache(): void;
 
   // figma-use JSX support
-  createFromJsx(tree: TreeNode, opts?: { x?: number; y?: number; parentId?: string }): Promise<{ nodeId: string; childIds: string[] }>;
-  createIcon(svg: string, size: number, color: string, opts?: { x?: number; y?: number; parentId?: string }): Promise<{ nodeId: string }>;
+  createFromJsx(
+    tree: TreeNode,
+    opts?: { x?: number; y?: number; parentId?: string },
+  ): Promise<{ nodeId: string; childIds: string[] }>;
+  createIcon(
+    svg: string,
+    size: number,
+    color: string,
+    opts?: { x?: number; y?: number; parentId?: string },
+  ): Promise<{ nodeId: string }>;
   bindVariable(nodeId: string, variableName: string, property: 'fill' | 'stroke'): Promise<void>;
 }

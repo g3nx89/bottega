@@ -18,10 +18,7 @@ const MAX_RECENT_PROMPTS = 5;
 const MAX_SUGGESTION_CHARS = 300;
 
 /** Build the suggestion prompt — adapted from pi-prompt-suggester's template */
-function buildSuggestionPrompt(
-  assistantText: string,
-  recentUserPrompts: string[],
-): string {
+function buildSuggestionPrompt(assistantText: string, recentUserPrompts: string[]): string {
   const prompts = recentUserPrompts.slice(0, MAX_RECENT_PROMPTS);
   return `You suggest likely follow-up prompts in a Figma design pair-programming session.
 The user describes design changes in natural language, and an AI agent operates on Figma.
@@ -31,7 +28,7 @@ Each suggestion should be a plausible next user message.
 If no plausible suggestions exist, return exactly ${NO_SUGGESTION_TOKEN}.
 
 RecentUserMessages:
-${prompts.length > 0 ? prompts.map(p => `- ${p}`).join('\n') : '(none)'}
+${prompts.length > 0 ? prompts.map((p) => `- ${p}`).join('\n') : '(none)'}
 
 LatestAssistantMessage:
 \`\`\`
@@ -51,8 +48,13 @@ function parseSuggestions(raw: string): string[] {
   if (raw.includes(NO_SUGGESTION_TOKEN)) return [];
   return raw
     .split('\n')
-    .map(line => line.replace(/^[\d.\-*•]+\s*/, '').replace(/^["']|["']$/g, '').trim())
-    .filter(line => line.length > 0 && line.length <= MAX_SUGGESTION_CHARS)
+    .map((line) =>
+      line
+        .replace(/^[\d.\-*•]+\s*/, '')
+        .replace(/^["']|["']$/g, '')
+        .trim(),
+    )
+    .filter((line) => line.length > 0 && line.length <= MAX_SUGGESTION_CHARS)
     .slice(0, 3);
 }
 
@@ -106,13 +108,17 @@ export class PromptSuggester {
       }
 
       const prompt = buildSuggestionPrompt(this.lastAssistantText, this.recentUserPrompts);
-      const response = await completeSimple(model, {
-        systemPrompt: 'You suggest follow-up prompts. Return only the suggestions, nothing else.',
-        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }], timestamp: Date.now() }],
-      }, {
-        apiKey,
-        reasoning: 'off',
-      } as any);
+      const response = await completeSimple(
+        model,
+        {
+          systemPrompt: 'You suggest follow-up prompts. Return only the suggestions, nothing else.',
+          messages: [{ role: 'user', content: [{ type: 'text', text: prompt }], timestamp: Date.now() }],
+        },
+        {
+          apiKey,
+          reasoning: 'off',
+        } as any,
+      );
 
       const text = response.content
         .filter((c: any) => c.type === 'text')

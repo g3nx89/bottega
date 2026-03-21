@@ -9,9 +9,9 @@
  */
 
 import type { IFigmaConnector } from './figma-connector.js';
-import type { FigmaWebSocketServer } from './websocket-server.js';
-import type { TreeNode } from './types.js';
 import { createChildLogger } from './logger.js';
+import type { TreeNode } from './types.js';
+import type { FigmaWebSocketServer } from './websocket-server.js';
 
 const logger = createChildLogger({ component: 'websocket-connector' });
 
@@ -24,9 +24,7 @@ export class WebSocketConnector implements IFigmaConnector {
 
   async initialize(): Promise<void> {
     if (!this.wsServer.isClientConnected()) {
-      throw new Error(
-        'No WebSocket client connected. Make sure the Desktop Bridge plugin is open in Figma.'
-      );
+      throw new Error('No WebSocket client connected. Make sure the Desktop Bridge plugin is open in Figma.');
     }
     logger.info('WebSocket connector initialized');
   }
@@ -83,12 +81,7 @@ export class WebSocketConnector implements IFigmaConnector {
     return this.wsServer.sendCommand('UPDATE_VARIABLE', { variableId, modeId, value });
   }
 
-  async createVariable(
-    name: string,
-    collectionId: string,
-    resolvedType: string,
-    options?: any
-  ): Promise<any> {
+  async createVariable(name: string, collectionId: string, resolvedType: string, options?: any): Promise<any> {
     const params: any = { name, collectionId, resolvedType };
     if (options) {
       if (options.valuesByMode) params.valuesByMode = options.valuesByMode;
@@ -168,7 +161,7 @@ export class WebSocketConnector implements IFigmaConnector {
     propertyName: string,
     type: string,
     defaultValue: any,
-    options?: any
+    options?: any,
   ): Promise<any> {
     const params: any = { nodeId, propertyName, propertyType: type, defaultValue };
     if (options?.preferredValues) params.preferredValues = options.preferredValues;
@@ -300,11 +293,19 @@ export class WebSocketConnector implements IFigmaConnector {
   // figma-use JSX support
   // ============================================================================
 
-  async createFromJsx(tree: TreeNode, opts?: { x?: number; y?: number; parentId?: string }): Promise<{ nodeId: string; childIds: string[] }> {
+  async createFromJsx(
+    tree: TreeNode,
+    opts?: { x?: number; y?: number; parentId?: string },
+  ): Promise<{ nodeId: string; childIds: string[] }> {
     return this.wsServer.sendCommand('CREATE_FROM_JSX', { tree, ...opts }, 60000);
   }
 
-  async createIcon(svg: string, size: number, color: string, opts?: { x?: number; y?: number; parentId?: string }): Promise<{ nodeId: string }> {
+  async createIcon(
+    svg: string,
+    size: number,
+    color: string,
+    opts?: { x?: number; y?: number; parentId?: string },
+  ): Promise<{ nodeId: string }> {
     return this.wsServer.sendCommand('CREATE_ICON', { svg, size, color, ...opts }, 30000);
   }
 

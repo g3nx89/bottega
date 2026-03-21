@@ -1,10 +1,12 @@
 import { app, BrowserWindow, crashReporter } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createFigmaCore } from './figma-core.js';
-import { createAgentInfra, createFigmaAgent } from './agent.js';
-import { setupIpcHandlers } from './ipc-handlers.js';
 import { createChildLogger, logFilePath } from '../figma/logger.js';
+import { createAgentInfra, createFigmaAgent } from './agent.js';
+import { createFigmaCore } from './figma-core.js';
+import { loadImageGenSettings } from './image-gen/config.js';
+import { ImageGenerator } from './image-gen/image-generator.js';
+import { setupIpcHandlers } from './ipc-handlers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const log = createChildLogger({ component: 'main' });
@@ -41,8 +43,12 @@ async function cleanup(exitCode = 0): Promise<void> {
   process.exit(exitCode);
 }
 
-process.on('SIGINT', () => { app.quit(); });
-process.on('SIGTERM', () => { app.quit(); });
+process.on('SIGINT', () => {
+  app.quit();
+});
+process.on('SIGTERM', () => {
+  app.quit();
+});
 
 // ── App startup ──────────────────────────────
 
@@ -54,12 +60,26 @@ app.whenReady().then(async () => {
   await figmaCore.start();
   log.info({ port: 9223 }, 'Figma WebSocket server started');
 
-  // 2. Create agent infrastructure (shared across session recreations)
-  const infra = await createAgentInfra(figmaCore);
+  // 2. Image generation state (shared between tools and IPC handlers)
+  const imageGenSettings = loadImageGenSettings();
+  const imageGenState = {
+    generator: imageGenSettings.apiKey
+      ? new ImageGenerator({ apiKey: imageGenSettings.apiKey, model: imageGenSettings.model })
+      : null,
+    settings: imageGenSettings,
+  };
+  if (imageGenState.generator) {
+    log.info({ model: imageGenState.generator.model }, 'Image generator initialized');
+  }
+
+  // 3. Create agent infrastructure (shared across session recreations)
+  const infra = await createAgentInfra(figmaCore, {
+    getImageGenerator: () => imageGenState.generator,
+  });
   const { session } = await createFigmaAgent(infra);
   log.info('Figma agent session created');
 
-  // 3. Create window
+  // 4. Create window
   mainWindow = new BrowserWindow({
     width: 480,
     height: 720,
@@ -88,10 +108,10 @@ app.whenReady().then(async () => {
     log.info('Renderer became responsive again');
   });
 
-  // 4. Setup IPC between agent and renderer
-  setupIpcHandlers(session as any, mainWindow, infra);
+  // 5. Setup IPC between agent and renderer
+  setupIpcHandlers(session as any, mainWindow, infra, imageGenState);
 
-  // 5. Forward Figma connection events to the UI
+  // 6. Forward Figma connection events to the UI
   figmaCore.wsServer.on('fileConnected', (info: { fileKey: string; fileName: string }) => {
     log.info({ fileName: info.fileName, fileKey: info.fileKey }, 'Figma file connected');
     mainWindow?.webContents.send('figma:connected', info.fileName);
@@ -102,5 +122,7 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('before-quit', () => { cleanup(0); });
+app.on('before-quit', () => {
+  cleanup(0);
+});
 app.on('window-all-closed', () => app.quit());

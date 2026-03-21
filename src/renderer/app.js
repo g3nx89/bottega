@@ -10,20 +10,35 @@ const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const pinBtn = document.getElementById('pin-btn');
 
+// Utilities
+function clearChildren(el) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+}
+
+function autoResizeInput() {
+  inputField.style.height = 'auto';
+  inputField.style.height = Math.min(inputField.scrollHeight, 120) + 'px';
+}
+
 // Send message
 function sendMessage() {
   const text = inputField.value.trim();
   if (!text || isStreaming) return;
 
-  // Hide prompt suggestions when sending
+  // Hide prompt suggestions and slash UI when sending
   hideSuggestions();
+  hideSlashMenu();
+  hideSlashHelp();
 
   // Add user bubble (with pasted images if any)
-  addUserMessage(text, pastedImages.map((p) => p.dataUrl));
+  addUserMessage(
+    text,
+    pastedImages.map((p) => p.dataUrl),
+  );
   pastedImages = [];
   renderPastePreview();
   inputField.value = '';
-  inputField.style.height = 'auto';
+  autoResizeInput();
 
   // Start assistant bubble
   currentAssistantBubble = createAssistantBubble();
@@ -172,16 +187,64 @@ function updateInputState() {
 sendBtn.addEventListener('click', sendMessage);
 
 inputField.addEventListener('keydown', (e) => {
+  // Slash menu keyboard navigation
+  if (slashMenuOpen) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      slashSelectedIdx = Math.min(slashSelectedIdx + 1, slashFiltered.length - 1);
+      updateSlashSelection();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      slashSelectedIdx = Math.max(slashSelectedIdx - 1, 0);
+      updateSlashSelection();
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      if (slashFiltered[slashSelectedIdx]) selectSlashCommand(slashFiltered[slashSelectedIdx]);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      hideSlashMenu();
+      return;
+    }
+  }
+
+  // Close help panel on Escape
+  if (e.key === 'Escape' && !slashHelpEl.classList.contains('hidden')) {
+    hideSlashHelp();
+    return;
+  }
+
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     sendMessage();
   }
 });
 
-// Auto-resize textarea
+// Consolidated input handler: auto-resize, suggestions, slash commands
 inputField.addEventListener('input', () => {
-  inputField.style.height = 'auto';
-  inputField.style.height = Math.min(inputField.scrollHeight, 120) + 'px';
+  autoResizeInput();
+
+  // Hide prompt suggestions on any typing
+  if (suggestionsContainer.children.length > 0) {
+    hideSuggestions();
+  }
+
+  // Slash command detection
+  const text = inputField.value;
+  if (text.startsWith('/') && !text.includes(' ')) {
+    showSlashMenu(text.slice(1));
+  } else {
+    hideSlashMenu();
+    // Auto-dismiss help panel when user clears/changes away from template
+    if (!slashHelpEl.classList.contains('hidden')) {
+      hideSlashHelp();
+    }
+  }
 });
 
 // ── API event handlers ───────────────────
@@ -262,7 +325,8 @@ function updateContextBar(inputTokens) {
   contextFill.className = 'context-fill' + (pct > 90 ? ' critical' : pct > 70 ? ' warn' : '');
 
   // Format: "125K / 1M" or "12K / 200K"
-  const fmt = (n) => n >= 1_000_000 ? (n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1) + 'M' : Math.round(n / 1000) + 'K';
+  const fmt = (n) =>
+    n >= 1_000_000 ? (n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1) + 'M' : Math.round(n / 1000) + 'K';
   contextLabel.textContent = fmt(inputTokens) + ' / ' + fmt(maxTokens);
 }
 
@@ -278,11 +342,19 @@ window.api.onUsage((usage) => {
 
 // SDK lifecycle: compaction / retry indicators
 window.api.onCompaction((active) => {
-  statusText.textContent = active ? 'Compacting…' : (statusDot.classList.contains('connected') ? 'Connected' : 'Disconnected');
+  statusText.textContent = active
+    ? 'Compacting…'
+    : statusDot.classList.contains('connected')
+      ? 'Connected'
+      : 'Disconnected';
 });
 
 window.api.onRetry((active) => {
-  statusText.textContent = active ? 'Retrying…' : (statusDot.classList.contains('connected') ? 'Connected' : 'Disconnected');
+  statusText.textContent = active
+    ? 'Retrying…'
+    : statusDot.classList.contains('connected')
+      ? 'Connected'
+      : 'Disconnected';
 });
 
 window.api.onFigmaConnected((fileKey) => {
@@ -355,7 +427,7 @@ const PROVIDER_META = {
 
 async function renderAccountCards() {
   const status = await window.api.getAuthStatus();
-  while (accountsList.firstChild) accountsList.removeChild(accountsList.firstChild);
+  clearChildren(accountsList);
 
   for (const [provider, info] of Object.entries(PROVIDER_META)) {
     const card = document.createElement('div');
@@ -458,7 +530,7 @@ async function startLogin(displayGroup) {
 }
 
 function setLoginAreaContent(area, message, promptOpts, showCancel) {
-  while (area.firstChild) area.removeChild(area.firstChild);
+  clearChildren(area);
 
   const msgEl = document.createElement('span');
   msgEl.className = 'login-message';
@@ -509,18 +581,18 @@ window.api.onLoginEvent((event) => {
 
   switch (event.type) {
     case 'auth':
-      setLoginAreaContent(
-        loginArea,
-        event.instructions || 'Waiting for browser authentication…',
-        null,
-        true,
-      );
+      setLoginAreaContent(loginArea, event.instructions || 'Waiting for browser authentication…', null, true);
       break;
     case 'prompt':
-      setLoginAreaContent(loginArea, event.message, {
-        placeholder: event.placeholder,
-        allowEmpty: event.allowEmpty,
-      }, true);
+      setLoginAreaContent(
+        loginArea,
+        event.message,
+        {
+          placeholder: event.placeholder,
+          allowEmpty: event.allowEmpty,
+        },
+        true,
+      );
       break;
     case 'progress':
       setLoginAreaContent(loginArea, event.message, null, true);
@@ -532,9 +604,7 @@ window.api.onLoginEvent((event) => {
 
 toggleApikeyBtn.addEventListener('click', () => {
   apikeySection.classList.toggle('hidden');
-  toggleApikeyBtn.textContent = apikeySection.classList.contains('hidden')
-    ? 'Use API key instead'
-    : 'Hide API key';
+  toggleApikeyBtn.textContent = apikeySection.classList.contains('hidden') ? 'Use API key instead' : 'Hide API key';
 });
 
 apikeyProviderSelect.addEventListener('change', () => {
@@ -574,7 +644,7 @@ saveKeyBtn.addEventListener('click', async () => {
 // ── Model selector ───────────────────────
 
 function populateModelSelect() {
-  while (modelSelect.firstChild) modelSelect.removeChild(modelSelect.firstChild);
+  clearChildren(modelSelect);
   for (const [displayGroup, models] of Object.entries(availableModels)) {
     if (models.length === 0) continue;
     const group = document.createElement('optgroup');
@@ -629,6 +699,59 @@ async function initAuthUI() {
 }
 
 initAuthUI();
+
+// ── Image Generation settings ─────────────
+
+const imagegenKeyInput = document.getElementById('imagegen-key-input');
+const imagegenSaveKeyBtn = document.getElementById('imagegen-save-key-btn');
+const imagegenKeyStatus = document.getElementById('imagegen-key-status');
+const imagegenModelSelect = document.getElementById('imagegen-model-select');
+
+async function initImageGenUI() {
+  const config = await window.api.getImageGenConfig();
+
+  // Populate model dropdown
+  clearChildren(imagegenModelSelect);
+  config.models.forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.label;
+    imagegenModelSelect.appendChild(opt);
+  });
+  imagegenModelSelect.value = config.model;
+
+  // Show status
+  if (config.hasApiKey) {
+    imagegenKeyStatus.textContent = 'API key configured';
+    imagegenKeyStatus.className = 'key-status success';
+    imagegenKeyInput.placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+  }
+}
+
+imagegenSaveKeyBtn.addEventListener('click', async () => {
+  const key = imagegenKeyInput.value.trim();
+  if (!key) return;
+
+  imagegenSaveKeyBtn.disabled = true;
+  const result = await window.api.setImageGenConfig({ apiKey: key });
+  imagegenSaveKeyBtn.disabled = false;
+  imagegenKeyInput.value = '';
+
+  if (result.hasApiKey) {
+    imagegenKeyStatus.textContent = 'Gemini API key saved';
+    imagegenKeyStatus.className = 'key-status success';
+    imagegenKeyInput.placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+  } else {
+    imagegenKeyStatus.textContent = 'Failed to save key';
+    imagegenKeyStatus.className = 'key-status error';
+  }
+});
+
+imagegenModelSelect.addEventListener('change', async () => {
+  await window.api.setImageGenConfig({ model: imagegenModelSelect.value });
+});
+
+initImageGenUI();
 
 // ── Transparency control ─────────────────
 
@@ -685,7 +808,11 @@ barEffortLabel.textContent = EFFORT_LEVELS.find((e) => e.id === currentEffort)?.
 function createDropdown(anchorBtn, items, onSelect) {
   // Close any existing dropdown
   const existing = anchorBtn.querySelector('.toolbar-dropdown');
-  if (existing) { existing.remove(); anchorBtn.classList.remove('open'); return; }
+  if (existing) {
+    existing.remove();
+    anchorBtn.classList.remove('open');
+    return;
+  }
   closeAllDropdowns();
 
   const menu = document.createElement('div');
@@ -736,12 +863,14 @@ barModelBtn.addEventListener('click', async (e) => {
   const currentModel = localStorage.getItem('figma-cowork:model') || 'claude-sonnet-4-6';
   const allModels = [];
   for (const [_group, list] of Object.entries(models)) {
-    list.forEach((m) => allModels.push({
-      id: m.id,
-      label: m.label,
-      sdkProvider: m.sdkProvider,
-      active: m.sdkProvider === currentProvider && m.id === currentModel,
-    }));
+    list.forEach((m) =>
+      allModels.push({
+        id: m.id,
+        label: m.label,
+        sdkProvider: m.sdkProvider,
+        active: m.sdkProvider === currentProvider && m.id === currentModel,
+      }),
+    );
   }
   createDropdown(barModelBtn, allModels, async (item) => {
     barModelLabel.textContent = item.label.replace(/ \(.*\)/, '');
@@ -803,7 +932,7 @@ inputField.addEventListener('paste', (e) => {
 });
 
 function renderPastePreview() {
-  while (pastePreview.firstChild) pastePreview.removeChild(pastePreview.firstChild);
+  clearChildren(pastePreview);
   if (pastedImages.length === 0) {
     pastePreview.classList.add('hidden');
     return;
@@ -834,7 +963,7 @@ const suggestionsContainer = document.getElementById('suggestions');
 
 function showSuggestions(suggestions) {
   // Clear old suggestions
-  while (suggestionsContainer.firstChild) suggestionsContainer.removeChild(suggestionsContainer.firstChild);
+  clearChildren(suggestionsContainer);
   if (!suggestions || suggestions.length === 0) {
     suggestionsContainer.classList.add('hidden');
     return;
@@ -845,8 +974,7 @@ function showSuggestions(suggestions) {
     chip.textContent = text;
     chip.addEventListener('click', () => {
       inputField.value = text;
-      inputField.style.height = 'auto';
-      inputField.style.height = Math.min(inputField.scrollHeight, 120) + 'px';
+      autoResizeInput();
       hideSuggestions();
       inputField.focus();
     });
@@ -858,19 +986,243 @@ function showSuggestions(suggestions) {
 
 function hideSuggestions() {
   suggestionsContainer.classList.add('hidden');
-  while (suggestionsContainer.firstChild) suggestionsContainer.removeChild(suggestionsContainer.firstChild);
+  clearChildren(suggestionsContainer);
 }
 
 window.api.onSuggestions((suggestions) => {
   showSuggestions(suggestions);
 });
 
-// Hide suggestions when user starts typing or sends
-inputField.addEventListener('input', () => {
-  if (suggestionsContainer.children.length > 0) {
-    hideSuggestions();
+
+// ── Slash commands ────────────────────────
+// Source of truth for tool parameters: src/main/tools/image-gen.ts
+
+const SLASH_COMMANDS = [
+  {
+    id: 'generate',
+    label: 'Generate Image',
+    desc: 'Create images from text descriptions with AI',
+    template: 'Generate an image of ',
+    help: 'Describe subject, style, mood, lighting, and composition in detail for best results.',
+    advanced: [
+      'Styles: photorealistic, watercolor, oil-painting, sketch, pixel-art, anime, vintage, modern, abstract, minimalist',
+      'Variations: lighting, angle, color-palette, composition, mood, season, time-of-day',
+      'Count: 1-8 for multiple variations',
+      'Auto-apply: mention the Figma node to use as fill target',
+      'Scale mode: FILL, FIT, CROP, TILE',
+    ],
+  },
+  {
+    id: 'edit',
+    label: 'Edit Image',
+    desc: 'Edit an existing image on a Figma node with AI',
+    template: 'Edit the image: ',
+    help: 'The target node must have an image fill. Describe changes clearly.',
+    advanced: [
+      'Examples: "remove the background", "change sky to sunset", "add snow on the mountains"',
+      'The edited image is automatically re-applied to the same node',
+      'Use figma_screenshot after to verify the result',
+    ],
+  },
+  {
+    id: 'restore',
+    label: 'Restore Image',
+    desc: 'Enhance, upscale, or fix image quality',
+    template: 'Restore the image: ',
+    help: 'Works on any node with an image fill or exportable content.',
+    advanced: [
+      'Goals: "enhance quality", "remove noise", "sharpen details", "fix compression artifacts"',
+      'Good for upscaling low-resolution images',
+      'Result is automatically re-applied to the same node',
+    ],
+  },
+  {
+    id: 'icon',
+    label: 'Generate Icon',
+    desc: 'Create app icons, favicons, and UI elements',
+    template: 'Create an icon of ',
+    help: 'Describe the icon subject clearly: "a mountain landscape", "a chat bubble".',
+    advanced: [
+      'Types: app-icon, favicon, ui-element',
+      'Styles: flat, skeuomorphic, minimal, modern',
+      'Background: transparent, white, black, or any color',
+      'Corners: rounded (default) or sharp',
+    ],
+  },
+  {
+    id: 'pattern',
+    label: 'Generate Pattern',
+    desc: 'Create seamless patterns and textures',
+    template: 'Create a seamless pattern of ',
+    help: 'Describe the pattern motif: "geometric triangles", "floral watercolor", "tech circuit board".',
+    advanced: [
+      'Types: seamless (tileable), texture, wallpaper',
+      'Styles: geometric, organic, abstract, floral, tech',
+      'Density: sparse, medium, dense',
+      'Colors: mono, duotone, colorful',
+      'Use TILE scale mode for seamless repeating fills',
+    ],
+  },
+  {
+    id: 'story',
+    label: 'Generate Story',
+    desc: 'Create a sequence of related images',
+    template: 'Create a visual story about ',
+    help: 'Describe the complete narrative or process. Each step is generated with sequential context.',
+    advanced: [
+      'Types: story (narrative), process (step-by-step), tutorial, timeline',
+      'Steps: 2-8 images in sequence',
+      'Style: consistent (same look) or evolving (changing)',
+      'Transitions: smooth, dramatic, fade',
+      'Creates auto-layout frames in Figma',
+    ],
+  },
+  {
+    id: 'diagram',
+    label: 'Generate Diagram',
+    desc: 'Create flowcharts, architecture diagrams, wireframes',
+    template: 'Create a diagram showing ',
+    help: 'Describe diagram content and relationships. List components and connections for accuracy.',
+    advanced: [
+      'Types: flowchart, architecture, network, database, wireframe, mindmap, sequence',
+      'Styles: professional, clean, hand-drawn, technical',
+      'Layout: horizontal, vertical, hierarchical, circular',
+      'Complexity: simple, detailed, comprehensive',
+      'Colors: mono, accent, categorical',
+    ],
+  },
+];
+
+const slashMenuEl = document.getElementById('slash-menu');
+const slashHelpEl = document.getElementById('slash-help');
+let slashMenuOpen = false;
+let slashSelectedIdx = 0;
+let slashFiltered = [];
+let slashLastFilter = null;
+
+function showSlashMenu(filter) {
+  if (filter === slashLastFilter) return;
+  slashLastFilter = filter;
+
+  const q = filter.toLowerCase();
+  slashFiltered = q
+    ? SLASH_COMMANDS.filter(
+        (c) => c.id.includes(q) || c.label.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q),
+      )
+    : [...SLASH_COMMANDS];
+
+  if (slashFiltered.length === 0) {
+    hideSlashMenu();
+    return;
   }
-});
+
+  slashSelectedIdx = 0;
+  renderSlashMenu();
+  slashMenuEl.classList.remove('hidden');
+  slashMenuOpen = true;
+}
+
+function renderSlashMenu() {
+  clearChildren(slashMenuEl);
+
+  slashFiltered.forEach((cmd, i) => {
+    const item = document.createElement('button');
+    item.className = 'slash-menu-item' + (i === slashSelectedIdx ? ' selected' : '');
+
+    const header = document.createElement('div');
+    header.className = 'slash-item-header';
+    const cmdName = document.createElement('span');
+    cmdName.className = 'slash-item-cmd';
+    cmdName.textContent = '/' + cmd.id;
+    const cmdLabel = document.createElement('span');
+    cmdLabel.className = 'slash-item-label';
+    cmdLabel.textContent = cmd.label;
+    header.appendChild(cmdName);
+    header.appendChild(cmdLabel);
+
+    const desc = document.createElement('span');
+    desc.className = 'slash-item-desc';
+    desc.textContent = cmd.desc;
+
+    item.appendChild(header);
+    item.appendChild(desc);
+
+    item.addEventListener('click', () => selectSlashCommand(cmd));
+    item.addEventListener('mouseenter', () => {
+      slashSelectedIdx = i;
+      updateSlashSelection();
+    });
+
+    slashMenuEl.appendChild(item);
+  });
+}
+
+function updateSlashSelection() {
+  const items = slashMenuEl.querySelectorAll('.slash-menu-item');
+  items.forEach((item, i) => item.classList.toggle('selected', i === slashSelectedIdx));
+  const selected = slashMenuEl.querySelector('.slash-menu-item.selected');
+  if (selected) selected.scrollIntoView({ block: 'nearest' });
+}
+
+function hideSlashMenu() {
+  slashMenuEl.classList.add('hidden');
+  slashMenuOpen = false;
+  slashFiltered = [];
+  slashLastFilter = null;
+}
+
+function selectSlashCommand(cmd) {
+  hideSlashMenu();
+  inputField.value = cmd.template;
+  autoResizeInput();
+  inputField.focus();
+  inputField.setSelectionRange(cmd.template.length, cmd.template.length);
+  showSlashHelp(cmd);
+}
+
+function showSlashHelp(cmd) {
+  clearChildren(slashHelpEl);
+
+  const header = document.createElement('div');
+  header.className = 'slash-help-header';
+  const title = document.createElement('span');
+  title.className = 'slash-help-title';
+  title.textContent = cmd.label;
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'slash-help-close';
+  closeBtn.textContent = '\u00d7';
+  closeBtn.addEventListener('click', hideSlashHelp);
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+  slashHelpEl.appendChild(header);
+
+  const usage = document.createElement('span');
+  usage.className = 'slash-help-usage';
+  usage.textContent = cmd.help;
+  slashHelpEl.appendChild(usage);
+
+  const section = document.createElement('span');
+  section.className = 'slash-help-section';
+  section.textContent = 'Advanced settings';
+  slashHelpEl.appendChild(section);
+
+  const tipsList = document.createElement('ul');
+  tipsList.className = 'slash-help-tips';
+  cmd.advanced.forEach((tip) => {
+    const li = document.createElement('li');
+    li.textContent = tip;
+    tipsList.appendChild(li);
+  });
+  slashHelpEl.appendChild(tipsList);
+
+  slashHelpEl.classList.remove('hidden');
+}
+
+function hideSlashHelp() {
+  slashHelpEl.classList.add('hidden');
+  clearChildren(slashHelpEl);
+}
+
 
 // Focus input on load
 inputField.focus();
