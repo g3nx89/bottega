@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { createChildLogger, logFilePath } from '../figma/logger.js';
 import { createAgentInfra, createFigmaAgent } from './agent.js';
 import { createFigmaCore } from './figma-core.js';
-import { loadImageGenSettings } from './image-gen/config.js';
+import { effectiveApiKey, loadImageGenSettings } from './image-gen/config.js';
 import { ImageGenerator } from './image-gen/image-generator.js';
 import { setupIpcHandlers } from './ipc-handlers.js';
 
@@ -62,15 +62,12 @@ app.whenReady().then(async () => {
 
   // 2. Image generation state (shared between tools and IPC handlers)
   const imageGenSettings = loadImageGenSettings();
+  const apiKey = effectiveApiKey(imageGenSettings);
   const imageGenState = {
-    generator: imageGenSettings.apiKey
-      ? new ImageGenerator({ apiKey: imageGenSettings.apiKey, model: imageGenSettings.model })
-      : null,
+    generator: new ImageGenerator({ apiKey, model: imageGenSettings.model }),
     settings: imageGenSettings,
   };
-  if (imageGenState.generator) {
-    log.info({ model: imageGenState.generator.model }, 'Image generator initialized');
-  }
+  log.info({ model: imageGenState.generator.model, isDefault: !imageGenSettings.apiKey }, 'Image generator initialized');
 
   // 3. Create agent infrastructure (shared across session recreations)
   const infra = await createAgentInfra(figmaCore, {

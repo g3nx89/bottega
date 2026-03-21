@@ -704,8 +704,23 @@ initAuthUI();
 
 const imagegenKeyInput = document.getElementById('imagegen-key-input');
 const imagegenSaveKeyBtn = document.getElementById('imagegen-save-key-btn');
+const imagegenResetKeyBtn = document.getElementById('imagegen-reset-key-btn');
 const imagegenKeyStatus = document.getElementById('imagegen-key-status');
 const imagegenModelSelect = document.getElementById('imagegen-model-select');
+
+function updateImageGenKeyUI(hasCustomKey) {
+  if (hasCustomKey) {
+    imagegenKeyStatus.textContent = 'Custom API key active';
+    imagegenKeyStatus.className = 'key-status success';
+    imagegenKeyInput.placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+    imagegenResetKeyBtn.classList.remove('hidden');
+  } else {
+    imagegenKeyStatus.textContent = 'Using default key';
+    imagegenKeyStatus.className = 'key-status success';
+    imagegenKeyInput.placeholder = 'AIza...';
+    imagegenResetKeyBtn.classList.add('hidden');
+  }
+}
 
 async function initImageGenUI() {
   const config = await window.api.getImageGenConfig();
@@ -720,12 +735,7 @@ async function initImageGenUI() {
   });
   imagegenModelSelect.value = config.model;
 
-  // Show status
-  if (config.hasApiKey) {
-    imagegenKeyStatus.textContent = 'API key configured';
-    imagegenKeyStatus.className = 'key-status success';
-    imagegenKeyInput.placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
-  }
+  updateImageGenKeyUI(config.hasCustomKey);
 }
 
 imagegenSaveKeyBtn.addEventListener('click', async () => {
@@ -737,14 +747,15 @@ imagegenSaveKeyBtn.addEventListener('click', async () => {
   imagegenSaveKeyBtn.disabled = false;
   imagegenKeyInput.value = '';
 
-  if (result.hasApiKey) {
-    imagegenKeyStatus.textContent = 'Gemini API key saved';
-    imagegenKeyStatus.className = 'key-status success';
-    imagegenKeyInput.placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
-  } else {
-    imagegenKeyStatus.textContent = 'Failed to save key';
-    imagegenKeyStatus.className = 'key-status error';
-  }
+  updateImageGenKeyUI(result.hasCustomKey);
+});
+
+imagegenResetKeyBtn.addEventListener('click', async () => {
+  imagegenResetKeyBtn.disabled = true;
+  await window.api.setImageGenConfig({ apiKey: '' });
+  imagegenResetKeyBtn.disabled = false;
+  imagegenKeyInput.value = '';
+  updateImageGenKeyUI(false);
 });
 
 imagegenModelSelect.addEventListener('change', async () => {

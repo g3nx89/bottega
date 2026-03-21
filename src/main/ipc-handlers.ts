@@ -10,7 +10,7 @@ import {
   OAUTH_PROVIDER_INFO,
   OAUTH_PROVIDER_MAP,
 } from './agent.js';
-import { type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
+import { type ImageGenSettings, effectiveApiKey, saveImageGenSettings } from './image-gen/config.js';
 import { DEFAULT_IMAGE_MODEL, IMAGE_GEN_MODELS, ImageGenerator } from './image-gen/image-generator.js';
 import { PromptSuggester } from './prompt-suggester.js';
 
@@ -356,7 +356,8 @@ export function setupIpcHandlers(
 
   ipcMain.handle('imagegen:get-config', () => {
     return {
-      hasApiKey: !!imageGenState?.settings.apiKey,
+      hasApiKey: true, // always true — default key is built-in
+      hasCustomKey: !!imageGenState?.settings.apiKey,
       model: imageGenState?.settings.model || DEFAULT_IMAGE_MODEL,
       models: IMAGE_GEN_MODELS,
     };
@@ -375,18 +376,14 @@ export function setupIpcHandlers(
     // Persist to disk
     await saveImageGenSettings(imageGenState.settings);
 
-    // Recreate generator with updated config
-    if (imageGenState.settings.apiKey) {
-      imageGenState.generator = new ImageGenerator({
-        apiKey: imageGenState.settings.apiKey,
-        model: imageGenState.settings.model,
-      });
-      log.info({ model: imageGenState.generator.model }, 'Image generator updated');
-    } else {
-      imageGenState.generator = null;
-      log.info('Image generator disabled (no API key)');
-    }
+    // Recreate generator with updated config (falls back to default key)
+    const key = effectiveApiKey(imageGenState.settings);
+    imageGenState.generator = new ImageGenerator({
+      apiKey: key,
+      model: imageGenState.settings.model,
+    });
+    log.info({ model: imageGenState.generator.model, isDefault: !imageGenState.settings.apiKey }, 'Image generator updated');
 
-    return { success: true, hasApiKey: !!imageGenState.settings.apiKey };
+    return { success: true, hasCustomKey: !!imageGenState.settings.apiKey };
   });
 }

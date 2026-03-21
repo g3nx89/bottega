@@ -102,10 +102,11 @@
           <div class="setting-divider"></div>
           <div class="setting-group">
             <label class="setting-label">Image Generation</label>
-            <span class="setting-hint">Powered by Google Nano Banana. Requires a <a href="https://aistudio.google.com/apikey" class="setting-link-inline" target="_blank">Gemini API key</a>.</span>
+            <span class="setting-hint">Powered by Google Nano Banana. A default key is included — or use your own <a href="https://aistudio.google.com/apikey" class="setting-link-inline" target="_blank">Gemini API key</a>.</span>
             <div class="key-input-row">
               <input type="password" id="imagegen-key-input" class="setting-input" placeholder="AIza..." autocomplete="off">
               <button id="imagegen-save-key-btn" class="setting-btn-sm">Save</button>
+              <button id="imagegen-reset-key-btn" class="setting-btn-sm hidden">Reset</button>
             </div>
             <span id="imagegen-key-status" class="key-status"></span>
             <label class="setting-sublabel" for="imagegen-model-select">Model</label>
