@@ -1,4 +1,4 @@
-# Figma Companion — Piano Dettagliato di Implementazione
+# Figma Cowork — Piano Dettagliato di Implementazione
 
 > Generato il 2026-03-18. Basato su PLAN.md + ricerca upstream repos + API Pi SDK v0.60.0.
 
@@ -52,7 +52,7 @@ Fase 1 (scaffold) ────────────────────�
 
 ```jsonc
 {
-  "name": "figma-companion",
+  "name": "figma-cowork",
   "version": "0.1.0",
   "type": "module",
   "main": "dist/main.js",
@@ -161,7 +161,7 @@ dist/
 ### 1.5 — File stub per compilazione
 
 Creare file minimi per verificare che il build funzioni:
-- `src/main/index.ts` → `console.log('Figma Companion starting...')`
+- `src/main/index.ts` → `console.log('Figma Cowork starting...')`
 - `src/main/preload.ts` → `console.log('preload')`
 - `src/renderer/index.html` → HTML vuoto con titolo
 
@@ -1250,7 +1250,7 @@ npm run start   # Finestra si apre, titlebar macOS, nessun crash
 **File**: `src/renderer/index.html`
 
 Layout:
-1. **Header** (40px): titolo "Figma Companion" + indicatore connessione (dot verde/rosso)
+1. **Header** (40px): titolo "Figma Cowork" + indicatore connessione (dot verde/rosso)
 2. **Chat area** (flex-grow, scrollable): messaggi user/assistant
 3. **Input area** (bottom): textarea + bottone invio
 
@@ -1309,7 +1309,7 @@ Il token Figma (Personal Access Token) serve per le REST API calls.
 2. Salvare con `safeStorage.encryptString()` di Electron
 3. Caricare con `safeStorage.decryptString()` al successivo avvio
 4. Passare al `FigmaAPI` constructor
-5. Storage: `~/.figma-companion/token.enc` (file cifrato con keychain macOS)
+5. Storage: `~/.figma-cowork/token.enc` (file cifrato con keychain macOS)
 
 ### 8.2 — Gestione errori
 
@@ -1351,8 +1351,8 @@ Config in `package.json`:
 ```json
 {
   "build": {
-    "appId": "com.figma-companion",
-    "productName": "Figma Companion",
+    "appId": "com.figma-cowork",
+    "productName": "Figma Cowork",
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "resources/icon.icns",

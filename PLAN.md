@@ -1,4 +1,4 @@
-# Figma Companion — Piano di Implementazione
+# Figma Cowork — Piano di Implementazione
 
 ## Cosa stiamo costruendo
 
@@ -47,7 +47,7 @@ Un'app desktop macOS che fa design pair-programming: l'utente descrive cosa vuol
 ## Struttura file
 
 ```
-figma-companion/
+figma-cowork/
 ├── package.json
 ├── tsconfig.json
 ├── scripts/

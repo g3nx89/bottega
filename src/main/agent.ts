@@ -88,11 +88,11 @@ export interface AgentInfra {
 }
 
 /**
- * Default sessions directory: ~/.figma-companion/sessions/
+ * Default sessions directory: ~/.figma-cowork/sessions/
  * Each app launch creates a new JSONL session file. Model switches
  * are recorded as entries within the same session.
  */
-const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), '.figma-companion', 'sessions');
+const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), '.figma-cowork', 'sessions');
 
 export async function createAgentInfra(figmaCore: FigmaCore, sessionsDir?: string): Promise<AgentInfra> {
   const operationQueue = new OperationQueue();

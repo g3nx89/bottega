@@ -1,9 +1,9 @@
 /**
- * Logger for Figma Companion
+ * Logger for Figma Cowork
  *
  * Writes structured JSON logs to:
  *   - stdout (via pino-pretty in dev)
- *   - ~/Library/Logs/FigmaCompanion/app.log (file, always JSON)
+ *   - ~/Library/Logs/FigmaCowork/app.log (file, always JSON)
  */
 
 import pino from 'pino';
@@ -11,7 +11,7 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 
-const logDir = path.join(os.homedir(), 'Library', 'Logs', 'FigmaCompanion');
+const logDir = path.join(os.homedir(), 'Library', 'Logs', 'FigmaCowork');
 fs.mkdirSync(logDir, { recursive: true });
 
 const logFile = path.join(logDir, 'app.log');

@@ -1,5 +1,5 @@
 /**
- * Type definitions for Figma Companion
+ * Type definitions for Figma Cowork
  */
 
 /**

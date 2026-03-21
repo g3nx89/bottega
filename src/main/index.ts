@@ -11,7 +11,7 @@ const log = createChildLogger({ component: 'main' });
 
 // ── Crash & error logging ────────────────────
 
-// Native crash dumps (segfault, OOM) → ~/Library/Logs/FigmaCompanion/crashes/
+// Native crash dumps (segfault, OOM) → ~/Library/Logs/FigmaCowork/crashes/
 crashReporter.start({ uploadToServer: false });
 
 process.on('uncaughtException', (err) => {

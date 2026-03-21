@@ -1,6 +1,6 @@
 {
-  "name": "Figma Companion Bridge",
-  "id": "figma-companion-bridge",
+  "name": "Figma Cowork Bridge",
+  "id": "figma-cowork-bridge",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",

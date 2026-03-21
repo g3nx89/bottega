@@ -255,7 +255,7 @@ let lastInputTokens = 0;
 
 function updateContextBar(inputTokens) {
   lastInputTokens = inputTokens;
-  const modelId = localStorage.getItem('figma-companion:model') || 'claude-sonnet-4-6';
+  const modelId = localStorage.getItem('figma-cowork:model') || 'claude-sonnet-4-6';
   const maxTokens = contextSizes[modelId] || 200000;
   const pct = Math.min(100, (inputTokens / maxTokens) * 100);
   contextFill.style.width = pct.toFixed(1) + '%';
@@ -440,8 +440,8 @@ async function startLogin(displayGroup) {
     const models = availableModels[displayGroup] || [];
     const oauthModel = models.find((m) => m.sdkProvider !== displayGroup) || models[0];
     if (oauthModel) {
-      localStorage.setItem('figma-companion:provider', oauthModel.sdkProvider);
-      localStorage.setItem('figma-companion:model', oauthModel.id);
+      localStorage.setItem('figma-cowork:provider', oauthModel.sdkProvider);
+      localStorage.setItem('figma-cowork:model', oauthModel.id);
       populateModelSelect();
       modelSelect.value = oauthModel.sdkProvider + ':' + oauthModel.id;
       const switchResult = await window.api.switchModel({ provider: oauthModel.sdkProvider, modelId: oauthModel.id });
@@ -563,8 +563,8 @@ saveKeyBtn.addEventListener('click', async () => {
   // For API keys, pick a model whose sdkProvider matches the display group
   const apiModel = models.find((m) => m.sdkProvider === provider) || models[0];
   if (apiModel) {
-    localStorage.setItem('figma-companion:provider', apiModel.sdkProvider);
-    localStorage.setItem('figma-companion:model', apiModel.id);
+    localStorage.setItem('figma-cowork:provider', apiModel.sdkProvider);
+    localStorage.setItem('figma-cowork:model', apiModel.id);
     populateModelSelect();
     modelSelect.value = apiModel.sdkProvider + ':' + apiModel.id;
     await window.api.switchModel({ provider: apiModel.sdkProvider, modelId: apiModel.id });
@@ -590,8 +590,8 @@ function populateModelSelect() {
   }
 
   // Restore saved selection
-  const savedProvider = localStorage.getItem('figma-companion:provider') || 'anthropic';
-  const savedModel = localStorage.getItem('figma-companion:model') || 'claude-sonnet-4-6';
+  const savedProvider = localStorage.getItem('figma-cowork:provider') || 'anthropic';
+  const savedModel = localStorage.getItem('figma-cowork:model') || 'claude-sonnet-4-6';
   modelSelect.value = savedProvider + ':' + savedModel;
 }
 
@@ -600,8 +600,8 @@ modelSelect.addEventListener('change', async () => {
   const sepIdx = modelSelect.value.indexOf(':');
   const sdkProvider = modelSelect.value.slice(0, sepIdx);
   const modelId = modelSelect.value.slice(sepIdx + 1);
-  localStorage.setItem('figma-companion:provider', sdkProvider);
-  localStorage.setItem('figma-companion:model', modelId);
+  localStorage.setItem('figma-cowork:provider', sdkProvider);
+  localStorage.setItem('figma-cowork:model', modelId);
   const result = await window.api.switchModel({ provider: sdkProvider, modelId });
   if (!result.success) {
     keyStatus.textContent = result.error || 'Failed to switch';
@@ -621,8 +621,8 @@ async function initAuthUI() {
   syncBarModelLabel();
 
   // Switch session to saved model if it differs from the default
-  const savedProvider = localStorage.getItem('figma-companion:provider') || 'anthropic';
-  const savedModel = localStorage.getItem('figma-companion:model') || 'claude-sonnet-4-6';
+  const savedProvider = localStorage.getItem('figma-cowork:provider') || 'anthropic';
+  const savedModel = localStorage.getItem('figma-cowork:model') || 'claude-sonnet-4-6';
   if (savedProvider !== 'anthropic' || savedModel !== 'claude-sonnet-4-6') {
     await window.api.switchModel({ provider: savedProvider, modelId: savedModel });
   }
@@ -637,7 +637,7 @@ function applyTransparency(value) {
   const opacity = 1 - (value / 100) * 0.225; // maps 0→1.0, 100→0.775
   window.api.setOpacity(opacity);
   transparencyValue.textContent = value + '%';
-  localStorage.setItem('figma-companion:transparency', value);
+  localStorage.setItem('figma-cowork:transparency', value);
 }
 
 transparencySlider.addEventListener('input', () => {
@@ -645,7 +645,7 @@ transparencySlider.addEventListener('input', () => {
 });
 
 // Restore saved transparency (or default 0 = fully opaque)
-const savedTransparency = localStorage.getItem('figma-companion:transparency');
+const savedTransparency = localStorage.getItem('figma-cowork:transparency');
 const initialTransparency = savedTransparency !== null ? Number(savedTransparency) : 0;
 transparencySlider.value = initialTransparency;
 applyTransparency(initialTransparency);
@@ -678,7 +678,7 @@ const EFFORT_LEVELS = [
   { id: 'high', label: 'High' },
 ];
 
-let currentEffort = localStorage.getItem('figma-companion:effort') || 'medium';
+let currentEffort = localStorage.getItem('figma-cowork:effort') || 'medium';
 barEffortLabel.textContent = EFFORT_LEVELS.find((e) => e.id === currentEffort)?.label || 'Medium';
 
 // Generic dropdown factory
@@ -732,8 +732,8 @@ function closeAllDropdowns() {
 barModelBtn.addEventListener('click', async (e) => {
   e.stopPropagation();
   const models = availableModels;
-  const currentProvider = localStorage.getItem('figma-companion:provider') || 'anthropic';
-  const currentModel = localStorage.getItem('figma-companion:model') || 'claude-sonnet-4-6';
+  const currentProvider = localStorage.getItem('figma-cowork:provider') || 'anthropic';
+  const currentModel = localStorage.getItem('figma-cowork:model') || 'claude-sonnet-4-6';
   const allModels = [];
   for (const [_group, list] of Object.entries(models)) {
     list.forEach((m) => allModels.push({
@@ -745,8 +745,8 @@ barModelBtn.addEventListener('click', async (e) => {
   }
   createDropdown(barModelBtn, allModels, async (item) => {
     barModelLabel.textContent = item.label.replace(/ \(.*\)/, '');
-    localStorage.setItem('figma-companion:provider', item.sdkProvider);
-    localStorage.setItem('figma-companion:model', item.id);
+    localStorage.setItem('figma-cowork:provider', item.sdkProvider);
+    localStorage.setItem('figma-cowork:model', item.id);
     // Sync settings panel model selector
     if (modelSelect) modelSelect.value = item.sdkProvider + ':' + item.id;
     await window.api.switchModel({ provider: item.sdkProvider, modelId: item.id });
@@ -761,15 +761,15 @@ barEffortBtn.addEventListener('click', (e) => {
   createDropdown(barEffortBtn, items, (item) => {
     currentEffort = item.id;
     barEffortLabel.textContent = item.label;
-    localStorage.setItem('figma-companion:effort', item.id);
+    localStorage.setItem('figma-cowork:effort', item.id);
     window.api.setThinking(item.id);
   });
 });
 
 // Sync model label on init (runs after initAuthUI populates availableModels)
 function syncBarModelLabel() {
-  const sdkProvider = localStorage.getItem('figma-companion:provider') || 'anthropic';
-  const modelId = localStorage.getItem('figma-companion:model') || 'claude-sonnet-4-6';
+  const sdkProvider = localStorage.getItem('figma-cowork:provider') || 'anthropic';
+  const modelId = localStorage.getItem('figma-cowork:model') || 'claude-sonnet-4-6';
   const allModels = Object.values(availableModels).flat();
   const match = allModels.find((m) => m.sdkProvider === sdkProvider && m.id === modelId);
   if (match) barModelLabel.textContent = match.label.replace(/ \(.*\)/, '');

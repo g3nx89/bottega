@@ -1,5 +1,5 @@
 /**
- * Configuration for Figma Companion
+ * Configuration for Figma Cowork
  */
 
 export interface FigmaConfig {
