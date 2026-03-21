@@ -60,8 +60,16 @@ contextBridge.exposeInMainWorld('api', {
   // Auth & Model
   getModels: () => ipcRenderer.invoke('auth:get-models'),
   getContextSizes: () => ipcRenderer.invoke('auth:get-context-sizes'),
-  getProviders: () => ipcRenderer.invoke('auth:get-providers'),
   setApiKey: (provider: string, key: string) => ipcRenderer.invoke('auth:set-key', provider, key),
-  hasApiKey: (provider: string) => ipcRenderer.invoke('auth:has-key', provider),
   switchModel: (config: { provider: string; modelId: string }) => ipcRenderer.invoke('auth:switch-model', config),
+
+  // OAuth login
+  getAuthStatus: () => ipcRenderer.invoke('auth:get-auth-status'),
+  login: (provider: string) => ipcRenderer.invoke('auth:login', provider),
+  loginRespond: (response: string) => ipcRenderer.invoke('auth:login-respond', response),
+  loginCancel: () => ipcRenderer.invoke('auth:login-cancel'),
+  logout: (provider: string) => ipcRenderer.invoke('auth:logout', provider),
+  onLoginEvent: (cb: (event: any) => void) => {
+    ipcRenderer.on('auth:login-event', (_event, data) => cb(data));
+  },
 });

@@ -16,7 +16,7 @@ function sendMessage() {
   if (!text || isStreaming) return;
 
   // Hide prompt suggestions when sending
-  if (typeof hideSuggestions === 'function') hideSuggestions();
+  hideSuggestions();
 
   // Add user bubble (with pasted images if any)
   addUserMessage(text, pastedImages.map((p) => p.dataUrl));
@@ -30,8 +30,9 @@ function sendMessage() {
   isStreaming = true;
   updateInputState();
 
-  // Send to main process
-  window.api.sendPrompt(text);
+  // Send to main process (catch to prevent unhandled rejection — errors are
+  // surfaced via agent:text-delta + agent:end events from the main process)
+  window.api.sendPrompt(text).catch(() => {});
 }
 
 function addUserMessage(text, images) {
@@ -332,126 +333,300 @@ document.addEventListener('keydown', (e) => {
 
 // ── Auth & Model ─────────────────────────
 
-const providerSelect = document.getElementById('provider-select');
-const modelSelect = document.getElementById('model-select');
+const accountsList = document.getElementById('accounts-list');
+const toggleApikeyBtn = document.getElementById('toggle-apikey-btn');
+const apikeySection = document.getElementById('apikey-section');
+const apikeyProviderSelect = document.getElementById('apikey-provider-select');
 const apiKeyInput = document.getElementById('api-key-input');
 const saveKeyBtn = document.getElementById('save-key-btn');
 const keyStatus = document.getElementById('key-status');
+const modelSelect = document.getElementById('model-select');
 
 let availableModels = {};
+let loginInProgress = null; // provider currently logging in
 
-const PROVIDER_LABELS = {
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  google: 'Google',
+const PROVIDER_META = {
+  anthropic: { label: 'Anthropic', sublabel: 'Claude Pro / Max', keyPlaceholder: 'sk-ant-...' },
+  openai: { label: 'OpenAI', sublabel: 'ChatGPT Plus / Pro', keyPlaceholder: 'sk-...' },
+  google: { label: 'Google', sublabel: 'Gemini (free)', keyPlaceholder: 'AIza...' },
 };
 
-const KEY_PLACEHOLDERS = {
-  anthropic: 'sk-ant-...',
-  openai: 'sk-...',
-  google: 'AIza...',
-};
+// ── Account cards ────────────────────────
 
-async function initAuthUI() {
-  availableModels = await window.api.getModels();
-  updateModelOptions();
-  await updateKeyStatus();
+async function renderAccountCards() {
+  const status = await window.api.getAuthStatus();
+  while (accountsList.firstChild) accountsList.removeChild(accountsList.firstChild);
 
-  // Restore saved provider/model from localStorage
-  const savedProvider = localStorage.getItem('figma-companion:provider');
-  const savedModel = localStorage.getItem('figma-companion:model');
-  if (savedProvider && availableModels[savedProvider]) {
-    providerSelect.value = savedProvider;
-    updateModelOptions();
-  }
-  if (savedModel) {
-    modelSelect.value = savedModel;
-  }
+  for (const [provider, info] of Object.entries(PROVIDER_META)) {
+    const card = document.createElement('div');
+    card.className = 'account-card';
+    card.dataset.provider = provider;
 
-  // Switch session to saved model if it differs from the default (claude-sonnet-4-6)
-  const targetProvider = savedProvider || 'anthropic';
-  const targetModel = savedModel || 'claude-sonnet-4-6';
-  if (targetProvider !== 'anthropic' || targetModel !== 'claude-sonnet-4-6') {
-    await window.api.switchModel({ provider: targetProvider, modelId: targetModel });
+    const left = document.createElement('div');
+    left.className = 'account-left';
+
+    const dot = document.createElement('span');
+    const st = status[provider] || { type: 'none' };
+    dot.className = 'account-dot' + (st.type !== 'none' ? ' connected' : '');
+
+    const text = document.createElement('div');
+    text.className = 'account-text';
+    const name = document.createElement('span');
+    name.className = 'account-name';
+    name.textContent = info.label;
+    const sub = document.createElement('span');
+    sub.className = 'account-sub';
+    sub.textContent = st.type === 'oauth' ? 'Logged in' : st.type === 'api_key' ? 'API key' : info.sublabel;
+    text.appendChild(name);
+    text.appendChild(sub);
+    left.appendChild(dot);
+    left.appendChild(text);
+    card.appendChild(left);
+
+    const right = document.createElement('div');
+    right.className = 'account-actions';
+
+    if (st.type !== 'none') {
+      const logoutBtn = document.createElement('button');
+      logoutBtn.className = 'account-btn logout';
+      logoutBtn.textContent = 'Logout';
+      logoutBtn.addEventListener('click', async () => {
+        await window.api.logout(provider);
+        renderAccountCards();
+      });
+      right.appendChild(logoutBtn);
+    } else {
+      const loginBtn = document.createElement('button');
+      loginBtn.className = 'account-btn login';
+      loginBtn.textContent = 'Login';
+      loginBtn.addEventListener('click', () => startLogin(provider));
+      right.appendChild(loginBtn);
+    }
+
+    card.appendChild(right);
+
+    // Login-in-progress state (inline prompt/progress area)
+    const loginArea = document.createElement('div');
+    loginArea.className = 'account-login-area hidden';
+    loginArea.id = 'login-area-' + provider;
+    card.appendChild(loginArea);
+
+    accountsList.appendChild(card);
   }
 }
 
-function updateModelOptions() {
-  const provider = providerSelect.value;
-  const models = availableModels[provider] || [];
-  // Clear options safely (no innerHTML)
-  while (modelSelect.firstChild) modelSelect.removeChild(modelSelect.firstChild);
-  models.forEach((m) => {
-    const opt = document.createElement('option');
-    opt.value = m.id;
-    opt.textContent = m.label;
-    modelSelect.appendChild(opt);
-  });
-  apiKeyInput.placeholder = KEY_PLACEHOLDERS[provider] || 'API key';
+// ── OAuth login flow ─────────────────────
 
-  // Restore saved model if it belongs to this provider
-  const savedModel = localStorage.getItem('figma-companion:model');
-  if (savedModel && models.some((m) => m.id === savedModel)) {
-    modelSelect.value = savedModel;
-  }
-}
+async function startLogin(displayGroup) {
+  loginInProgress = displayGroup;
+  const loginArea = document.getElementById('login-area-' + displayGroup);
+  if (!loginArea) return;
 
-async function updateKeyStatus() {
-  const provider = providerSelect.value;
-  const hasKey = await window.api.hasApiKey(provider);
-  keyStatus.textContent = hasKey ? PROVIDER_LABELS[provider] + ' key configured' : 'No key set';
-  keyStatus.className = 'key-status' + (hasKey ? ' success' : '');
-}
+  // Show waiting state
+  loginArea.classList.remove('hidden');
+  setLoginAreaContent(loginArea, 'Opening browser for authentication…', null, true);
 
-providerSelect.addEventListener('change', async () => {
-  updateModelOptions();
-  await updateKeyStatus();
-  apiKeyInput.value = '';
-});
+  // Disable other login buttons
+  accountsList.querySelectorAll('.account-btn.login').forEach((btn) => (btn.disabled = true));
 
-modelSelect.addEventListener('change', async () => {
-  const provider = providerSelect.value;
-  const modelId = modelSelect.value;
-  localStorage.setItem('figma-companion:provider', provider);
-  localStorage.setItem('figma-companion:model', modelId);
+  const result = await window.api.login(displayGroup);
 
-  keyStatus.textContent = 'Switching model…';
-  keyStatus.className = 'key-status';
-  const result = await window.api.switchModel({ provider, modelId });
+  loginInProgress = null;
+  loginArea.classList.add('hidden');
+  await renderAccountCards();
+
   if (result.success) {
-    keyStatus.textContent = 'Using ' + modelSelect.options[modelSelect.selectedIndex].text;
-    keyStatus.className = 'key-status success';
-  } else {
-    keyStatus.textContent = result.error || 'Failed to switch';
+    // Auto-select first OAuth model (one whose sdkProvider differs from the display group)
+    const models = availableModels[displayGroup] || [];
+    const oauthModel = models.find((m) => m.sdkProvider !== displayGroup) || models[0];
+    if (oauthModel) {
+      localStorage.setItem('figma-companion:provider', oauthModel.sdkProvider);
+      localStorage.setItem('figma-companion:model', oauthModel.id);
+      populateModelSelect();
+      modelSelect.value = oauthModel.sdkProvider + ':' + oauthModel.id;
+      const switchResult = await window.api.switchModel({ provider: oauthModel.sdkProvider, modelId: oauthModel.id });
+      if (!switchResult.success) {
+        keyStatus.textContent = switchResult.error || 'Failed to switch model';
+        keyStatus.className = 'key-status error';
+      }
+      updateContextBar(0);
+    }
+  } else if (result.error && result.error !== 'Login cancelled') {
+    keyStatus.textContent = result.error;
     keyStatus.className = 'key-status error';
   }
+}
+
+function setLoginAreaContent(area, message, promptOpts, showCancel) {
+  while (area.firstChild) area.removeChild(area.firstChild);
+
+  const msgEl = document.createElement('span');
+  msgEl.className = 'login-message';
+  msgEl.textContent = message;
+  area.appendChild(msgEl);
+
+  if (promptOpts) {
+    const row = document.createElement('div');
+    row.className = 'login-prompt-row';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'setting-input';
+    input.placeholder = promptOpts.placeholder || '';
+    const submit = document.createElement('button');
+    submit.className = 'setting-btn-sm';
+    submit.textContent = 'Submit';
+    submit.addEventListener('click', () => {
+      const val = input.value.trim();
+      if (!val && !promptOpts.allowEmpty) return;
+      window.api.loginRespond(val);
+      setLoginAreaContent(area, 'Authenticating…', null, true);
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submit.click();
+    });
+    row.appendChild(input);
+    row.appendChild(submit);
+    area.appendChild(row);
+    input.focus();
+  }
+
+  if (showCancel) {
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'account-btn cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => {
+      window.api.loginCancel();
+    });
+    area.appendChild(cancelBtn);
+  }
+}
+
+// Listen for login events from main process
+window.api.onLoginEvent((event) => {
+  if (!loginInProgress) return;
+  const loginArea = document.getElementById('login-area-' + loginInProgress);
+  if (!loginArea) return;
+
+  switch (event.type) {
+    case 'auth':
+      setLoginAreaContent(
+        loginArea,
+        event.instructions || 'Waiting for browser authentication…',
+        null,
+        true,
+      );
+      break;
+    case 'prompt':
+      setLoginAreaContent(loginArea, event.message, {
+        placeholder: event.placeholder,
+        allowEmpty: event.allowEmpty,
+      }, true);
+      break;
+    case 'progress':
+      setLoginAreaContent(loginArea, event.message, null, true);
+      break;
+  }
+});
+
+// ── API key fallback ─────────────────────
+
+toggleApikeyBtn.addEventListener('click', () => {
+  apikeySection.classList.toggle('hidden');
+  toggleApikeyBtn.textContent = apikeySection.classList.contains('hidden')
+    ? 'Use API key instead'
+    : 'Hide API key';
+});
+
+apikeyProviderSelect.addEventListener('change', () => {
+  const provider = apikeyProviderSelect.value;
+  apiKeyInput.placeholder = PROVIDER_META[provider]?.keyPlaceholder || 'API key';
+  keyStatus.textContent = '';
 });
 
 saveKeyBtn.addEventListener('click', async () => {
-  const provider = providerSelect.value;
+  const provider = apikeyProviderSelect.value;
   const key = apiKeyInput.value.trim();
   if (!key) return;
 
   saveKeyBtn.disabled = true;
   await window.api.setApiKey(provider, key);
   apiKeyInput.value = '';
-  await updateKeyStatus();
   saveKeyBtn.disabled = false;
 
-  // Auto-switch to this provider's model
-  const modelId = modelSelect.value;
-  localStorage.setItem('figma-companion:provider', provider);
-  localStorage.setItem('figma-companion:model', modelId);
-  keyStatus.textContent = 'Key saved. Switching…';
-  const result = await window.api.switchModel({ provider, modelId });
-  if (result.success) {
-    keyStatus.textContent = 'Using ' + modelSelect.options[modelSelect.selectedIndex].text;
-    keyStatus.className = 'key-status success';
-  } else {
-    keyStatus.textContent = result.error || 'Switch failed';
-    keyStatus.className = 'key-status error';
+  keyStatus.textContent = PROVIDER_META[provider]?.label + ' key saved';
+  keyStatus.className = 'key-status success';
+
+  await renderAccountCards();
+
+  // Auto-switch to this provider's first API key model
+  const models = availableModels[provider] || [];
+  // For API keys, pick a model whose sdkProvider matches the display group
+  const apiModel = models.find((m) => m.sdkProvider === provider) || models[0];
+  if (apiModel) {
+    localStorage.setItem('figma-companion:provider', apiModel.sdkProvider);
+    localStorage.setItem('figma-companion:model', apiModel.id);
+    populateModelSelect();
+    modelSelect.value = apiModel.sdkProvider + ':' + apiModel.id;
+    await window.api.switchModel({ provider: apiModel.sdkProvider, modelId: apiModel.id });
   }
 });
+
+// ── Model selector ───────────────────────
+
+function populateModelSelect() {
+  while (modelSelect.firstChild) modelSelect.removeChild(modelSelect.firstChild);
+  for (const [displayGroup, models] of Object.entries(availableModels)) {
+    if (models.length === 0) continue;
+    const group = document.createElement('optgroup');
+    group.label = PROVIDER_META[displayGroup]?.label || displayGroup;
+    models.forEach((m) => {
+      const opt = document.createElement('option');
+      // Value encodes sdkProvider:modelId (sdkProvider is the Pi SDK provider)
+      opt.value = m.sdkProvider + ':' + m.id;
+      opt.textContent = m.label;
+      group.appendChild(opt);
+    });
+    modelSelect.appendChild(group);
+  }
+
+  // Restore saved selection
+  const savedProvider = localStorage.getItem('figma-companion:provider') || 'anthropic';
+  const savedModel = localStorage.getItem('figma-companion:model') || 'claude-sonnet-4-6';
+  modelSelect.value = savedProvider + ':' + savedModel;
+}
+
+modelSelect.addEventListener('change', async () => {
+  // Split on first colon only (model IDs should not contain colons, but be safe)
+  const sepIdx = modelSelect.value.indexOf(':');
+  const sdkProvider = modelSelect.value.slice(0, sepIdx);
+  const modelId = modelSelect.value.slice(sepIdx + 1);
+  localStorage.setItem('figma-companion:provider', sdkProvider);
+  localStorage.setItem('figma-companion:model', modelId);
+  const result = await window.api.switchModel({ provider: sdkProvider, modelId });
+  if (!result.success) {
+    keyStatus.textContent = result.error || 'Failed to switch';
+    keyStatus.className = 'key-status error';
+  }
+  updateContextBar(0);
+});
+
+// ── Init auth UI ─────────────────────────
+
+async function initAuthUI() {
+  availableModels = await window.api.getModels();
+  populateModelSelect();
+  await renderAccountCards();
+
+  // Sync bar label now that models are loaded
+  syncBarModelLabel();
+
+  // Switch session to saved model if it differs from the default
+  const savedProvider = localStorage.getItem('figma-companion:provider') || 'anthropic';
+  const savedModel = localStorage.getItem('figma-companion:model') || 'claude-sonnet-4-6';
+  if (savedProvider !== 'anthropic' || savedModel !== 'claude-sonnet-4-6') {
+    await window.api.switchModel({ provider: savedProvider, modelId: savedModel });
+  }
+}
 
 initAuthUI();
 
@@ -556,22 +731,25 @@ function closeAllDropdowns() {
 // Model picker
 barModelBtn.addEventListener('click', async (e) => {
   e.stopPropagation();
-  const models = await window.api.getModels();
-  const provider = localStorage.getItem('figma-companion:provider') || 'anthropic';
+  const models = availableModels;
+  const currentProvider = localStorage.getItem('figma-companion:provider') || 'anthropic';
   const currentModel = localStorage.getItem('figma-companion:model') || 'claude-sonnet-4-6';
   const allModels = [];
-  for (const [prov, list] of Object.entries(models)) {
-    list.forEach((m) => allModels.push({ id: m.id, label: m.label, provider: prov, active: m.id === currentModel }));
+  for (const [_group, list] of Object.entries(models)) {
+    list.forEach((m) => allModels.push({
+      id: m.id,
+      label: m.label,
+      sdkProvider: m.sdkProvider,
+      active: m.sdkProvider === currentProvider && m.id === currentModel,
+    }));
   }
   createDropdown(barModelBtn, allModels, async (item) => {
     barModelLabel.textContent = item.label.replace(/ \(.*\)/, '');
-    localStorage.setItem('figma-companion:provider', item.provider);
+    localStorage.setItem('figma-companion:provider', item.sdkProvider);
     localStorage.setItem('figma-companion:model', item.id);
-    // Also update settings panel selectors if open
-    if (providerSelect) providerSelect.value = item.provider;
-    updateModelOptions();
-    if (modelSelect) modelSelect.value = item.id;
-    await window.api.switchModel({ provider: item.provider, modelId: item.id });
+    // Sync settings panel model selector
+    if (modelSelect) modelSelect.value = item.sdkProvider + ':' + item.id;
+    await window.api.switchModel({ provider: item.sdkProvider, modelId: item.id });
     updateContextBar(0);
   });
 });
@@ -588,15 +766,14 @@ barEffortBtn.addEventListener('click', (e) => {
   });
 });
 
-// Sync model label on init
-(async () => {
-  const models = await window.api.getModels();
-  const provider = localStorage.getItem('figma-companion:provider') || 'anthropic';
+// Sync model label on init (runs after initAuthUI populates availableModels)
+function syncBarModelLabel() {
+  const sdkProvider = localStorage.getItem('figma-companion:provider') || 'anthropic';
   const modelId = localStorage.getItem('figma-companion:model') || 'claude-sonnet-4-6';
-  const allModels = Object.values(models).flat();
-  const match = allModels.find((m) => m.id === modelId);
+  const allModels = Object.values(availableModels).flat();
+  const match = allModels.find((m) => m.sdkProvider === sdkProvider && m.id === modelId);
   if (match) barModelLabel.textContent = match.label.replace(/ \(.*\)/, '');
-})();
+}
 
 // Apply saved effort on load
 window.api.setThinking(currentEffort);
@@ -650,9 +827,6 @@ function renderPastePreview() {
     pastePreview.appendChild(thumb);
   });
 }
-
-// Clear pasted images after sending
-const originalSendMessage = sendMessage;
 
 // ── Prompt suggestions ───────────────────
 

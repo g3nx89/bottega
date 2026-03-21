@@ -1,5 +1,5 @@
-import { ipcMain, type BrowserWindow } from 'electron';
-import { createFigmaAgent, AVAILABLE_MODELS, CONTEXT_SIZES, DEFAULT_MODEL, type AgentInfra, type ModelConfig } from './agent.js';
+import { ipcMain, shell, type BrowserWindow } from 'electron';
+import { createFigmaAgent, AVAILABLE_MODELS, CONTEXT_SIZES, DEFAULT_MODEL, OAUTH_PROVIDER_MAP, OAUTH_PROVIDER_INFO, type AgentInfra, type ModelConfig } from './agent.js';
 import { PromptSuggester } from './prompt-suggester.js';
 import { createChildLogger } from '../figma/logger.js';
 
@@ -83,6 +83,9 @@ export function setupIpcHandlers(
               wc.send('agent:suggestions', suggestions);
             }
             suggester.resetAssistantText();
+          }).catch(err => {
+            log.warn({ err }, 'Failed to generate suggestions');
+            suggester.resetAssistantText();
           });
           break;
         case 'auto_compaction_start':
@@ -106,13 +109,29 @@ export function setupIpcHandlers(
 
   // ── Agent prompt/abort ─────────────────
   ipcMain.handle('agent:prompt', async (_event, text: string) => {
+    // Pre-check: ensure the current provider has credentials before calling prompt.
+    // Without this, the SDK may hang indefinitely on an unauthenticated API call.
+    const apiKey = await infra.authStorage.getApiKey(currentModelConfig.provider);
+    if (!apiKey) {
+      mainWindow.webContents.send('agent:text-delta', 'No credentials configured for this model. Open Settings to log in or add an API key.');
+      mainWindow.webContents.send('agent:end');
+      return;
+    }
+
     suggester.trackUserPrompt(text);
     suggester.resetAssistantText();
-    if (isStreaming) {
-      await session.prompt(text, { streamingBehavior: 'followUp' });
-    } else {
-      isStreaming = true;
-      await session.prompt(text);
+    try {
+      if (isStreaming) {
+        await session.prompt(text, { streamingBehavior: 'followUp' });
+      } else {
+        isStreaming = true;
+        await session.prompt(text);
+      }
+    } catch (err: any) {
+      log.error({ err }, 'Prompt failed');
+      isStreaming = false;
+      mainWindow.webContents.send('agent:text-delta', `\n\nError: ${err.message || 'Request failed. Check your credentials in Settings.'}`);
+      mainWindow.webContents.send('agent:end');
     }
   });
 
@@ -146,17 +165,13 @@ export function setupIpcHandlers(
     return CONTEXT_SIZES;
   });
 
-  ipcMain.handle('auth:get-providers', () => {
-    // Return which providers have keys configured
-    const providers = ['anthropic', 'openai', 'google'];
-    const configured: Record<string, boolean> = {};
-    for (const p of providers) {
-      configured[p] = infra.authStorage.hasAuth(p);
-    }
-    return configured;
-  });
+  const VALID_PROVIDERS = new Set([
+    ...Object.keys(OAUTH_PROVIDER_MAP),
+    ...Object.values(OAUTH_PROVIDER_MAP),
+  ]);
 
   ipcMain.handle('auth:set-key', (_event, provider: string, apiKey: string) => {
+    if (!VALID_PROVIDERS.has(provider)) return false;
     if (apiKey) {
       infra.authStorage.set(provider, { type: 'api_key', key: apiKey });
       log.info({ provider }, 'API key saved');
@@ -167,8 +182,120 @@ export function setupIpcHandlers(
     return true;
   });
 
-  ipcMain.handle('auth:has-key', (_event, provider: string) => {
-    return infra.authStorage.hasAuth(provider);
+  // ── OAuth login/logout ─────────────────
+
+  let loginAbortController: AbortController | null = null;
+  let loginPromptResolver: ((value: string) => void) | null = null;
+
+  ipcMain.handle('auth:get-auth-status', () => {
+    const status: Record<string, { type: 'oauth' | 'api_key' | 'none'; label: string }> = {};
+    for (const [displayGroup, oauthId] of Object.entries(OAUTH_PROVIDER_MAP)) {
+      const oauthCred = infra.authStorage.get(oauthId);
+      const apiKeyCred = infra.authStorage.get(displayGroup);
+      if (oauthCred?.type === 'oauth') {
+        status[displayGroup] = { type: 'oauth', label: OAUTH_PROVIDER_INFO[displayGroup]?.description || 'Logged in' };
+      } else if (apiKeyCred?.type === 'api_key' || oauthCred?.type === 'api_key') {
+        status[displayGroup] = { type: 'api_key', label: 'API key' };
+      } else {
+        status[displayGroup] = { type: 'none', label: 'Not connected' };
+      }
+    }
+    return status;
+  });
+
+  ipcMain.handle('auth:login', async (_event, displayGroup: string) => {
+    const oauthId = OAUTH_PROVIDER_MAP[displayGroup];
+    if (!oauthId) return { success: false, error: `Unknown provider: ${displayGroup}` };
+
+    // Concurrency guard: only one login at a time
+    if (loginAbortController) {
+      return { success: false, error: 'Login already in progress' };
+    }
+
+    loginAbortController = new AbortController();
+    try {
+      await infra.authStorage.login(oauthId, {
+        onAuth: (info) => {
+          // Validate URL before opening in system browser
+          try {
+            const parsed = new URL(info.url);
+            if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+              shell.openExternal(info.url);
+            } else {
+              log.warn({ url: info.url }, 'Refused to open non-HTTP URL');
+            }
+          } catch {
+            log.warn({ url: info.url }, 'Invalid URL from OAuth provider');
+          }
+          mainWindow.webContents.send('auth:login-event', {
+            type: 'auth',
+            url: info.url,
+            instructions: info.instructions,
+          });
+        },
+        onPrompt: (prompt) => {
+          return new Promise<string>((resolve) => {
+            loginPromptResolver = resolve;
+            mainWindow.webContents.send('auth:login-event', {
+              type: 'prompt',
+              message: prompt.message,
+              placeholder: prompt.placeholder,
+              allowEmpty: prompt.allowEmpty,
+            });
+          });
+        },
+        onProgress: (message) => {
+          mainWindow.webContents.send('auth:login-event', { type: 'progress', message });
+        },
+        onManualCodeInput: () => {
+          return new Promise<string>((resolve) => {
+            loginPromptResolver = resolve;
+            mainWindow.webContents.send('auth:login-event', {
+              type: 'prompt',
+              message: 'Paste the authorization code or callback URL:',
+              placeholder: 'Code or URL…',
+            });
+          });
+        },
+        signal: loginAbortController.signal,
+      });
+
+      log.info({ displayGroup, oauthId }, 'OAuth login success');
+      return { success: true };
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        log.info({ displayGroup }, 'OAuth login cancelled');
+        return { success: false, error: 'Login cancelled' };
+      }
+      log.error({ displayGroup, err }, 'OAuth login failed');
+      return { success: false, error: err.message };
+    } finally {
+      loginAbortController = null;
+      loginPromptResolver = null;
+    }
+  });
+
+  ipcMain.handle('auth:login-respond', (_event, response: string) => {
+    if (loginPromptResolver) {
+      loginPromptResolver(response);
+      loginPromptResolver = null;
+    }
+  });
+
+  ipcMain.handle('auth:login-cancel', () => {
+    loginAbortController?.abort();
+  });
+
+  ipcMain.handle('auth:logout', (_event, displayGroup: string) => {
+    const oauthId = OAUTH_PROVIDER_MAP[displayGroup];
+    if (oauthId) {
+      // logout() already calls remove() internally
+      infra.authStorage.logout(oauthId);
+    }
+    // Also remove API key credentials stored under the display group name
+    infra.authStorage.remove(displayGroup);
+    log.info({ displayGroup }, 'Logged out');
+    return true;
   });
 
   ipcMain.handle('agent:set-thinking', (_event, level: string) => {
