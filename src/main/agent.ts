@@ -3,6 +3,7 @@ import { getModel } from '@mariozechner/pi-ai';
 import { createFigmaTools } from './tools/index.js';
 import { buildSystemPrompt } from './system-prompt.js';
 import os from 'os';
+import path from 'path';
 import type { FigmaCore } from './figma-core.js';
 import { OperationQueue } from './operation-queue.js';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
@@ -82,10 +83,18 @@ export const AVAILABLE_MODELS: Record<string, { id: string; label: string; sdkPr
 export interface AgentInfra {
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
+  sessionManager: SessionManager;
   figmaTools: ToolDefinition[];
 }
 
-export async function createAgentInfra(figmaCore: FigmaCore): Promise<AgentInfra> {
+/**
+ * Default sessions directory: ~/.figma-companion/sessions/
+ * Each app launch creates a new JSONL session file. Model switches
+ * are recorded as entries within the same session.
+ */
+const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), '.figma-companion', 'sessions');
+
+export async function createAgentInfra(figmaCore: FigmaCore, sessionsDir?: string): Promise<AgentInfra> {
   const operationQueue = new OperationQueue();
 
   const figmaTools = createFigmaTools({
@@ -97,8 +106,9 @@ export async function createAgentInfra(figmaCore: FigmaCore): Promise<AgentInfra
 
   const authStorage = AuthStorage.create();
   const modelRegistry = new ModelRegistry(authStorage);
+  const sessionManager = SessionManager.create(os.tmpdir(), sessionsDir || DEFAULT_SESSIONS_DIR);
 
-  return { authStorage, modelRegistry, figmaTools };
+  return { authStorage, modelRegistry, sessionManager, figmaTools };
 }
 
 export async function createFigmaAgent(
@@ -133,7 +143,7 @@ export async function createFigmaAgent(
     tools: [],
     customTools: infra.figmaTools,
     resourceLoader,
-    sessionManager: SessionManager.inMemory(),
+    sessionManager: infra.sessionManager,
     authStorage: infra.authStorage,
     modelRegistry: infra.modelRegistry,
   });
