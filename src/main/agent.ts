@@ -10,6 +10,10 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import os from 'os';
 import path from 'path';
+import type { CompressionConfigManager } from './compression/compression-config.js';
+import type { DesignSystemCache } from './compression/design-system-cache.js';
+import { createCompressionExtensionFactory } from './compression/extension-factory.js';
+import type { CompressionMetricsCollector } from './compression/metrics.js';
 import type { FigmaCore } from './figma-core.js';
 import type { ImageGenerator } from './image-gen/image-generator.js';
 import { OperationQueue } from './operation-queue.js';
@@ -81,7 +85,7 @@ export const AVAILABLE_MODELS: Record<string, { id: string; label: string; sdkPr
 };
 
 /**
- * Shared agent infrastructure: tools, auth, resource loader.
+ * Shared agent infrastructure: tools, auth, resource loader, compression.
  * Created once, reused across session recreations.
  */
 export interface AgentInfra {
@@ -89,6 +93,10 @@ export interface AgentInfra {
   modelRegistry: ModelRegistry;
   sessionManager: SessionManager;
   figmaTools: ToolDefinition[];
+  configManager: CompressionConfigManager;
+  designSystemCache: DesignSystemCache;
+  metricsCollector: CompressionMetricsCollector;
+  compressionExtensionFactory: (pi: any) => void;
 }
 
 /**
@@ -111,19 +119,40 @@ export async function createAgentInfra(
   const opts: AgentInfraOptions = typeof options === 'string' ? { sessionsDir: options } : options || {};
   const operationQueue = new OperationQueue();
 
+  // Compression infrastructure (dynamic imports: biome auto-converts static value imports to type-only)
+  const { CompressionConfigManager } = await import('./compression/compression-config.js');
+  const { DesignSystemCache } = await import('./compression/design-system-cache.js');
+  const { CompressionMetricsCollector } = await import('./compression/metrics.js');
+
+  const configManager = new CompressionConfigManager();
+  const designSystemCache = new DesignSystemCache(() => configManager.getActiveConfig().designSystemCacheTtlMs);
+  const metricsCollector = new CompressionMetricsCollector('app-session', 'pending', 1_000_000);
+  const compressionExtensionFactory = createCompressionExtensionFactory(configManager, metricsCollector);
+
   const figmaTools = createFigmaTools({
     connector: figmaCore.connector,
     figmaAPI: figmaCore.figmaAPI,
     operationQueue,
     wsServer: figmaCore.wsServer,
     getImageGenerator: opts.getImageGenerator,
+    designSystemCache,
+    configManager,
   });
 
   const authStorage = AuthStorage.create();
   const modelRegistry = new ModelRegistry(authStorage);
   const sessionManager = SessionManager.create(os.tmpdir(), opts.sessionsDir || DEFAULT_SESSIONS_DIR);
 
-  return { authStorage, modelRegistry, sessionManager, figmaTools };
+  return {
+    authStorage,
+    modelRegistry,
+    sessionManager,
+    figmaTools,
+    configManager,
+    designSystemCache,
+    metricsCollector,
+    compressionExtensionFactory,
+  };
 }
 
 export async function createFigmaAgent(
@@ -148,6 +177,7 @@ export async function createFigmaAgent(
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
+    extensionFactories: [infra.compressionExtensionFactory],
   });
   await resourceLoader.reload();
 

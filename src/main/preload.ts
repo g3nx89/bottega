@@ -67,6 +67,12 @@ contextBridge.exposeInMainWorld('api', {
   getImageGenConfig: () => ipcRenderer.invoke('imagegen:get-config'),
   setImageGenConfig: (config: { apiKey?: string; model?: string }) => ipcRenderer.invoke('imagegen:set-config', config),
 
+  // Compression profiles & cache
+  compressionGetProfiles: () => ipcRenderer.invoke('compression:get-profiles'),
+  compressionGetProfile: () => ipcRenderer.invoke('compression:get-profile'),
+  compressionSetProfile: (profile: string) => ipcRenderer.invoke('compression:set-profile', profile),
+  compressionInvalidateCaches: () => ipcRenderer.invoke('compression:invalidate-caches'),
+
   // OAuth login
   getAuthStatus: () => ipcRenderer.invoke('auth:get-auth-status'),
   login: (provider: string) => ipcRenderer.invoke('auth:login', provider),

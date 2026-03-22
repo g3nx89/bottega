@@ -29,12 +29,18 @@ process.on('unhandledRejection', (reason) => {
 
 let mainWindow: BrowserWindow | null = null;
 let figmaCore: Awaited<ReturnType<typeof createFigmaCore>> | null = null;
+const appState: { infra: Awaited<ReturnType<typeof createAgentInfra>> | null } = { infra: null };
 let cleaningUp = false;
 
 async function cleanup(exitCode = 0): Promise<void> {
   if (cleaningUp) return;
   cleaningUp = true;
   log.info('Shutting down');
+  try {
+    if (appState.infra) await appState.infra.metricsCollector.finalize();
+  } catch (err) {
+    log.warn({ err }, 'Error finalizing metrics');
+  }
   try {
     if (figmaCore) await figmaCore.stop();
   } catch (err) {
@@ -76,6 +82,7 @@ app.whenReady().then(async () => {
   const infra = await createAgentInfra(figmaCore, {
     getImageGenerator: () => imageGenState.generator,
   });
+  appState.infra = infra;
   const { session } = await createFigmaAgent(infra);
   log.info('Figma agent session created');
 
@@ -120,9 +127,23 @@ app.whenReady().then(async () => {
     log.info('Figma disconnected');
     mainWindow?.webContents.send('figma:disconnected');
   });
+
+  // 7. Invalidate compression caches on Figma document changes
+  figmaCore.wsServer.on('documentChange', (data: any) => {
+    if (data.hasStyleChanges || data.hasNodeChanges) {
+      infra.designSystemCache.invalidate();
+      log.debug(
+        { hasStyleChanges: data.hasStyleChanges, hasNodeChanges: data.hasNodeChanges },
+        'Compression cache invalidated via documentChange',
+      );
+    }
+  });
 });
 
-app.on('before-quit', () => {
-  cleanup(0);
+app.on('before-quit', (event) => {
+  if (!cleaningUp) {
+    event.preventDefault();
+    cleanup(0);
+  }
 });
 app.on('window-all-closed', () => app.quit());

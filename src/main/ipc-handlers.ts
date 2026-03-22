@@ -389,4 +389,31 @@ export function setupIpcHandlers(
 
     return { success: true, hasCustomKey: !!imageGenState.settings.apiKey };
   });
+
+  // ── Compression profile & cache management ──────
+
+  ipcMain.handle('compression:get-profiles', () => {
+    return infra.configManager.getProfiles();
+  });
+
+  ipcMain.handle('compression:get-profile', () => {
+    return infra.configManager.getActiveProfile();
+  });
+
+  ipcMain.handle('compression:set-profile', (_event, profile: string) => {
+    try {
+      infra.configManager.setProfile(profile as any);
+      log.info({ profile }, 'Compression profile changed');
+      return { success: true };
+    } catch (err: any) {
+      log.warn({ profile, err }, 'Invalid compression profile');
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('compression:invalidate-caches', () => {
+    infra.designSystemCache.invalidate();
+    log.info('All compression caches invalidated manually');
+    return { success: true };
+  });
 }

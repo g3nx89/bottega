@@ -784,6 +784,85 @@ const initialTransparency = savedTransparency !== null ? Number(savedTransparenc
 transparencySlider.value = initialTransparency;
 applyTransparency(initialTransparency);
 
+// ── Compression profile ─────────────────
+
+const compressionSelect = document.getElementById('compression-profile-select');
+const compressionDesc = document.getElementById('compression-profile-desc');
+const compressionRefreshBtn = document.getElementById('compression-refresh-btn');
+
+// Profile descriptions — loaded from main process, fallback inline
+const profileDescriptions = {
+  balanced: 'Default profile. Balances token savings and information completeness.',
+  creative: 'For intensive design sessions. Shorter cache TTLs for rapid iteration.',
+  exploration: 'For analysis and auditing. More detail in nodes and design system.',
+  minimal: 'For quick fixes and debugging. Mutation compression disabled, full detail preserved.',
+};
+
+function updateCompressionDesc() {
+  if (compressionDesc) {
+    compressionDesc.textContent = profileDescriptions[compressionSelect.value] || '';
+  }
+}
+
+if (compressionSelect) {
+  // Load full descriptions from main process
+  window.api
+    .compressionGetProfiles()
+    .then((profiles) => {
+      if (Array.isArray(profiles)) {
+        for (const p of profiles) {
+          if (p.id && p.description) profileDescriptions[p.id] = p.description;
+        }
+        updateCompressionDesc();
+      }
+    })
+    .catch(() => {});
+
+  // Sync active profile from main
+  window.api
+    .compressionGetProfile()
+    .then((profile) => {
+      if (profile) {
+        compressionSelect.value = profile;
+        localStorage.setItem('figma-cowork:compression-profile', profile);
+        updateCompressionDesc();
+      }
+    })
+    .catch(() => {});
+
+  // Restore from localStorage as immediate fallback
+  const savedProfile = localStorage.getItem('figma-cowork:compression-profile');
+  if (savedProfile) {
+    compressionSelect.value = savedProfile;
+  }
+  updateCompressionDesc();
+
+  compressionSelect.addEventListener('change', async () => {
+    const profile = compressionSelect.value;
+    localStorage.setItem('figma-cowork:compression-profile', profile);
+    updateCompressionDesc();
+    try {
+      await window.api.compressionSetProfile(profile);
+    } catch (err) {
+      console.warn('Failed to set compression profile:', err);
+    }
+  });
+}
+
+if (compressionRefreshBtn) {
+  compressionRefreshBtn.addEventListener('click', async () => {
+    try {
+      await window.api.compressionInvalidateCaches();
+      compressionRefreshBtn.textContent = 'Done!';
+      setTimeout(() => {
+        compressionRefreshBtn.textContent = 'Refresh caches';
+      }, 1500);
+    } catch (err) {
+      console.warn('Failed to invalidate caches:', err);
+    }
+  });
+}
+
 // ── Pin (always-on-top) ─────────────────
 
 pinBtn.addEventListener('click', async () => {

@@ -409,6 +409,28 @@ body {
   box-shadow: 0 0 0 2px var(--accent-dim);
 }
 
+.setting-description {
+  margin: 4px 0 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.setting-btn-small {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-secondary);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.setting-btn-small:hover {
+  background: var(--surface-hover, var(--border));
+}
+
 .setting-input {
   flex: 1;
   padding: 6px 10px;
