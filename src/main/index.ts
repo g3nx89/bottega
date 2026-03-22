@@ -67,7 +67,10 @@ app.whenReady().then(async () => {
     generator: new ImageGenerator({ apiKey, model: imageGenSettings.model }),
     settings: imageGenSettings,
   };
-  log.info({ model: imageGenState.generator.model, isDefault: !imageGenSettings.apiKey }, 'Image generator initialized');
+  log.info(
+    { model: imageGenState.generator.model, isDefault: !imageGenSettings.apiKey },
+    'Image generator initialized',
+  );
 
   // 3. Create agent infrastructure (shared across session recreations)
   const infra = await createAgentInfra(figmaCore, {

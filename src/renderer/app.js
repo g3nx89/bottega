@@ -1004,7 +1004,6 @@ window.api.onSuggestions((suggestions) => {
   showSuggestions(suggestions);
 });
 
-
 // ── Slash commands ────────────────────────
 // Source of truth for tool parameters: src/main/tools/image-gen.ts
 
@@ -1233,7 +1232,6 @@ function hideSlashHelp() {
   slashHelpEl.classList.add('hidden');
   clearChildren(slashHelpEl);
 }
-
 
 // Focus input on load
 inputField.focus();

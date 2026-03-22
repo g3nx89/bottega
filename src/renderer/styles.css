@@ -1539,7 +1539,7 @@ body {
 }
 
 .slash-help-tips li::before {
-  content: '';
+  content: "";
   position: absolute;
   left: 0;
   top: 6px;

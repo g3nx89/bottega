@@ -10,7 +10,7 @@ import {
   OAUTH_PROVIDER_INFO,
   OAUTH_PROVIDER_MAP,
 } from './agent.js';
-import { type ImageGenSettings, effectiveApiKey, saveImageGenSettings } from './image-gen/config.js';
+import { effectiveApiKey, type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
 import { DEFAULT_IMAGE_MODEL, IMAGE_GEN_MODELS, ImageGenerator } from './image-gen/image-generator.js';
 import { PromptSuggester } from './prompt-suggester.js';
 
@@ -382,7 +382,10 @@ export function setupIpcHandlers(
       apiKey: key,
       model: imageGenState.settings.model,
     });
-    log.info({ model: imageGenState.generator.model, isDefault: !imageGenState.settings.apiKey }, 'Image generator updated');
+    log.info(
+      { model: imageGenState.generator.model, isDefault: !imageGenState.settings.apiKey },
+      'Image generator updated',
+    );
 
     return { success: true, hasCustomKey: !!imageGenState.settings.apiKey };
   });
