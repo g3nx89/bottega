@@ -18,7 +18,7 @@ import { createFigmaTools } from './tools/index.js';
 
 export interface ModelConfig {
   provider: string; // Pi SDK provider ID: 'anthropic' | 'openai' | 'openai-codex' | 'google' | 'google-gemini-cli'
-  modelId: string; // e.g. 'claude-sonnet-4-6', 'gpt-4o', 'gpt-5.1', 'gemini-2.5-pro'
+  modelId: string; // e.g. 'claude-sonnet-4-6', 'gpt-5.4', 'gemini-3.1-pro'
 }
 
 export const DEFAULT_MODEL: ModelConfig = { provider: 'anthropic', modelId: 'claude-sonnet-4-6' };
@@ -46,14 +46,13 @@ export const CONTEXT_SIZES: Record<string, number> = {
   'claude-opus-4-6': 1_000_000,
   'claude-sonnet-4-6': 1_000_000,
   'claude-haiku-4-5': 200_000,
-  'gpt-4o': 128_000,
-  'gpt-4o-mini': 128_000,
-  'o4-mini': 200_000,
-  'o3-mini': 200_000,
-  'gpt-5.1': 1_000_000,
-  'gpt-5.1-codex-mini': 1_000_000,
-  'gemini-2.5-pro': 1_000_000,
-  'gemini-2.5-flash': 1_000_000,
+  'gpt-5.4': 1_000_000,
+  'gpt-5.4-mini': 1_000_000,
+  'gpt-5.4-nano': 1_000_000,
+  'gpt-5.3-codex': 1_000_000,
+  'gemini-3-flash': 1_000_000,
+  'gemini-3.1-pro': 1_000_000,
+  'gemini-3.1-flash-lite': 1_000_000,
 };
 
 /**
@@ -69,18 +68,15 @@ export const AVAILABLE_MODELS: Record<string, { id: string; label: string; sdkPr
     { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', sdkProvider: 'anthropic' },
   ],
   openai: [
-    { id: 'gpt-4o', label: 'GPT-4o', sdkProvider: 'openai' },
-    { id: 'gpt-4o-mini', label: 'GPT-4o Mini', sdkProvider: 'openai' },
-    { id: 'o4-mini', label: 'o4-mini', sdkProvider: 'openai' },
-    { id: 'o3-mini', label: 'o3-mini', sdkProvider: 'openai' },
-    { id: 'gpt-5.1', label: 'GPT-5.1 (Codex)', sdkProvider: 'openai-codex' },
-    { id: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Mini (Codex)', sdkProvider: 'openai-codex' },
+    { id: 'gpt-5.4', label: 'GPT-5.4', sdkProvider: 'openai' },
+    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', sdkProvider: 'openai' },
+    { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', sdkProvider: 'openai' },
+    { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', sdkProvider: 'openai-codex' },
   ],
   google: [
-    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', sdkProvider: 'google' },
-    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', sdkProvider: 'google' },
-    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro (Free)', sdkProvider: 'google-gemini-cli' },
-    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Free)', sdkProvider: 'google-gemini-cli' },
+    { id: 'gemini-3-flash', label: 'Gemini 3 Flash', sdkProvider: 'google' },
+    { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', sdkProvider: 'google' },
+    { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', sdkProvider: 'google' },
   ],
 };
 
