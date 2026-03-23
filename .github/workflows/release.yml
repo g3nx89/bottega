@@ -57,13 +57,16 @@ jobs:
 
           rm /tmp/cert.p12 /tmp/DevIDG2.cer /tmp/AppleRoot.cer
 
+      - name: Install coreutils
+        run: brew install coreutils
+
       - name: Package unsigned
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npx electron-builder --mac -c.mac.notarize=false --publish never
 
-      - name: Sign app manually
+      - name: Sign app
         run: |
           APP="dist/mac-arm64/Bottega.app"
           IDENTITY="Developer ID Application: Alessandro Fato (NMPQ3SH37Y)"
@@ -73,45 +76,52 @@ jobs:
 
           # Sign nested frameworks and helpers first (inside-out)
           find "$APP" -type f \( -name "*.dylib" -o -name "*.so" -o -perm +111 \) -not -path "*/MacOS/Bottega" | sort | while read -r file; do
-            # Skip non-Mach-O files
             file_type=$(file -b "$file")
             if echo "$file_type" | grep -q "Mach-O"; then
               echo "Signing: $file"
-              timeout 60 codesign --sign "$IDENTITY" --force --timestamp \
-                --entitlements "$ENTITLEMENTS" --options runtime "$file" 2>&1 || {
-                echo "::warning::Failed to sign $file, trying without timestamp..."
-                timeout 60 codesign --sign "$IDENTITY" --force \
-                  --entitlements "$ENTITLEMENTS" --options runtime "$file" 2>&1
-              }
+              gtimeout 120 codesign --sign "$IDENTITY" --force --timestamp \
+                --entitlements "$ENTITLEMENTS" --options runtime "$file" 2>&1
             fi
           done
 
           # Sign .framework bundles
           find "$APP" -name "*.framework" -type d | sort | while read -r fw; do
             echo "Signing framework: $fw"
-            timeout 60 codesign --sign "$IDENTITY" --force --timestamp \
-              --entitlements "$ENTITLEMENTS" --options runtime "$fw" 2>&1 || {
-              echo "::warning::Failed to sign framework $fw"
-            }
+            gtimeout 120 codesign --sign "$IDENTITY" --force --timestamp \
+              --entitlements "$ENTITLEMENTS" --options runtime "$fw" 2>&1
+          done
+
+          # Sign helper apps
+          find "$APP/Contents/Frameworks" -name "*.app" -type d | sort | while read -r helper; do
+            echo "Signing helper: $helper"
+            gtimeout 120 codesign --sign "$IDENTITY" --force --timestamp \
+              --entitlements "$ENTITLEMENTS" --options runtime "$helper" 2>&1
           done
 
           # Sign the main app bundle
           echo "Signing main app: $APP"
-          timeout 120 codesign --sign "$IDENTITY" --force --timestamp \
+          gtimeout 180 codesign --sign "$IDENTITY" --force --timestamp \
             --entitlements "$ENTITLEMENTS" --options runtime "$APP" 2>&1
 
           echo "=== Verifying signature ==="
           codesign --verify --deep --strict --verbose=2 "$APP" 2>&1
+          echo "=== Signing complete ==="
 
-          echo "=== Done ==="
-
-      - name: Create dmg and zip
+      - name: Package signed app
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
-          # Re-run electron-builder just for dmg/zip creation (app already signed)
-          npx electron-builder --mac -c.mac.notarize=false -c.mac.identity=null --publish always
+          # Create zip for auto-update
+          cd dist/mac-arm64
+          zip -ry ../Bottega-$(node -p "require('../../package.json').version")-arm64-mac.zip Bottega.app
+          cd ../..
+
+          # Create dmg
+          npx electron-builder --mac dmg -c.mac.notarize=false -c.mac.identity=null --publish never
+
+          echo "=== Artifacts ==="
+          ls -la dist/*.dmg dist/*.zip
 
       - name: Notarize
         env:
@@ -119,10 +129,19 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          ZIP=$(ls dist/Bottega-*-arm64-mac.zip)
+          ZIP=$(ls dist/Bottega-*-arm64-mac.zip | head -1)
           echo "Submitting $ZIP for notarization..."
           xcrun notarytool submit "$ZIP" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_SPECIFIC_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait --timeout 10m 2>&1 || echo "::warning::Notarization failed or timed out"
+            --wait --timeout 10m 2>&1
+
+      - name: Publish to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" --draft --title "Bottega ${TAG#v}" --generate-notes \
+            dist/Bottega-*-arm64.dmg \
+            dist/Bottega-*-arm64-mac.zip
