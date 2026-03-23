@@ -33,12 +33,16 @@ jobs:
           KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain"
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
 
+          # Save for later steps
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> "$GITHUB_ENV"
+
           # Create and unlock keychain
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          # Import Apple intermediate + root certs for trust chain
+          # Import Apple intermediate + root certs
           curl -sL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o /tmp/DevIDG2.cer
           curl -sL https://www.apple.com/appleca/AppleIncRootCertificate.cer -o /tmp/AppleRoot.cer
           security import /tmp/DevIDG2.cer -k "$KEYCHAIN_PATH"
@@ -52,11 +56,11 @@ jobs:
             -T /usr/bin/productbuild \
             -T /usr/bin/security
 
-          # CRITICAL: use KEYCHAIN password (not cert password) for partition list
+          # Use KEYCHAIN password for partition list
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          # Add to search list while preserving existing keychains
+          # Preserve system keychains in search list
           security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
 
           # Verify
@@ -64,10 +68,22 @@ jobs:
 
           rm /tmp/cert.p12 /tmp/DevIDG2.cer /tmp/AppleRoot.cer
 
+      - name: Test codesign (diagnostic)
+        run: |
+          echo "Testing codesign on a simple binary..."
+          cp /bin/echo /tmp/test-binary
+          timeout 30 codesign -s "Developer ID Application: Alessandro Fato (NMPQ3SH37Y)" \
+            --force --timestamp -v /tmp/test-binary 2>&1 || {
+            echo "::error::codesign test FAILED or timed out"
+            echo "Trying without --timestamp..."
+            timeout 30 codesign -s "Developer ID Application: Alessandro Fato (NMPQ3SH37Y)" \
+              --force -v /tmp/test-binary 2>&1 || echo "::error::codesign without timestamp also failed"
+          }
+          rm -f /tmp/test-binary
+
       - name: Package & Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Do NOT set CSC_LINK here — cert already imported, auto-discovery finds it
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
