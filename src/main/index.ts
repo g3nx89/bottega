@@ -11,6 +11,50 @@ import { setupIpcHandlers } from './ipc-handlers.js';
 import { safeSend } from './safe-send.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ── Ensure PATH includes node/npm location ──────────
+// When launched from Finder, macOS provides a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin).
+// Pi SDK needs `npm` to resolve global packages. We scan common install locations.
+import { existsSync, readdirSync } from 'fs';
+
+{
+  const home = process.env.HOME || '';
+  const candidates = [
+    '/usr/local/bin',
+    '/opt/homebrew/bin',
+    path.join(home, '.volta/bin'),
+    path.join(home, '.local/bin'),
+  ];
+
+  // nvm: find the latest installed version's bin directory
+  const nvmDir = path.join(home, '.nvm/versions/node');
+  if (existsSync(nvmDir)) {
+    try {
+      const versions = readdirSync(nvmDir)
+        .filter((d) => d.startsWith('v'))
+        .sort();
+      if (versions.length > 0) candidates.push(path.join(nvmDir, versions[versions.length - 1], 'bin'));
+    } catch {}
+  }
+
+  // fnm
+  const fnmDir = path.join(home, '.local/share/fnm/node-versions');
+  if (existsSync(fnmDir)) {
+    try {
+      const versions = readdirSync(fnmDir)
+        .filter((d) => d.startsWith('v'))
+        .sort();
+      if (versions.length > 0) candidates.push(path.join(fnmDir, versions[versions.length - 1], 'installation/bin'));
+    } catch {}
+  }
+
+  const currentPath = process.env.PATH || '';
+  const missing = candidates.filter((p) => p && existsSync(p) && !currentPath.includes(p));
+  if (missing.length > 0) {
+    process.env.PATH = `${currentPath}:${missing.join(':')}`;
+  }
+}
+
 const log = createChildLogger({ component: 'main' });
 
 // ── Crash & error logging ────────────────────
@@ -122,12 +166,21 @@ app.whenReady().then(async () => {
       subscribe: () => {},
     };
   } else {
-    infra = await createAgentInfra(figmaCore, {
-      getImageGenerator: () => imageGenState.generator,
-    });
-    const result = await createFigmaAgent(infra);
-    session = result.session;
-    log.info('Figma agent session created');
+    try {
+      infra = await createAgentInfra(figmaCore, {
+        getImageGenerator: () => imageGenState.generator,
+      });
+      const result = await createFigmaAgent(infra);
+      session = result.session;
+      log.info('Figma agent session created');
+    } catch (err: any) {
+      log.error(
+        { message: err?.message, code: err?.code, name: err?.name, stack: err?.stack, raw: String(err) },
+        'Agent session creation failed — starting without agent',
+      );
+      infra = infra!;
+      session = { prompt: async () => {}, abort: async () => {}, subscribe: () => {} };
+    }
   }
   appState.infra = infra;
 
