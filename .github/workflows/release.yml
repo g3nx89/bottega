@@ -107,35 +107,47 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP" 2>&1
           echo "=== Signing complete ==="
 
-      - name: Package signed app
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: |
-          # Create zip for auto-update
-          cd dist/mac-arm64
-          zip -ry ../Bottega-$(node -p "require('../../package.json').version")-arm64-mac.zip Bottega.app
-          cd ../..
-
-          # Create dmg
-          npx electron-builder --mac dmg -c.mac.notarize=false -c.mac.identity=null --publish never
-
-          echo "=== Artifacts ==="
-          ls -la dist/*.dmg dist/*.zip
-
-      - name: Notarize
+      - name: Notarize app
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          ZIP=$(ls dist/Bottega-*-arm64-mac.zip | head -1)
-          echo "Submitting $ZIP for notarization..."
-          xcrun notarytool submit "$ZIP" \
+          APP="dist/mac-arm64/Bottega.app"
+
+          # Create temp zip for notarization submission
+          ditto -c -k --keepParent "$APP" /tmp/notarize.zip
+
+          echo "Submitting for notarization..."
+          xcrun notarytool submit /tmp/notarize.zip \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_SPECIFIC_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
             --wait --timeout 10m 2>&1
+
+          echo "Stapling notarization ticket..."
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+
+          rm /tmp/notarize.zip
+
+      - name: Package stapled app
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+
+          # Create zip from stapled app (for auto-update)
+          cd dist/mac-arm64
+          zip -ry "../Bottega-${VERSION}-arm64-mac.zip" Bottega.app
+          cd ../..
+
+          # Create dmg from stapled app
+          npx electron-builder --mac dmg \
+            -c.mac.notarize=false -c.mac.identity=null \
+            -c.mac.sign=false \
+            --publish never
+
+          echo "=== Artifacts ==="
+          ls -la dist/*.dmg dist/*.zip
 
       - name: Generate latest-mac.yml
         run: |
