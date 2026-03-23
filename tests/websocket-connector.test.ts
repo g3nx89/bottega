@@ -80,4 +80,80 @@ describe('WebSocketConnector', () => {
 
     await expect(connector.executeCodeViaUI('bad code')).rejects.toThrow('Connection lost');
   });
+
+  // ── Edge cases: gap-filling ────────────────────────
+
+  it('initialize() throws when no client is connected', async () => {
+    // Edge case: initialize before plugin connects — should fail fast
+    mockWsServer.isClientConnected.mockReturnValue(false);
+
+    await expect(connector.initialize()).rejects.toThrow(/No WebSocket client connected/);
+  });
+
+  it('initialize() succeeds when client is connected', async () => {
+    // Edge case: happy path — client is already connected
+    mockWsServer.isClientConnected.mockReturnValue(true);
+
+    await expect(connector.initialize()).resolves.toBeUndefined();
+  });
+
+  it('getTransportType returns websocket', () => {
+    // Coverage: transport type accessor
+    expect(connector.getTransportType()).toBe('websocket');
+  });
+
+  it('createVariable sends optional fields only when provided', async () => {
+    // Edge case: optional params construction — with all options
+    await connector.createVariable('primary', 'col:1', 'COLOR', {
+      valuesByMode: { m1: { r: 1, g: 0, b: 0, a: 1 } },
+      description: 'Primary color',
+      scopes: ['ALL_SCOPES'],
+    });
+
+    expect(mockSendCommand).toHaveBeenCalledWith('CREATE_VARIABLE', {
+      name: 'primary',
+      collectionId: 'col:1',
+      resolvedType: 'COLOR',
+      valuesByMode: { m1: { r: 1, g: 0, b: 0, a: 1 } },
+      description: 'Primary color',
+      scopes: ['ALL_SCOPES'],
+    });
+  });
+
+  it('createVariable without options omits optional fields', async () => {
+    // Edge case: no options — only required fields sent
+    await connector.createVariable('token', 'col:1', 'FLOAT');
+
+    expect(mockSendCommand).toHaveBeenCalledWith('CREATE_VARIABLE', {
+      name: 'token',
+      collectionId: 'col:1',
+      resolvedType: 'FLOAT',
+    });
+  });
+
+  it('setNodeStrokes includes strokeWeight only when provided', async () => {
+    // Edge case: optional strokeWeight param
+    const strokes = [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 } }];
+
+    await connector.setNodeStrokes('1:1', strokes, 2);
+    expect(mockSendCommand).toHaveBeenCalledWith('SET_NODE_STROKES', {
+      nodeId: '1:1',
+      strokes,
+      strokeWeight: 2,
+    });
+
+    mockSendCommand.mockClear();
+    await connector.setNodeStrokes('1:1', strokes);
+    expect(mockSendCommand).toHaveBeenCalledWith('SET_NODE_STROKES', {
+      nodeId: '1:1',
+      strokes,
+    });
+  });
+
+  it('executeInPluginContext uses hardcoded 5s/7s timeouts', async () => {
+    // Coverage: executeInPluginContext vs executeCodeViaUI
+    await connector.executeInPluginContext('figma.root.name');
+
+    expect(mockSendCommand).toHaveBeenCalledWith('EXECUTE_CODE', { code: 'figma.root.name', timeout: 5000 }, 7000);
+  });
 });

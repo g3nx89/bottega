@@ -354,4 +354,234 @@ describe('FigmaWebSocketServer', () => {
       expect(server.isStarted()).toBe(false);
     });
   });
+
+  // ==========================================================================
+  // Edge cases: gap-filling tests
+  // ==========================================================================
+
+  describe('edge cases', () => {
+    // Security: origin validation via verifyClient
+    it('should reject WebSocket connections from unauthorized origins', async () => {
+      const { WebSocket: WS } = await import('ws');
+
+      // Connect with a malicious origin — should be rejected with 403
+      const maliciousWs = new WS(`ws://localhost:${port}`, {
+        headers: { origin: 'https://evil.example.com' },
+      });
+
+      const result = await new Promise<{ error: Error | null; open: boolean }>((resolve) => {
+        maliciousWs.on('open', () => resolve({ error: null, open: true }));
+        maliciousWs.on('error', (err) => resolve({ error: err, open: false }));
+        // Also listen for unexpected close
+        maliciousWs.on('close', () => resolve({ error: null, open: false }));
+      });
+
+      expect(result.open).toBe(false);
+      if (maliciousWs.readyState !== WS.CLOSED) maliciousWs.terminate();
+    });
+
+    it('should accept WebSocket connections with no origin (local process)', async () => {
+      // Security: no-origin connections should be allowed (Node.js clients)
+      const { WebSocket: WS } = await import('ws');
+      const localWs = new WS(`ws://localhost:${port}`);
+
+      const opened = await new Promise<boolean>((resolve) => {
+        localWs.on('open', () => resolve(true));
+        localWs.on('error', () => resolve(false));
+      });
+
+      expect(opened).toBe(true);
+      localWs.terminate();
+    });
+
+    it('should reject origins that prefix-match allowed domains (CSWSH bypass)', async () => {
+      // Security: startsWith('https://www.figma.com') must not match subdomains
+      const { WebSocket: WS } = await import('ws');
+
+      for (const maliciousOrigin of [
+        'https://www.figma.com.evil.com',
+        'https://figma.com.attacker.com',
+        'https://www.figma.community',
+      ]) {
+        const ws = new WS(`ws://localhost:${port}`, {
+          headers: { origin: maliciousOrigin },
+        });
+
+        const opened = await new Promise<boolean>((resolve) => {
+          ws.on('open', () => resolve(true));
+          ws.on('error', () => resolve(false));
+          ws.on('close', () => resolve(false));
+        });
+
+        expect(opened).toBe(false);
+        if (ws.readyState !== WS.CLOSED) ws.terminate();
+      }
+    });
+
+    it('FILE_INFO without fileKey should leave client pending', async () => {
+      // Edge case: FILE_INFO with missing fileKey — client remains pending
+      const { WebSocket: WS } = await import('ws');
+      const rawWs = new WS(`ws://localhost:${port}`);
+
+      await new Promise<void>((resolve) => {
+        rawWs.on('open', () => {
+          rawWs.send(
+            JSON.stringify({
+              type: 'FILE_INFO',
+              data: { fileName: 'No Key File' }, // No fileKey!
+            }),
+          );
+          setTimeout(resolve, 100);
+        });
+      });
+
+      // Should not be promoted to a named client
+      expect(server.isClientConnected()).toBe(false);
+      rawWs.terminate();
+    });
+
+    it('setActiveFile with invalid fileKey returns false', async () => {
+      // Edge case: switching to a non-existent file
+      await client.connect(port, 'abc123', 'Test File');
+      const result = server.setActiveFile('non-existent-key');
+      expect(result).toBe(false);
+      // Active file should remain unchanged
+      expect(server.getActiveFileKey()).toBe('abc123');
+    });
+
+    it('start() is idempotent when already started', async () => {
+      // Edge case: calling start() when already running should be a no-op
+      expect(server.isStarted()).toBe(true);
+      await server.start(); // should not throw
+      expect(server.isStarted()).toBe(true);
+    });
+
+    it('getDocumentChanges with since filter returns only recent entries', async () => {
+      // Edge case: temporal filtering of document changes
+      await client.connect(port, 'abc123', 'Test File');
+
+      client.sendEvent('DOCUMENT_CHANGE', {
+        hasStyleChanges: false,
+        hasNodeChanges: true,
+        changedNodeIds: ['1:0'],
+        changeCount: 1,
+        timestamp: 1000,
+      });
+      client.sendEvent('DOCUMENT_CHANGE', {
+        hasStyleChanges: false,
+        hasNodeChanges: true,
+        changedNodeIds: ['2:0'],
+        changeCount: 1,
+        timestamp: 2000,
+      });
+      client.sendEvent('DOCUMENT_CHANGE', {
+        hasStyleChanges: false,
+        hasNodeChanges: true,
+        changedNodeIds: ['3:0'],
+        changeCount: 1,
+        timestamp: 3000,
+      });
+      await new Promise((r) => setTimeout(r, 100));
+
+      const recent = server.getDocumentChanges({ since: 2000 });
+      expect(recent.length).toBe(2);
+      expect(recent[0].timestamp).toBe(2000);
+      expect(recent[1].timestamp).toBe(3000);
+    });
+
+    it('getDocumentChanges with count returns last N entries', async () => {
+      await client.connect(port, 'abc123', 'Test File');
+
+      for (let i = 0; i < 5; i++) {
+        client.sendEvent('DOCUMENT_CHANGE', {
+          hasStyleChanges: false,
+          hasNodeChanges: true,
+          changedNodeIds: [`${i}:0`],
+          changeCount: 1,
+          timestamp: i,
+        });
+      }
+      await new Promise((r) => setTimeout(r, 100));
+
+      const last2 = server.getDocumentChanges({ count: 2 });
+      expect(last2.length).toBe(2);
+      expect(last2[0].timestamp).toBe(3);
+      expect(last2[1].timestamp).toBe(4);
+    });
+
+    it('clearDocumentChanges returns count and empties buffer', async () => {
+      await client.connect(port, 'abc123', 'Test File');
+
+      client.sendEvent('DOCUMENT_CHANGE', {
+        hasStyleChanges: false,
+        hasNodeChanges: true,
+        changedNodeIds: ['1:0'],
+        changeCount: 1,
+        timestamp: 1000,
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const cleared = server.clearDocumentChanges();
+      expect(cleared).toBe(1);
+      expect(server.getDocumentChanges().length).toBe(0);
+    });
+
+    it('clearConsoleLogs returns count and empties buffer', async () => {
+      await client.connect(port, 'abc123', 'Test File');
+
+      client.sendEvent('CONSOLE_CAPTURE', {
+        timestamp: Date.now(),
+        level: 'log',
+        message: 'test',
+        args: [],
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      const cleared = server.clearConsoleLogs();
+      expect(cleared).toBe(1);
+      expect(server.getConsoleLogs().length).toBe(0);
+    });
+
+    it('getConsoleLogs with level filter returns only matching entries', async () => {
+      await client.connect(port, 'abc123', 'Test File');
+
+      client.sendEvent('CONSOLE_CAPTURE', { timestamp: 1, level: 'log', message: 'info msg', args: [] });
+      client.sendEvent('CONSOLE_CAPTURE', { timestamp: 2, level: 'error', message: 'err msg', args: [] });
+      client.sendEvent('CONSOLE_CAPTURE', { timestamp: 3, level: 'log', message: 'info 2', args: [] });
+      await new Promise((r) => setTimeout(r, 100));
+
+      const errors = server.getConsoleLogs({ level: 'error' });
+      expect(errors.length).toBe(1);
+      expect(errors[0].message).toBe('err msg');
+    });
+
+    it('getters return empty/null when no active file', async () => {
+      // Edge case: all getters with no active file should not crash
+      expect(server.getConnectedFileInfo()).toBeNull();
+      expect(server.getCurrentSelection()).toBeNull();
+      expect(server.getDocumentChanges()).toEqual([]);
+      expect(server.getConsoleLogs()).toEqual([]);
+      expect(server.clearDocumentChanges()).toBe(0);
+      expect(server.clearConsoleLogs()).toBe(0);
+    });
+
+    it('sendCommand to specific targetFileKey routes correctly', async () => {
+      // Edge case: command routing to non-active file
+      await client.connect(port, 'file-A', 'File A');
+      client.onCommand('PING', () => ({ pong: 'A' }));
+
+      const client2 = new WsTestClient();
+      try {
+        await client2.connect(port, 'file-B', 'File B');
+        client2.onCommand('PING', () => ({ pong: 'B' }));
+
+        // Active file is file-B, but explicitly target file-A
+        expect(server.getActiveFileKey()).toBe('file-B');
+        const result = await server.sendCommand('PING', {}, 5000, 'file-A');
+        expect(result).toEqual({ pong: 'A' });
+      } finally {
+        await client2.close();
+      }
+    });
+  });
 });

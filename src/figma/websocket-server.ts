@@ -115,11 +115,17 @@ export class FigmaWebSocketServer extends EventEmitter {
             // Mitigate Cross-Site WebSocket Hijacking (CSWSH):
             // Reject connections from unexpected browser origins.
             const origin = info.origin;
-            const allowed =
+            let allowed =
               !origin || // No origin — local process (e.g. Node.js client)
-              origin === 'null' || // Sandboxed iframe / Figma Desktop plugin UI
-              origin.startsWith('https://www.figma.com') ||
-              origin.startsWith('https://figma.com');
+              origin === 'null'; // Sandboxed iframe / Figma Desktop plugin UI
+            if (!allowed && origin) {
+              try {
+                const hostname = new URL(origin).hostname;
+                allowed = hostname === 'www.figma.com' || hostname === 'figma.com';
+              } catch {
+                allowed = false;
+              }
+            }
             if (allowed) {
               callback(true);
             } else {

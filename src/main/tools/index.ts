@@ -26,7 +26,13 @@ export interface ToolDeps {
 
 /** Standard text result wrapper — avoids repeating the same shape in every tool. */
 export function textResult(data: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(data) }], details: {} };
+  let text: string;
+  try {
+    text = JSON.stringify(data);
+  } catch {
+    text = `[Serialization error] ${String(data)}`;
+  }
+  return { content: [{ type: 'text' as const, text }], details: {} };
 }
 
 /** Wrap tool execute to check abort signal before running. */

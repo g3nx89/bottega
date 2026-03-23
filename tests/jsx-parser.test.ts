@@ -245,4 +245,50 @@ describe('parseJsx', () => {
     expect((result2.children[0] as TreeNode).type).toBe('text');
     expect((result2.children[1] as TreeNode).type).toBe('text');
   });
+
+  // ── Additional edge cases ─────────────────────
+
+  it('should handle explicit undefined prop value', () => {
+    // Edge case: esbuild compiles width={undefined} to { width: void 0 }.
+    // h() receives a truthy object so props || {} keeps it as-is.
+    const result = parseJsx('<Frame width={undefined} />');
+    expect(result.type).toBe('frame');
+    expect('width' in result.props).toBe(true);
+    expect(result.props.width).toBeUndefined();
+  });
+
+  it('should handle nested Fragment inside Frame', () => {
+    // Edge case: Fragment as child of Frame — should flatten
+    const result = parseJsx(`
+      <Frame>
+        <>
+          <Text>A</Text>
+          <Text>B</Text>
+        </>
+      </Frame>
+    `);
+    expect(result.type).toBe('frame');
+    // The fragment becomes a child node with type 'fragment'
+    const fragmentChild = result.children[0] as TreeNode;
+    expect(fragmentChild.type).toBe('fragment');
+    expect(fragmentChild.children).toHaveLength(2);
+  });
+
+  it('should handle empty text content', () => {
+    // Edge case: Text with empty string child
+    const result = parseJsx('<Text>{""}</Text>');
+    expect(result.type).toBe('text');
+    expect(result.children).toContain('');
+  });
+
+  it('should handle array map pattern commonly used by LLM', () => {
+    // Edge case: dynamic children via array map — common LLM pattern
+    const result = parseJsx(`
+      <Frame>
+        {[1, 2, 3].map(i => <Rectangle key={i} width={i * 10} />)}
+      </Frame>
+    `);
+    expect(result.type).toBe('frame');
+    expect(result.children.length).toBeGreaterThanOrEqual(3);
+  });
 });

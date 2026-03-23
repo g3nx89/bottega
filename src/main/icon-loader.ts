@@ -9,8 +9,10 @@ export async function loadIconSvg(name: string, size: number = 24): Promise<stri
   const cacheKey = `${name}@${size}`;
   if (iconCache.has(cacheKey)) return iconCache.get(cacheKey)!;
 
-  const [prefix, iconName] = name.split(':');
-  if (!prefix || !iconName) throw new Error(`Invalid icon name "${name}". Use format "prefix:name" (e.g. "mdi:home")`);
+  const parts = name.split(':');
+  if (parts.length !== 2 || !parts[0] || !parts[1])
+    throw new Error(`Invalid icon name "${name}". Use format "prefix:name" (e.g. "mdi:home")`);
+  const [prefix, iconName] = parts;
 
   const url = `https://api.iconify.design/${prefix}.json?icons=${iconName}`;
   const controller = new AbortController();

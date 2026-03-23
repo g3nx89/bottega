@@ -364,6 +364,96 @@ describe('setupIpcHandlers', () => {
     });
   });
 
+  // ── Untested event forwarding ─────────────────────────────────
+
+  describe('additional event forwarding', () => {
+    it('should forward auto_compaction_start to renderer', () => {
+      // Edge case: compaction events not covered by existing tests
+      mockSession.emitEvent({ type: 'auto_compaction_start' });
+
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:compaction', true);
+    });
+
+    it('should forward auto_compaction_end to renderer', () => {
+      mockSession.emitEvent({ type: 'auto_compaction_end' });
+
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:compaction', false);
+    });
+
+    it('should forward auto_retry_start to renderer', () => {
+      mockSession.emitEvent({ type: 'auto_retry_start' });
+
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:retry', true);
+    });
+
+    it('should forward auto_retry_end to renderer', () => {
+      mockSession.emitEvent({ type: 'auto_retry_end' });
+
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:retry', false);
+    });
+
+    it('should not crash on screenshot tool result without image content', () => {
+      // Edge case: figma_screenshot succeeds but content has no image entry
+      mockSession.emitEvent({
+        type: 'tool_execution_end',
+        toolName: 'figma_screenshot',
+        toolCallId: 'call-no-img',
+        isError: false,
+        result: {
+          content: [{ type: 'text', text: 'Screenshot captured but no image data' }],
+        },
+      });
+
+      // Should send tool-end but NOT agent:screenshot
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith(
+        'agent:tool-end',
+        'figma_screenshot',
+        'call-no-img',
+        true,
+        expect.any(Object),
+      );
+      expect(mockWindow.webContents.send).not.toHaveBeenCalledWith('agent:screenshot', expect.anything());
+    });
+  });
+
+  // ── Auth edge cases ─────────────────────────────────────────
+
+  describe('auth edge cases', () => {
+    it('auth:set-key should reject invalid provider', async () => {
+      // Security: setting API key for unknown provider should fail
+      const result = await invokeHandler('auth:set-key', 'unknown-provider', 'sk-test');
+
+      expect(result).toBe(false);
+    });
+
+    it('auth:set-key with empty apiKey should remove credentials', async () => {
+      // Edge case: empty string means "remove"
+      const result = await invokeHandler('auth:set-key', 'Anthropic', '');
+
+      expect(result).toBe(true);
+      expect(mockInfra.authStorage.remove).toHaveBeenCalledWith('Anthropic');
+      expect(mockInfra.authStorage.set).not.toHaveBeenCalled();
+    });
+
+    it('window:is-pinned returns the pin state', async () => {
+      // Coverage: untested IPC handler
+      mockWindow.isAlwaysOnTop.mockReturnValueOnce(true);
+      const result = await invokeHandler('window:is-pinned');
+
+      expect(result).toBe(true);
+    });
+
+    it('double abort should not crash', async () => {
+      // Characterization: mock always resolves — real Pi SDK may throw
+      // if abort() is called on a non-streaming session. This test verifies
+      // the handler does not guard against double-abort itself.
+      await invokeHandler('agent:abort');
+      await invokeHandler('agent:abort');
+
+      expect(mockSession._abortFn).toHaveBeenCalledTimes(2);
+    });
+  });
+
   // ── IPC contract (R-N8) ───────────────────────────────────────
 
   describe('IPC contract', () => {

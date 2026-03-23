@@ -318,6 +318,23 @@ describe('resolveIcons', () => {
     await expect(loadIconSvg('mdi:slow')).rejects.toThrow(/timeout/i);
   }, 15000);
 
+  it('should reject icon names with multiple colons', async () => {
+    // Only "prefix:name" format is valid — reject ambiguous multi-colon names
+    await expect(loadIconSvg('mdi:light:home')).rejects.toThrow(/Invalid icon name/);
+  });
+
+  it('should throw on completely empty string', async () => {
+    // Edge case: empty string splits to [''] — both prefix and iconName are empty
+    await expect(loadIconSvg('')).rejects.toThrow('Invalid icon name');
+  });
+
+  it('should propagate network errors that are not abort errors', async () => {
+    // Edge case: general fetch failure (DNS, network down)
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+
+    await expect(loadIconSvg('mdi:home')).rejects.toThrow('ECONNREFUSED');
+  });
+
   it('should evict oldest cache entry when cache is full (FIFO at 500)', async () => {
     const mockResponse = {
       ok: true,

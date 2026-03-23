@@ -194,4 +194,37 @@ describe('OperationQueue', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(order).toEqual(['outer', 'inner']);
   });
+
+  // ── Edge case: timeout boundary values ──────
+
+  it('should reject immediately with near-zero timeout', async () => {
+    // Edge case: 1ms timeout vs 50ms operation — deterministic, no race
+    const queue = new OperationQueue();
+    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    await expect(queue.execute(() => delay(50) as Promise<void>, 1)).rejects.toThrow(/timed out/);
+  });
+
+  it('should continue draining after near-zero-timeout rejection', async () => {
+    // Edge case: verify queue health after timeout edge case
+    const queue = new OperationQueue();
+    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    const p1 = queue.execute(() => delay(50) as Promise<void>, 1);
+    const p2 = queue.execute(async () => 'after-zero-timeout');
+
+    await expect(p1).rejects.toThrow(/timed out/);
+    expect(await p2).toBe('after-zero-timeout');
+  });
+
+  it('should handle operation that rejects synchronously (not async throw)', async () => {
+    // Edge case: fn returns already-rejected promise vs throwing in async body
+    const queue = new OperationQueue();
+
+    await expect(queue.execute(() => Promise.reject(new Error('sync-reject')))).rejects.toThrow('sync-reject');
+
+    // Queue should still be healthy
+    const result = await queue.execute(async () => 'recovered');
+    expect(result).toBe('recovered');
+  });
 });

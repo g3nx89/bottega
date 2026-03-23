@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { extractFigmaUrlInfo, extractFileKey, formatVariables, withTimeout } from '../src/figma/figma-api.js';
+import {
+  extractFigmaUrlInfo,
+  extractFileKey,
+  formatComponentData,
+  formatVariables,
+  withTimeout,
+} from '../src/figma/figma-api.js';
 
 describe('extractFileKey', () => {
   it('should extract key from /design/ URL', () => {
@@ -96,6 +102,65 @@ describe('formatVariables', () => {
   it('should not crash on missing/null fields', () => {
     expect(() => formatVariables({})).not.toThrow();
     expect(() => formatVariables({ variables: null, variableCollections: null })).not.toThrow();
+  });
+});
+
+describe('formatComponentData', () => {
+  it('should extract standard component fields', () => {
+    // Coverage: formatComponentData was completely untested
+    const result = formatComponentData({
+      id: '1:1',
+      name: 'Button',
+      type: 'COMPONENT',
+      description: 'A button component',
+      descriptionMarkdown: '**A button** component',
+      componentPropertyDefinitions: { label: { type: 'TEXT', defaultValue: 'Click' } },
+      children: [
+        { id: '2:1', name: 'Label', type: 'TEXT' },
+        { id: '2:2', name: 'Icon', type: 'FRAME' },
+      ],
+      absoluteBoundingBox: { x: 0, y: 0, width: 120, height: 40 },
+      fills: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1, a: 1 } }],
+      strokes: [],
+      effects: [{ type: 'DROP_SHADOW' }],
+    });
+
+    expect(result.id).toBe('1:1');
+    expect(result.name).toBe('Button');
+    expect(result.type).toBe('COMPONENT');
+    expect(result.description).toBe('A button component');
+    expect(result.properties).toEqual({ label: { type: 'TEXT', defaultValue: 'Click' } });
+    expect(result.children).toHaveLength(2);
+    expect(result.children![0]).toEqual({ id: '2:1', name: 'Label', type: 'TEXT' });
+    expect(result.bounds).toEqual({ x: 0, y: 0, width: 120, height: 40 });
+    expect(result.fills).toHaveLength(1);
+    expect(result.effects).toHaveLength(1);
+  });
+
+  it('should handle component with no children', () => {
+    // Edge case: component without children array
+    const result = formatComponentData({
+      id: '1:1',
+      name: 'Divider',
+      type: 'COMPONENT',
+    });
+
+    expect(result.id).toBe('1:1');
+    expect(result.children).toBeUndefined();
+    expect(result.fills).toBeUndefined();
+    expect(result.strokes).toBeUndefined();
+  });
+
+  it('should handle component with empty children array', () => {
+    // Edge case: empty children array
+    const result = formatComponentData({
+      id: '1:1',
+      name: 'Empty',
+      type: 'COMPONENT',
+      children: [],
+    });
+
+    expect(result.children).toEqual([]);
   });
 });
 
