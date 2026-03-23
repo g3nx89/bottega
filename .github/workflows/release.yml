@@ -137,6 +137,28 @@ jobs:
             --team-id "$APPLE_TEAM_ID" \
             --wait --timeout 10m 2>&1
 
+      - name: Generate latest-mac.yml
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          ZIP="Bottega-${VERSION}-arm64-mac.zip"
+          ZIP_PATH="dist/${ZIP}"
+          SHA512=$(shasum -a 512 "$ZIP_PATH" | awk '{print $1}' | xxd -r -p | base64)
+          SIZE=$(stat -f%z "$ZIP_PATH")
+          cat > dist/latest-mac.yml <<EOYML
+          version: ${VERSION}
+          files:
+            - url: ${ZIP}
+              sha512: ${SHA512}
+              size: ${SIZE}
+          path: ${ZIP}
+          sha512: ${SHA512}
+          releaseDate: $(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+          EOYML
+          # Remove leading spaces from heredoc
+          sed -i '' 's/^          //' dist/latest-mac.yml
+          echo "=== latest-mac.yml ==="
+          cat dist/latest-mac.yml
+
       - name: Publish to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -144,4 +166,5 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           gh release create "$TAG" --draft --title "Bottega ${TAG#v}" --generate-notes \
             dist/Bottega-*-arm64.dmg \
-            dist/Bottega-*-arm64-mac.zip
+            dist/Bottega-*-arm64-mac.zip \
+            dist/latest-mac.yml
