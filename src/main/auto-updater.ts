@@ -1,5 +1,8 @@
 import { app, type BrowserWindow } from 'electron';
-import { autoUpdater } from 'electron-updater';
+import electronUpdater from 'electron-updater';
+
+const { autoUpdater } = electronUpdater;
+
 import { createChildLogger } from '../figma/logger.js';
 import { safeSend } from './safe-send.js';
 

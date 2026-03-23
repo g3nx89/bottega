@@ -152,10 +152,15 @@ jobs:
           zip -ry "../Bottega-${VERSION}-arm64-mac.zip" Bottega.app
           cd ../..
 
-          # Create dmg from stapled app using hdiutil (NOT electron-builder, which rebuilds unsigned)
+          # Create dmg with Applications shortcut (drag-to-install)
           DMG_NAME="Bottega-${VERSION}-arm64.dmg"
-          hdiutil create -volname "Bottega" -srcfolder dist/mac-arm64/Bottega.app \
+          DMG_STAGING="/tmp/dmg-staging"
+          mkdir -p "$DMG_STAGING"
+          cp -R dist/mac-arm64/Bottega.app "$DMG_STAGING/"
+          ln -s /Applications "$DMG_STAGING/Applications"
+          hdiutil create -volname "Bottega" -srcfolder "$DMG_STAGING" \
             -ov -format UDZO "dist/${DMG_NAME}"
+          rm -rf "$DMG_STAGING"
 
           echo "=== Artifacts ==="
           ls -la dist/*.dmg dist/*.zip
