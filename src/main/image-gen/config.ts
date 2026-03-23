@@ -2,11 +2,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const CONFIG_DIR = path.join(os.homedir(), '.figma-cowork');
+const CONFIG_DIR = path.join(os.homedir(), '.bottega');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'imagegen.json');
 
 // Never hardcode secrets — load from environment.
-export const DEFAULT_IMAGEGEN_API_KEY = process.env.FIGMA_COWORK_GEMINI_KEY ?? '';
+export const DEFAULT_IMAGEGEN_API_KEY = process.env.BOTTEGA_GEMINI_KEY ?? process.env.FIGMA_COWORK_GEMINI_KEY ?? '';
 
 export interface ImageGenSettings {
   apiKey?: string;

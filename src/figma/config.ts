@@ -1,5 +1,5 @@
 /**
- * Configuration for Figma Cowork
+ * Configuration for Bottega
  */
 
 export interface FigmaConfig {

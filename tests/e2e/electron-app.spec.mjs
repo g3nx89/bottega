@@ -18,7 +18,7 @@ test.beforeAll(async () => {
   app = await electron.launch({
     args: ['dist/main.js'],
     timeout: 30000,
-    env: { ...process.env, FIGMA_COWORK_TEST_MODE: '1' },
+    env: { ...process.env, BOTTEGA_TEST_MODE: '1' },
   });
   window = await app.firstWindow();
   await window.waitForLoadState('domcontentloaded');
@@ -35,7 +35,7 @@ test.afterAll(async () => {
 test.describe('App startup', () => {
   test('window opens with correct title element', async () => {
     const title = await window.textContent('#app-title');
-    expect(title).toBeTruthy();
+    expect(title).toBe('Bottega');
   });
 
   test('status indicator is present', async () => {

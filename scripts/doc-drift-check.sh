@@ -21,7 +21,7 @@ if [ "$TOOL_CHANGES" -gt 0 ]; then
   if [ "$ACTUAL" != "$DOCUMENTED" ]; then
     HINTS="${HINTS}\n⚠️  Tool count mismatch: ${ACTUAL} actual vs ${DOCUMENTED} in CLAUDE.md"
     HINTS="${HINTS}\n   → Update: CLAUDE.md (tool count + categories), system-prompt.ts (tool tables)"
-    HINTS="${HINTS}\n   → Update skills: figma-cowork-tools, add-tool (tool file listings)"
+    HINTS="${HINTS}\n   → Update skills: bottega-tools, add-tool (tool file listings)"
   fi
 fi
 
@@ -31,13 +31,13 @@ NEW_MAIN=$(echo "$CHANGED" | grep '^src/main/[^/]*\.ts$' | while read -r f; do
 done || true)
 if [ -n "$NEW_MAIN" ]; then
   HINTS="${HINTS}\n⚠️  New main process files added — update CLAUDE.md architecture tree"
-  HINTS="${HINTS}\n   → Also update: figma-cowork-architecture skill"
+  HINTS="${HINTS}\n   → Also update: bottega-architecture skill"
 fi
 
 # ── system-prompt.ts changed → skills may reference stale info ──
 if echo "$CHANGED" | grep -q '^src/main/system-prompt\.ts$'; then
   HINTS="${HINTS}\n⚠️  system-prompt.ts modified — verify skills still match"
-  HINTS="${HINTS}\n   → Check: figma-cowork-tools (promptSnippet docs), figma-cowork-architecture (section 6)"
+  HINTS="${HINTS}\n   → Check: bottega-tools (promptSnippet docs), bottega-architecture (section 6)"
 fi
 
 # ── Compression or image-gen changed → CLAUDE.md patterns ──
@@ -58,7 +58,7 @@ NEW_TESTS=$(echo "$CHANGED" | grep '^tests/.*\.test\.' | while read -r f; do
   git diff --diff-filter=A --name-only -- "$f" 2>/dev/null
 done || true)
 if [ -n "$NEW_TESTS" ]; then
-  HINTS="${HINTS}\n⚠️  New test files added — update figma-cowork-testing skill test tree"
+  HINTS="${HINTS}\n⚠️  New test files added — update bottega-testing skill test tree"
 fi
 
 # ── Output ──

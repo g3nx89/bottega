@@ -24,7 +24,7 @@ describe('image-gen config', () => {
     let tmpConfigPath: string;
 
     beforeEach(() => {
-      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-cowork-test-'));
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bottega-test-'));
       tmpConfigPath = path.join(tmpDir, 'imagegen.json');
     });
 

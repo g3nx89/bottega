@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Figma Cowork — a macOS Electron desktop app for design pair-programming. Users describe what they want in natural language, an AI agent (Pi SDK) operates on Figma Desktop via WebSocket, shows screenshots, and iterates based on feedback.
+Bottega — a macOS Electron desktop app for design pair-programming. Users describe what they want in natural language, an AI agent (Pi SDK) operates on Figma Desktop via WebSocket, shows screenshots, and iterates based on feedback.
 
 ## Architecture
 
@@ -44,7 +44,7 @@ Figma Core (src/figma/)           — Embedded from figma-console-mcp (MIT), clo
 Desktop Bridge Plugin (figma-desktop-bridge/)   — Fork of figma-console-mcp plugin
 ├── code.js               — Plugin main thread (upstream + CREATE_FROM_JSX/ICON/BIND_VARIABLE)
 ├── ui.html               — WebSocket relay bridge
-└── manifest.json          — Plugin config (name: "Figma Cowork Bridge")
+└── manifest.json          — Plugin config (name: "Bottega Bridge")
 
 Renderer (src/renderer/)          — Vanilla HTML/CSS/JS, no framework
 ├── index.html             — Chat layout with CSP headers

@@ -10,5 +10,8 @@ dist/
 # Playwright MCP
 .playwright-mcp/
 
+# NTM session artifacts
+.ntm/
+
 # Test artifacts
 tests/*.png

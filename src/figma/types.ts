@@ -1,5 +1,5 @@
 /**
- * Type definitions for Figma Cowork
+ * Type definitions for Bottega
  */
 
 /**

@@ -1,6 +1,6 @@
 {
-  "name": "Figma Cowork Bridge",
-  "id": "figma-cowork-bridge",
+  "name": "Bottega Bridge",
+  "id": "bottega-bridge",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",

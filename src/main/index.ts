@@ -14,7 +14,7 @@ const log = createChildLogger({ component: 'main' });
 
 // ── Crash & error logging ────────────────────
 
-// Native crash dumps (segfault, OOM) → ~/Library/Logs/FigmaCowork/crashes/
+// Native crash dumps (segfault, OOM) → ~/Library/Logs/Bottega/crashes/
 crashReporter.start({ uploadToServer: false });
 
 process.on('uncaughtException', (err) => {
@@ -62,7 +62,7 @@ process.on('SIGTERM', () => {
 app.whenReady().then(async () => {
   log.info({ logFile: logFilePath }, 'App starting');
 
-  const isTestMode = !!process.env.FIGMA_COWORK_TEST_MODE;
+  const isTestMode = !!process.env.BOTTEGA_TEST_MODE;
 
   // 1. Start Figma core (WebSocket server — port 0 in test mode for auto-assign)
   const wsPort = isTestMode ? 0 : 9223;

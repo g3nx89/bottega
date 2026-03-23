@@ -100,11 +100,11 @@ export interface AgentInfra {
 }
 
 /**
- * Default sessions directory: ~/.figma-cowork/sessions/
+ * Default sessions directory: ~/.bottega/sessions/
  * Each app launch creates a new JSONL session file. Model switches
  * are recorded as entries within the same session.
  */
-const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), '.figma-cowork', 'sessions');
+const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), '.bottega', 'sessions');
 
 export interface AgentInfraOptions {
   sessionsDir?: string;

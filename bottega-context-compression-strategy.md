@@ -1,4 +1,4 @@
-# Context Compression Strategy for Figma Cowork
+# Context Compression Strategy for Bottega
 
 ## Technical Design Document — v2
 
@@ -8,7 +8,7 @@
 
 ## 1. Context Anatomy Analysis
 
-Every token entering the Figma Cowork agent's context window falls into one of the categories below. Token estimates are calibrated against the known system prompt size (~4,500 tokens ≈ 284 lines) and real-world Figma document structures.
+Every token entering the Bottega agent's context window falls into one of the categories below. Token estimates are calibrated against the known system prompt size (~4,500 tokens ≈ 284 lines) and real-world Figma document structures.
 
 ### 1.1 Context Budget Reference
 
@@ -740,7 +740,7 @@ interface SessionMetrics {
 ### 9.4 Storage & Persistence
 
 ```
-~/.figma-cowork/
+~/.bottega/
 ├── sessions/          (existing — Pi SDK session JSONL files)
 └── metrics/
     ├── sessions.jsonl           ← one SessionMetrics per line, append-only
@@ -766,7 +766,7 @@ import path from 'path';
 import os from 'os';
 
 const log = createChildLogger({ component: 'metrics' });
-const METRICS_DIR = path.join(os.homedir(), '.figma-cowork', 'metrics');
+const METRICS_DIR = path.join(os.homedir(), '.bottega', 'metrics');
 
 export class CompressionMetricsCollector {
   private sessionMetrics: Partial<SessionMetrics> = {};
@@ -853,19 +853,19 @@ Metrics files can be analyzed offline with simple scripts:
 
 ```bash
 # Average session length
-cat ~/.figma-cowork/metrics/sessions.jsonl | jq -s 'map(.totalTurns) | add / length'
+cat ~/.bottega/metrics/sessions.jsonl | jq -s 'map(.totalTurns) | add / length'
 
 # Compression ratio by category
-cat ~/.figma-cowork/metrics/sessions.jsonl | jq -s '
+cat ~/.bottega/metrics/sessions.jsonl | jq -s '
   map(.compressionByCategory | to_entries[]) | group_by(.key) |
   map({ category: .[0].key,
          ratio: (1 - (map(.value.totalAfter) | add) / (map(.value.totalBefore) | add)) })'
 
 # Sessions where compaction fired
-cat ~/.figma-cowork/metrics/sessions.jsonl | jq 'select(.compactionTriggered == true)'
+cat ~/.bottega/metrics/sessions.jsonl | jq 'select(.compactionTriggered == true)'
 
 # Peak context usage distribution
-cat ~/.figma-cowork/metrics/sessions.jsonl | jq -s 'map(.peakContextTokens) | sort'
+cat ~/.bottega/metrics/sessions.jsonl | jq -s 'map(.peakContextTokens) | sort'
 ```
 
 ### 9.7 Decision Points from Metrics

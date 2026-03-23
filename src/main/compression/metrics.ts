@@ -12,7 +12,7 @@ import { createChildLogger } from '../../figma/logger.js';
 
 const log = createChildLogger({ component: 'compression-metrics' });
 
-const METRICS_DIR = path.join(os.homedir(), '.figma-cowork', 'metrics');
+const METRICS_DIR = path.join(os.homedir(), '.bottega', 'metrics');
 const AUTO_FLUSH_THRESHOLD = 20;
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB rotation threshold
 

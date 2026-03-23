@@ -1,9 +1,9 @@
 /**
- * Logger for Figma Cowork
+ * Logger for Bottega
  *
  * Writes structured JSON logs to:
  *   - stdout (via pino-pretty in dev)
- *   - ~/Library/Logs/FigmaCowork/app.log (file, always JSON)
+ *   - ~/Library/Logs/Bottega/app.log (file, always JSON)
  */
 
 import fs from 'fs';
@@ -11,7 +11,7 @@ import os from 'os';
 import path from 'path';
 import pino from 'pino';
 
-const logDir = path.join(os.homedir(), 'Library', 'Logs', 'FigmaCowork');
+const logDir = path.join(os.homedir(), 'Library', 'Logs', 'Bottega');
 fs.mkdirSync(logDir, { recursive: true });
 
 const logFile = path.join(logDir, 'app.log');

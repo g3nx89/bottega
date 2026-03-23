@@ -10,7 +10,7 @@ describe('buildSystemPrompt', () => {
 
   it('should include key sections', () => {
     const result = buildSystemPrompt('Test Model');
-    expect(result).toContain('Figma Cowork');
+    expect(result).toContain('Bottega');
     expect(result).toContain('## Workflow');
     expect(result).toContain('## Tool Selection Guide');
     expect(result).toContain('## Critical Rules');
@@ -27,7 +27,7 @@ describe('buildSystemPrompt', () => {
 
   it('should handle empty model label', () => {
     const result = buildSystemPrompt('');
-    expect(result).toContain('Figma Cowork (powered by )');
+    expect(result).toContain('Bottega (powered by )');
     expect(result).not.toContain('{{MODEL}}');
   });
 

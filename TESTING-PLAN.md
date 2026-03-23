@@ -1,4 +1,4 @@
-# Piano di Testing — Figma Cowork
+# Piano di Testing — Bottega
 
 > Analisi dei rischi e strategia di estensione della copertura di test.
 > v3 — revisionato con analisi sequenziale + review Codex gpt-5.4 (xhigh).
