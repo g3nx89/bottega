@@ -67,4 +67,131 @@ describe('OperationQueue', () => {
     const result = await queue.execute(async () => 'second');
     expect(result).toBe('second');
   });
+
+  // ── Edge cases ────────────────────────────────
+
+  it('should queue nested execute calls (fire-and-forget from within)', async () => {
+    const queue = new OperationQueue();
+    const order: string[] = [];
+
+    // Nested execute without awaiting — queues for after outer completes
+    await queue.execute(async () => {
+      order.push('outer');
+      // Fire-and-forget: don't await the inner promise (awaiting would deadlock)
+      queue.execute(async () => {
+        order.push('inner');
+      });
+    });
+
+    // Give the drain loop a tick to process the queued inner operation
+    await new Promise((r) => setTimeout(r, 10));
+    expect(order).toEqual(['outer', 'inner']);
+  });
+
+  it('should handle high contention (20 concurrent operations)', async () => {
+    const queue = new OperationQueue();
+    const results: number[] = [];
+
+    const promises = Array.from({ length: 20 }, (_, i) =>
+      queue.execute(async () => {
+        results.push(i);
+        return i;
+      }),
+    );
+
+    const resolved = await Promise.all(promises);
+
+    // All results should be in order
+    expect(resolved).toEqual(Array.from({ length: 20 }, (_, i) => i));
+    expect(results).toEqual(Array.from({ length: 20 }, (_, i) => i));
+  });
+
+  it('should handle multiple errors interspersed with successes', async () => {
+    const queue = new OperationQueue();
+    const results: string[] = [];
+
+    const p1 = queue.execute(async () => {
+      results.push('ok1');
+      return 'ok1';
+    });
+    const p2 = queue.execute(async () => {
+      throw new Error('err1');
+    });
+    const p3 = queue.execute(async () => {
+      results.push('ok2');
+      return 'ok2';
+    });
+    const p4 = queue.execute(async () => {
+      throw new Error('err2');
+    });
+    const p5 = queue.execute(async () => {
+      results.push('ok3');
+      return 'ok3';
+    });
+
+    expect(await p1).toBe('ok1');
+    await expect(p2).rejects.toThrow('err1');
+    expect(await p3).toBe('ok2');
+    await expect(p4).rejects.toThrow('err2');
+    expect(await p5).toBe('ok3');
+    expect(results).toEqual(['ok1', 'ok2', 'ok3']);
+  });
+
+  it('should handle sync-like operations (no awaiting)', async () => {
+    const queue = new OperationQueue();
+    const result = await queue.execute(async () => 'instant');
+    expect(result).toBe('instant');
+  });
+
+  it('should support different return types', async () => {
+    const queue = new OperationQueue();
+
+    expect(await queue.execute(async () => null)).toBeNull();
+    expect(await queue.execute(async () => undefined)).toBeUndefined();
+    expect(await queue.execute(async () => [1, 2, 3])).toEqual([1, 2, 3]);
+    expect(await queue.execute(async () => ({ key: 'val' }))).toEqual({ key: 'val' });
+  });
+
+  // ── Phase 2B: Timeout tests ─────────────────
+
+  it('should reject when operation exceeds timeout', async () => {
+    const queue = new OperationQueue();
+    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    await expect(queue.execute(() => delay(500) as Promise<void>, 50)).rejects.toThrow(/timed out/);
+  });
+
+  it('should continue draining after a timeout rejection', async () => {
+    const queue = new OperationQueue();
+    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    const p1 = queue.execute(() => delay(500) as Promise<void>, 50);
+    const p2 = queue.execute(async () => 'after-timeout');
+
+    await expect(p1).rejects.toThrow(/timed out/);
+    expect(await p2).toBe('after-timeout');
+  });
+
+  it('should resolve normally when operation completes before timeout', async () => {
+    const queue = new OperationQueue();
+    const result = await queue.execute(async () => 'fast', 5000);
+    expect(result).toBe('fast');
+  });
+
+  it('should handle nested execute with timeout', async () => {
+    const queue = new OperationQueue();
+    const order: string[] = [];
+
+    await queue.execute(async () => {
+      order.push('outer');
+      // Fire-and-forget inner (don't await — would deadlock)
+      queue.execute(async () => {
+        order.push('inner');
+      }, 1000);
+    }, 1000);
+
+    // Let inner drain
+    await new Promise((r) => setTimeout(r, 50));
+    expect(order).toEqual(['outer', 'inner']);
+  });
 });

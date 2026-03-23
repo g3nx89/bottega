@@ -7,6 +7,7 @@ import { createFigmaCore } from './figma-core.js';
 import { effectiveApiKey, loadImageGenSettings } from './image-gen/config.js';
 import { ImageGenerator } from './image-gen/image-generator.js';
 import { setupIpcHandlers } from './ipc-handlers.js';
+import { safeSend } from './safe-send.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const log = createChildLogger({ component: 'main' });
@@ -61,10 +62,13 @@ process.on('SIGTERM', () => {
 app.whenReady().then(async () => {
   log.info({ logFile: logFilePath }, 'App starting');
 
-  // 1. Start Figma core (WebSocket server on port 9223)
-  figmaCore = await createFigmaCore({ port: 9223 });
+  const isTestMode = !!process.env.FIGMA_COWORK_TEST_MODE;
+
+  // 1. Start Figma core (WebSocket server — port 0 in test mode for auto-assign)
+  const wsPort = isTestMode ? 0 : 9223;
+  figmaCore = await createFigmaCore({ port: wsPort });
   await figmaCore.start();
-  log.info({ port: 9223 }, 'Figma WebSocket server started');
+  log.info({ port: figmaCore.wsServer.address()?.port ?? wsPort }, 'Figma WebSocket server started');
 
   // 2. Image generation state (shared between tools and IPC handlers)
   const imageGenSettings = loadImageGenSettings();
@@ -78,13 +82,53 @@ app.whenReady().then(async () => {
     'Image generator initialized',
   );
 
-  // 3. Create agent infrastructure (shared across session recreations)
-  const infra = await createAgentInfra(figmaCore, {
-    getImageGenerator: () => imageGenState.generator,
-  });
+  // 3. Create agent infrastructure and session
+  //    In test mode, skip real agent session creation (Pi SDK may hang without credentials).
+  let infra: Awaited<ReturnType<typeof createAgentInfra>>;
+  let session: any;
+
+  if (isTestMode) {
+    log.info('Test mode: using stub agent session');
+    const { CompressionConfigManager } = await import('./compression/compression-config.js');
+    const { DesignSystemCache } = await import('./compression/design-system-cache.js');
+    const { CompressionMetricsCollector } = await import('./compression/metrics.js');
+
+    const configManager = new CompressionConfigManager();
+    const designSystemCache = new DesignSystemCache(() => 60_000);
+    const metricsCollector = new CompressionMetricsCollector('test', 'pending', 1_000_000);
+
+    infra = {
+      authStorage: {
+        getApiKey: async () => 'test',
+        get: () => null,
+        set() {},
+        remove() {},
+        login: async () => {},
+        logout() {},
+      },
+      modelRegistry: {},
+      sessionManager: {},
+      figmaTools: [],
+      configManager,
+      designSystemCache,
+      metricsCollector,
+      compressionExtensionFactory: () => ({}),
+    } as any;
+
+    session = {
+      prompt: async () => {},
+      abort: async () => {},
+      subscribe: () => {},
+    };
+  } else {
+    infra = await createAgentInfra(figmaCore, {
+      getImageGenerator: () => imageGenState.generator,
+    });
+    const result = await createFigmaAgent(infra);
+    session = result.session;
+    log.info('Figma agent session created');
+  }
   appState.infra = infra;
-  const { session } = await createFigmaAgent(infra);
-  log.info('Figma agent session created');
 
   // 4. Create window
   mainWindow = new BrowserWindow({
@@ -121,11 +165,11 @@ app.whenReady().then(async () => {
   // 6. Forward Figma connection events to the UI
   figmaCore.wsServer.on('fileConnected', (info: { fileKey: string; fileName: string }) => {
     log.info({ fileName: info.fileName, fileKey: info.fileKey }, 'Figma file connected');
-    mainWindow?.webContents.send('figma:connected', info.fileName);
+    if (mainWindow) safeSend(mainWindow.webContents, 'figma:connected', info.fileName);
   });
   figmaCore.wsServer.on('disconnected', () => {
     log.info('Figma disconnected');
-    mainWindow?.webContents.send('figma:disconnected');
+    if (mainWindow) safeSend(mainWindow.webContents, 'figma:disconnected');
   });
 
   // 7. Invalidate compression caches on Figma document changes

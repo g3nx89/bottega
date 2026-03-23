@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "npm run build && npx playwright test tests/e2e/",
     "lint": "biome check src/ tests/",
     "lint:fix": "biome check --write src/ tests/",
     "check": "npm run typecheck && npm run lint && npm run test",

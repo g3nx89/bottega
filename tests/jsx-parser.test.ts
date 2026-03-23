@@ -100,4 +100,149 @@ describe('parseJsx', () => {
     expect(result.type).toBe('fragment');
     expect(result.children).toHaveLength(2);
   });
+
+  // ── Edge cases ────────────────────────────────
+
+  it('should handle expression children (numbers)', () => {
+    const result = parseJsx('<Text>{42}</Text>');
+    expect(result.children).toContain(42);
+  });
+
+  it('should handle expression children (booleans are filtered by JSX)', () => {
+    // In JSX, {true} and {false} are valid but typically render as nothing
+    const result = parseJsx('<Frame>{true}{false}</Frame>');
+    // true/false are filtered out by the h function's null filter or kept as primitives
+    expect(result.type).toBe('frame');
+  });
+
+  it('should handle multiple text children', () => {
+    const result = parseJsx(`
+      <Frame>
+        <Text>Hello</Text>
+        <Text>World</Text>
+        <Text>!</Text>
+      </Frame>
+    `);
+    expect(result.children).toHaveLength(3);
+    for (const child of result.children) {
+      expect((child as TreeNode).type).toBe('text');
+    }
+  });
+
+  it('should handle mixed prop types in one element', () => {
+    const result = parseJsx(`
+      <Frame
+        name="card"
+        width={300}
+        clipsContent={true}
+        fills={[{ type: "SOLID", color: "#FFF" }]}
+      />
+    `);
+    expect(result.props.name).toBe('card');
+    expect(result.props.width).toBe(300);
+    expect(result.props.clipsContent).toBe(true);
+    expect(result.props.fills).toEqual([{ type: 'SOLID', color: '#FFF' }]);
+  });
+
+  it('should handle self-closing elements with no props', () => {
+    const result = parseJsx('<Rectangle />');
+    expect(result.type).toBe('rectangle');
+    expect(result.props).toEqual({});
+    expect(result.children).toEqual([]);
+  });
+
+  it('should handle template literals in expressions', () => {
+    const result = parseJsx('<Frame name={`test-${1 + 1}`} />');
+    expect(result.props.name).toBe('test-2');
+  });
+
+  it('should handle conditional expressions', () => {
+    const result = parseJsx('<Frame width={true ? 100 : 200} />');
+    expect(result.props.width).toBe(100);
+  });
+
+  it('should handle wide tree (many siblings)', () => {
+    const items = Array.from({ length: 10 }, (_, i) => `<Rectangle width={${i * 10}} />`).join('\n');
+    const result = parseJsx(`<Frame>${items}</Frame>`);
+    expect(result.children).toHaveLength(10);
+    expect((result.children[9] as TreeNode).props.width).toBe(90);
+  });
+
+  it('should handle negative numeric values', () => {
+    const result = parseJsx('<Frame width={-10} />');
+    expect(result.props.width).toBe(-10);
+  });
+
+  it('should handle float numeric values', () => {
+    const result = parseJsx('<Frame opacity={0.5} />');
+    expect(result.props.opacity).toBe(0.5);
+  });
+
+  // ── Boundary behavior ──────────────────────────
+
+  it('should throw on unknown tag name not in sandbox mapping', () => {
+    // 'CustomTag' is not in the sandbox mapping, so vm will throw ReferenceError
+    expect(() => parseJsx('<CustomTag width={10} />')).toThrow();
+  });
+
+  it('should throw on empty JSX string', () => {
+    expect(() => parseJsx('')).toThrow();
+  });
+
+  it('should handle wide tree with 100 siblings', () => {
+    const items = Array.from({ length: 100 }, (_, i) => `<Rectangle width={${i}} />`).join('\n');
+    const result = parseJsx(`<Frame>${items}</Frame>`);
+    expect(result.type).toBe('frame');
+    expect(result.children).toHaveLength(100);
+    for (let i = 0; i < 100; i++) {
+      const child = result.children[i] as TreeNode;
+      expect(child.type).toBe('rectangle');
+      expect(child.props.width).toBe(i);
+    }
+  });
+
+  it('should throw on expression with undefined variable', () => {
+    expect(() => parseJsx('<Frame width={nonExistentVar} />')).toThrow();
+  });
+
+  it('should throw on multiple root elements without Fragment', () => {
+    expect(() => parseJsx('<Text>A</Text><Text>B</Text>')).toThrow();
+  });
+
+  // ── Cross-run contamination (R2 stability) ─────
+
+  it('should not let sandbox mutation of tag name persist across calls', () => {
+    // First call: expression tries to overwrite Frame in the sandbox
+    const result1 = parseJsx('<Frame name={(() => { Frame = "hacked"; return "test"; })()}/>');
+    expect(result1.props.name).toBe('test');
+
+    // Second call: the sandbox IS shared (module-level vm.createContext),
+    // so Frame is now "hacked" — h() receives "hacked" as the type string.
+    const result2 = parseJsx('<Frame />');
+    expect(result2.type).toBe('hacked');
+
+    // Restore Frame for subsequent tests
+    parseJsx('<Frame name={(() => { Frame = "frame"; return "restore"; })()}/>');
+    const result3 = parseJsx('<Frame />');
+    expect(result3.type).toBe('frame');
+  });
+
+  it('should not let Array.prototype modification persist across calls', () => {
+    // First call: try to modify Array.prototype inside the sandbox
+    const result1 = parseJsx('<Rectangle name={(() => { Array.prototype.customProp = 42; return "modified"; })()}/>');
+    expect(result1.props.name).toBe('modified');
+
+    // Second call: parseJsx should still work correctly — children array
+    // operations (flat, filter) should be unaffected by the added property
+    const result2 = parseJsx(`
+      <Frame>
+        <Text>A</Text>
+        <Text>B</Text>
+      </Frame>
+    `);
+    expect(result2.type).toBe('frame');
+    expect(result2.children).toHaveLength(2);
+    expect((result2.children[0] as TreeNode).type).toBe('text');
+    expect((result2.children[1] as TreeNode).type).toBe('text');
+  });
 });

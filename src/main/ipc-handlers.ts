@@ -13,6 +13,7 @@ import {
 import { effectiveApiKey, type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
 import { DEFAULT_IMAGE_MODEL, IMAGE_GEN_MODELS, ImageGenerator } from './image-gen/image-generator.js';
 import { PromptSuggester } from './prompt-suggester.js';
+import { safeSend } from './safe-send.js';
 
 const log = createChildLogger({ component: 'ipc' });
 
@@ -46,16 +47,16 @@ export function setupIpcHandlers(
       switch (event.type) {
         case 'message_update':
           if (event.assistantMessageEvent?.type === 'text_delta') {
-            wc.send('agent:text-delta', event.assistantMessageEvent.delta);
+            safeSend(wc, 'agent:text-delta', event.assistantMessageEvent.delta);
             suggester.appendAssistantText(event.assistantMessageEvent.delta);
           }
           if (event.assistantMessageEvent?.type === 'thinking_delta') {
-            wc.send('agent:thinking', event.assistantMessageEvent.delta);
+            safeSend(wc, 'agent:thinking', event.assistantMessageEvent.delta);
           }
           break;
         case 'tool_execution_start':
           log.info({ tool: event.toolName, callId: event.toolCallId, params: event.toolParams }, 'Tool start');
-          wc.send('agent:tool-start', event.toolName, event.toolCallId);
+          safeSend(wc, 'agent:tool-start', event.toolName, event.toolCallId);
           break;
         case 'tool_execution_end': {
           const resultPreview = event.result?.content
@@ -74,12 +75,12 @@ export function setupIpcHandlers(
             },
             'Tool end',
           );
-          wc.send('agent:tool-end', event.toolName, event.toolCallId, !event.isError, event.result);
+          safeSend(wc, 'agent:tool-end', event.toolName, event.toolCallId, !event.isError, event.result);
           if (event.toolName === 'figma_screenshot' && !event.isError && event.result?.content) {
             const imageContent = event.result.content.find((c: any) => c.type === 'image');
             if (imageContent) {
               log.info({ dataLen: imageContent.data?.length }, 'Screenshot image forwarded to renderer');
-              wc.send('agent:screenshot', imageContent.data);
+              safeSend(wc, 'agent:screenshot', imageContent.data);
             } else {
               log.warn({ content: resultPreview }, 'Screenshot tool succeeded but no image content found');
             }
@@ -90,19 +91,23 @@ export function setupIpcHandlers(
           // Forward token usage for context bar
           const msg = event.message;
           if (msg?.usage) {
-            wc.send('agent:usage', { input: msg.usage.input, output: msg.usage.output, total: msg.usage.totalTokens });
+            safeSend(wc, 'agent:usage', {
+              input: msg.usage.input,
+              output: msg.usage.output,
+              total: msg.usage.totalTokens,
+            });
           }
           break;
         }
         case 'agent_end':
           isStreaming = false;
-          wc.send('agent:end');
+          safeSend(wc, 'agent:end');
           // Generate suggestions asynchronously — don't block the UI
           suggester
             .suggest(currentModelConfig)
             .then((suggestions) => {
               if (suggestions.length > 0) {
-                wc.send('agent:suggestions', suggestions);
+                safeSend(wc, 'agent:suggestions', suggestions);
               }
               suggester.resetAssistantText();
             })
@@ -112,16 +117,16 @@ export function setupIpcHandlers(
             });
           break;
         case 'auto_compaction_start':
-          wc.send('agent:compaction', true);
+          safeSend(wc, 'agent:compaction', true);
           break;
         case 'auto_compaction_end':
-          wc.send('agent:compaction', false);
+          safeSend(wc, 'agent:compaction', false);
           break;
         case 'auto_retry_start':
-          wc.send('agent:retry', true);
+          safeSend(wc, 'agent:retry', true);
           break;
         case 'auto_retry_end':
-          wc.send('agent:retry', false);
+          safeSend(wc, 'agent:retry', false);
           break;
       }
     });
@@ -136,11 +141,12 @@ export function setupIpcHandlers(
     // Without this, the SDK may hang indefinitely on an unauthenticated API call.
     const apiKey = await infra.authStorage.getApiKey(currentModelConfig.provider);
     if (!apiKey) {
-      mainWindow.webContents.send(
+      safeSend(
+        mainWindow.webContents,
         'agent:text-delta',
         'No credentials configured for this model. Open Settings to log in or add an API key.',
       );
-      mainWindow.webContents.send('agent:end');
+      safeSend(mainWindow.webContents, 'agent:end');
       return;
     }
 
@@ -156,11 +162,12 @@ export function setupIpcHandlers(
     } catch (err: any) {
       log.error({ err }, 'Prompt failed');
       isStreaming = false;
-      mainWindow.webContents.send(
+      safeSend(
+        mainWindow.webContents,
         'agent:text-delta',
         `\n\nError: ${err.message || 'Request failed. Check your credentials in Settings.'}`,
       );
-      mainWindow.webContents.send('agent:end');
+      safeSend(mainWindow.webContents, 'agent:end');
     }
   });
 
@@ -253,7 +260,7 @@ export function setupIpcHandlers(
           } catch {
             log.warn({ url: info.url }, 'Invalid URL from OAuth provider');
           }
-          mainWindow.webContents.send('auth:login-event', {
+          safeSend(mainWindow.webContents, 'auth:login-event', {
             type: 'auth',
             url: info.url,
             instructions: info.instructions,
@@ -262,7 +269,7 @@ export function setupIpcHandlers(
         onPrompt: (prompt) => {
           return new Promise<string>((resolve) => {
             loginPromptResolver = resolve;
-            mainWindow.webContents.send('auth:login-event', {
+            safeSend(mainWindow.webContents, 'auth:login-event', {
               type: 'prompt',
               message: prompt.message,
               placeholder: prompt.placeholder,
@@ -271,12 +278,12 @@ export function setupIpcHandlers(
           });
         },
         onProgress: (message) => {
-          mainWindow.webContents.send('auth:login-event', { type: 'progress', message });
+          safeSend(mainWindow.webContents, 'auth:login-event', { type: 'progress', message });
         },
         onManualCodeInput: () => {
           return new Promise<string>((resolve) => {
             loginPromptResolver = resolve;
-            mainWindow.webContents.send('auth:login-event', {
+            safeSend(mainWindow.webContents, 'auth:login-event', {
               type: 'prompt',
               message: 'Paste the authorization code or callback URL:',
               placeholder: 'Code or URL…',
@@ -356,7 +363,7 @@ export function setupIpcHandlers(
 
   ipcMain.handle('imagegen:get-config', () => {
     return {
-      hasApiKey: true, // always true — default key is built-in
+      hasApiKey: !!effectiveApiKey(imageGenState?.settings ?? {}),
       hasCustomKey: !!imageGenState?.settings.apiKey,
       model: imageGenState?.settings.model || DEFAULT_IMAGE_MODEL,
       models: IMAGE_GEN_MODELS,
