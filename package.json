@@ -23,6 +23,7 @@
     "@mariozechner/pi-ai": "^0.61.0",
     "@mariozechner/pi-coding-agent": "^0.61.0",
     "@sinclair/typebox": "^0.34.0",
+    "electron-updater": "^6.8.3",
     "esbuild": "^0.25.0",
     "pino": "^9.5.0",
     "pino-pretty": "^13.0.0",
@@ -41,11 +42,25 @@
   "build": {
     "appId": "com.bottega.app",
     "productName": "Bottega",
+    "publish": {
+      "provider": "github",
+      "owner": "g3nx89",
+      "repo": "bottega"
+    },
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
-        "dmg"
-      ]
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": true
+    },
+    "dmg": {
+      "sign": false
     },
     "files": [
       "dist/**/*"

@@ -10,6 +10,7 @@ import {
   OAUTH_PROVIDER_INFO,
   OAUTH_PROVIDER_MAP,
 } from './agent.js';
+import { getAppVersion, quitAndInstall } from './auto-updater.js';
 import { effectiveApiKey, type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
 import { DEFAULT_IMAGE_MODEL, IMAGE_GEN_MODELS, ImageGenerator } from './image-gen/image-generator.js';
 import { PromptSuggester } from './prompt-suggester.js';
@@ -423,4 +424,8 @@ export function setupIpcHandlers(
     log.info('All compression caches invalidated manually');
     return { success: true };
   });
+
+  // ── Auto-update ────────────────────────
+  ipcMain.handle('update:get-version', () => getAppVersion());
+  ipcMain.handle('update:install', () => quitAndInstall());
 }

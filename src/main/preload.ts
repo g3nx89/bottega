@@ -82,4 +82,20 @@ contextBridge.exposeInMainWorld('api', {
   onLoginEvent: (cb: (event: any) => void) => {
     ipcRenderer.on('auth:login-event', (_event, data) => cb(data));
   },
+
+  // Auto-update
+  getAppVersion: () => ipcRenderer.invoke('update:get-version') as Promise<string>,
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  onUpdateAvailable: (cb: (version: string) => void) => {
+    ipcRenderer.on('update:available', (_event, version) => cb(version));
+  },
+  onUpdateDownloaded: (cb: (version: string) => void) => {
+    ipcRenderer.on('update:downloaded', (_event, version) => cb(version));
+  },
+  onUpdateProgress: (cb: (percent: number) => void) => {
+    ipcRenderer.on('update:progress', (_event, percent) => cb(percent));
+  },
+  onUpdateError: (cb: (message: string) => void) => {
+    ipcRenderer.on('update:error', (_event, message) => cb(message));
+  },
 });

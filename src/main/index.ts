@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createChildLogger, logFilePath } from '../figma/logger.js';
 import { createAgentInfra, createFigmaAgent } from './agent.js';
+import { initAutoUpdater } from './auto-updater.js';
 import { createFigmaCore } from './figma-core.js';
 import { effectiveApiKey, loadImageGenSettings } from './image-gen/config.js';
 import { ImageGenerator } from './image-gen/image-generator.js';
@@ -162,7 +163,10 @@ app.whenReady().then(async () => {
   // 5. Setup IPC between agent and renderer
   setupIpcHandlers(session as any, mainWindow, infra, imageGenState);
 
-  // 6. Forward Figma connection events to the UI
+  // 6. Auto-updater (GitHub Releases)
+  initAutoUpdater(mainWindow);
+
+  // 7. Forward Figma connection events to the UI
   figmaCore.wsServer.on('fileConnected', (info: { fileKey: string; fileName: string }) => {
     log.info({ fileName: info.fileName, fileKey: info.fileKey }, 'Figma file connected');
     if (mainWindow) safeSend(mainWindow.webContents, 'figma:connected', info.fileName);
