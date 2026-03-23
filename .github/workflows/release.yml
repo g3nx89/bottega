@@ -74,8 +74,8 @@ jobs:
 
           echo "=== Signing all binaries inside $APP ==="
 
-          # Sign nested frameworks and helpers first (inside-out)
-          find "$APP" -type f \( -name "*.dylib" -o -name "*.so" -o -perm +111 \) -not -path "*/MacOS/Bottega" | sort | while read -r file; do
+          # Sign ALL native binaries (inside-out): .dylib, .so, .node, and executables
+          find "$APP" -type f \( -name "*.dylib" -o -name "*.so" -o -name "*.node" -o -perm +111 \) -not -path "*/MacOS/Bottega" | sort | while read -r file; do
             file_type=$(file -b "$file")
             if echo "$file_type" | grep -q "Mach-O"; then
               echo "Signing: $file"
@@ -119,11 +119,23 @@ jobs:
           ditto -c -k --keepParent "$APP" /tmp/notarize.zip
 
           echo "Submitting for notarization..."
-          xcrun notarytool submit /tmp/notarize.zip \
+          RESULT=$(xcrun notarytool submit /tmp/notarize.zip \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_SPECIFIC_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait --timeout 10m 2>&1
+            --wait --timeout 10m 2>&1) || true
+          echo "$RESULT"
+
+          # Extract submission ID and check status
+          SUB_ID=$(echo "$RESULT" | grep "id:" | head -1 | awk '{print $2}')
+          if echo "$RESULT" | grep -q "status: Invalid"; then
+            echo "::error::Notarization rejected. Fetching log..."
+            xcrun notarytool log "$SUB_ID" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" 2>&1
+            exit 1
+          fi
 
           echo "Stapling notarization ticket..."
           xcrun stapler staple "$APP"
