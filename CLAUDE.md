@@ -19,13 +19,19 @@ Electron Main Process (src/main/)
 ├── system-prompt.ts      — LLM system prompt with tool reference and design patterns
 ├── jsx-parser.ts         — JSX string → TreeNode via esbuild transform + vm sandbox
 ├── icon-loader.ts        — Iconify API fetch with in-memory cache
-└── tools/                — 28 ToolDefinition[] for Pi SDK (TypeBox schemas)
-    ├── core.ts           — execute, screenshot, screenshot_rest, status, get_selection
+├── prompt-suggester.ts   — AI-powered follow-up prompt suggestions (IPC → clickable chips)
+├── safe-send.ts          — IPC crash guard (no-op if renderer destroyed)
+├── compression/          — Context compression: profiles, metrics, design-system cache, mutation compressor
+├── image-gen/            — Gemini-based image generation (config, generator, prompt builders)
+└── tools/                — 34 ToolDefinition[] for Pi SDK (TypeBox schemas)
+    ├── index.ts          — Aggregator, ToolDeps interface, textResult helper, abort-check wrapper
+    ├── core.ts           — execute, screenshot, status, get_selection
     ├── discovery.ts      — get_file_data, search_components, get_library_components, get_component_details, design_system
     ├── components.ts     — instantiate, set_instance_properties, arrange_component_set
-    ├── manipulation.ts   — set_fills, set_strokes, set_text, set_image_fill, resize, move, create_child, clone, delete
-    ├── tokens.ts         — setup_tokens, rename, lint
-    └── jsx-render.ts     — render_jsx, create_icon, bind_variable
+    ├── manipulation.ts   — set_fills, set_strokes, set_text, set_image_fill, resize, move, create_child, clone, delete, rename
+    ├── tokens.ts         — setup_tokens, lint
+    ├── jsx-render.ts     — render_jsx, create_icon, bind_variable
+    └── image-gen.ts      — generate_image, edit_image, restore_image, generate_icon, generate_pattern, generate_story, generate_diagram
 
 Figma Core (src/figma/)           — Embedded from figma-console-mcp (MIT), cloud relay removed
 ├── websocket-server.ts           — WS server on port 9223, sendCommand with Promise correlation
@@ -50,8 +56,11 @@ Renderer (src/renderer/)          — Vanilla HTML/CSS/JS, no framework
 
 ```bash
 npm install
-node scripts/build.mjs          # esbuild: main (ESM) + preload (CJS) → dist/
-npx electron dist/main.js       # run the app
+npm run build                   # esbuild: main (ESM) + preload (CJS) → dist/
+npm start                       # build + run the app
+npx electron dist/main.js       # run without rebuilding
+npm test                        # vitest run
+npm run lint                    # biome check src/ tests/
 npx tsc --noEmit                # type check only
 npx electron-builder --mac      # package .dmg
 ```
@@ -73,7 +82,9 @@ node tests/electron-smoke.mjs
 - `ws` — WebSocket server for Figma Desktop Bridge communication
 - `esbuild` — Build tool AND runtime dep (JSX transform in jsx-parser.ts)
 - `@iconify/utils` / `@iconify/core` — Icon SVG generation for figma_create_icon / figma_render_jsx
+- `@google/genai` — Gemini API for AI image generation tools
 - `pino` — Structured logging
+- `vitest` — Test runner; `@biomejs/biome` — Linter/formatter
 
 ## Important Patterns
 
@@ -85,15 +96,19 @@ node tests/electron-smoke.mjs
 - **Pi SDK system prompt**: Injected via `DefaultResourceLoader({ systemPrompt })` with `noExtensions/noSkills/noPromptTemplates/noThemes: true`.
 - **Tool params typed as `any`**: ToolDefinition generic inference doesn't work when returning `ToolDefinition[]`. Params are cast to `any` in execute — runtime validation is via TypeBox schemas.
 - **Upstream sync**: `src/figma/` and `figma-desktop-bridge/` are embedded/forked. Track in respective `UPSTREAM.md` files.
+- **Context compression**: `compression/` profiles tune how verbose tool results are. Active profile switchable at runtime via IPC; the extension factory reads live config on every `tool_result`.
+- **Image generation**: `image-gen/` wraps Gemini API (`@google/genai`). Tools can generate, edit, and restore images on Figma nodes. Requires a Gemini API key configured in Settings.
+- **Prompt suggester**: After each agent turn, `prompt-suggester.ts` generates follow-up suggestions via a lightweight LLM call, forwarded as clickable chips in the renderer.
 
-## Tool Categories (28 tools)
+## Tool Categories (34 tools)
 
-- **Core** (5): `figma_execute`, `figma_screenshot`, `figma_screenshot_rest`, `figma_status`, `figma_get_selection`
+- **Core** (4): `figma_execute`, `figma_screenshot`, `figma_status`, `figma_get_selection`
 - **Discovery** (5): `figma_get_file_data`, `figma_search_components`, `figma_get_library_components`, `figma_get_component_details`, `figma_design_system`
 - **Components** (3): `figma_instantiate`, `figma_set_instance_properties`, `figma_arrange_component_set`
-- **Manipulation** (9): `figma_set_fills`, `figma_set_strokes`, `figma_set_text`, `figma_set_image_fill`, `figma_resize`, `figma_move`, `figma_create_child`, `figma_clone`, `figma_delete`
-- **Tokens** (3): `figma_setup_tokens`, `figma_rename`, `figma_lint`
+- **Manipulation** (10): `figma_set_fills`, `figma_set_strokes`, `figma_set_text`, `figma_set_image_fill`, `figma_resize`, `figma_move`, `figma_create_child`, `figma_clone`, `figma_delete`, `figma_rename`
+- **Tokens** (2): `figma_setup_tokens`, `figma_lint`
 - **JSX Render** (3): `figma_render_jsx`, `figma_create_icon`, `figma_bind_variable`
+- **Image Gen** (7): `figma_generate_image`, `figma_edit_image`, `figma_restore_image`, `figma_generate_icon`, `figma_generate_pattern`, `figma_generate_story`, `figma_generate_diagram`
 
 ## Language & Conventions
 
