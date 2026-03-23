@@ -152,11 +152,10 @@ jobs:
           zip -ry "../Bottega-${VERSION}-arm64-mac.zip" Bottega.app
           cd ../..
 
-          # Create dmg from stapled app
-          npx electron-builder --mac dmg \
-            -c.mac.notarize=false -c.mac.identity=null \
-            -c.mac.sign=false \
-            --publish never
+          # Create dmg from stapled app using hdiutil (NOT electron-builder, which rebuilds unsigned)
+          DMG_NAME="Bottega-${VERSION}-arm64.dmg"
+          hdiutil create -volname "Bottega" -srcfolder dist/mac-arm64/Bottega.app \
+            -ov -format UDZO "dist/${DMG_NAME}"
 
           echo "=== Artifacts ==="
           ls -la dist/*.dmg dist/*.zip
