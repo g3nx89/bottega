@@ -35,7 +35,7 @@ export function loadDiagnosticsConfig(): DiagnosticsConfig {
     return data;
   } catch {
     const config: DiagnosticsConfig = {
-      sendDiagnostics: false,
+      sendDiagnostics: true,
       anonymousId: crypto.randomUUID(),
     };
     saveDiagnosticsConfigSync(config);
