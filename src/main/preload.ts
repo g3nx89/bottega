@@ -83,6 +83,11 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('auth:login-event', (_event, data) => cb(data));
   },
 
+  // Figma plugin
+  checkFigmaPlugin: () => ipcRenderer.invoke('plugin:check') as Promise<{ installed: boolean }>,
+  installFigmaPlugin: () =>
+    ipcRenderer.invoke('plugin:install') as Promise<{ success: boolean; path?: string; error?: string }>,
+
   // Auto-update
   getAppVersion: () => ipcRenderer.invoke('update:get-version') as Promise<string>,
   downloadUpdate: () => ipcRenderer.invoke('update:download'),

@@ -1,4 +1,6 @@
-import { type BrowserWindow, ipcMain, shell } from 'electron';
+import { cpSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { app, type BrowserWindow, ipcMain, shell } from 'electron';
 import { createChildLogger } from '../figma/logger.js';
 import {
   type AgentInfra,
@@ -423,6 +425,47 @@ export function setupIpcHandlers(
     infra.designSystemCache.invalidate();
     log.info('All compression caches invalidated manually');
     return { success: true };
+  });
+
+  // ── Figma plugin setup ──────────────────
+
+  const PLUGIN_MANIFEST = 'manifest.json';
+
+  function getPluginSourcePath(): string | null {
+    const candidates = [
+      join(process.resourcesPath, 'figma-desktop-bridge'), // Packaged app
+      join(app.getAppPath(), 'figma-desktop-bridge'), // Dev mode
+    ];
+    for (const dir of candidates) {
+      if (existsSync(join(dir, PLUGIN_MANIFEST))) return dir;
+    }
+    return null;
+  }
+
+  function getPluginTargetPath(): string {
+    return join(app.getPath('userData'), 'figma-plugin');
+  }
+
+  ipcMain.handle('plugin:check', () => {
+    return { installed: existsSync(join(getPluginTargetPath(), PLUGIN_MANIFEST)) };
+  });
+
+  ipcMain.handle('plugin:install', () => {
+    const src = getPluginSourcePath();
+    if (!src) {
+      log.error('Plugin source not found in any candidate path');
+      return { success: false, error: 'Plugin files not found in app bundle.' };
+    }
+    const dest = getPluginTargetPath();
+    try {
+      cpSync(src, dest, { recursive: true, force: true });
+      shell.showItemInFolder(join(dest, PLUGIN_MANIFEST));
+      log.info({ dest }, 'Figma plugin copied and revealed in Finder');
+      return { success: true, path: dest };
+    } catch (err: any) {
+      log.error({ err }, 'Failed to copy Figma plugin');
+      return { success: false, error: err.message };
+    }
   });
 
   // ── Auto-update ────────────────────────

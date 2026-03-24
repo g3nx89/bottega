@@ -990,6 +990,51 @@ if (compressionRefreshBtn) {
   });
 }
 
+// ── Figma Plugin setup ──────────────────
+
+const setupFigmaBtn = document.getElementById('setup-figma-btn');
+const setupFigmaStatus = document.getElementById('setup-figma-status');
+const figmaPluginSteps = document.getElementById('figma-plugin-steps');
+
+if (setupFigmaBtn) {
+  setupFigmaBtn.addEventListener('click', async () => {
+    setupFigmaBtn.disabled = true;
+    setupFigmaBtn.textContent = 'Installing…';
+    setupFigmaStatus.textContent = '';
+    try {
+      const result = await window.api.installFigmaPlugin();
+      if (result.success) {
+        setupFigmaBtn.textContent = 'Reinstall Figma Plugin';
+        figmaPluginSteps.classList.remove('hidden');
+      } else {
+        setupFigmaStatus.textContent = result.error || 'Setup failed.';
+        setupFigmaBtn.textContent = 'Install Figma Plugin';
+        figmaPluginSteps.classList.add('hidden');
+      }
+    } catch {
+      setupFigmaStatus.textContent = 'Setup failed — see logs.';
+      setupFigmaBtn.textContent = 'Install Figma Plugin';
+      figmaPluginSteps.classList.add('hidden');
+    } finally {
+      setupFigmaBtn.disabled = false;
+    }
+  });
+
+  // First-launch nudge: if plugin not yet set up, open settings automatically
+  window.api
+    .checkFigmaPlugin()
+    .then((status) => {
+      if (status.installed) {
+        setupFigmaBtn.textContent = 'Reinstall Figma Plugin';
+      } else if (!localStorage.getItem('bottega:plugin-nudge-dismissed')) {
+        openSettings();
+        setupFigmaBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        localStorage.setItem('bottega:plugin-nudge-dismissed', '1');
+      }
+    })
+    .catch(() => {});
+}
+
 // ── Pin (always-on-top) ─────────────────
 
 pinBtn.addEventListener('click', async () => {

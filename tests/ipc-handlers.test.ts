@@ -3,9 +3,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // ── Module mocks (must be before imports) ─────────────────────────
 
 vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn().mockReturnValue('/mock/userData'),
+    getAppPath: vi.fn().mockReturnValue('/mock/appPath'),
+    isPackaged: false,
+  },
   ipcMain: { handle: vi.fn() },
-  shell: { openExternal: vi.fn() },
+  shell: { openExternal: vi.fn(), showItemInFolder: vi.fn() },
 }));
+
+vi.mock('node:fs', () => ({
+  existsSync: vi.fn().mockReturnValue(false),
+  cpSync: vi.fn(),
+}));
+
+vi.mock('node:path', async () => {
+  const actual = await vi.importActual<typeof import('node:path')>('node:path');
+  return { ...actual };
+});
 
 vi.mock('../src/figma/logger.js', () => ({
   createChildLogger: () => ({
@@ -57,7 +72,8 @@ vi.mock('../src/main/prompt-suggester.js', () => ({
 
 // ── Imports (after mocks) ─────────────────────────────────────────
 
-import { ipcMain } from 'electron';
+import { cpSync, existsSync } from 'node:fs';
+import { app, ipcMain, shell } from 'electron';
 import { createFigmaAgent } from '../src/main/agent.js';
 import { setupIpcHandlers } from '../src/main/ipc-handlers.js';
 import { createMockSession } from './helpers/mock-session.js';
@@ -90,6 +106,11 @@ async function invokeHandler(channel: string, ...args: any[]) {
 describe('setupIpcHandlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Restore electron app mocks (clearAllMocks strips return values)
+    (app.getPath as any).mockReturnValue('/mock/userData');
+    (app.getAppPath as any).mockReturnValue('/mock/appPath');
+    // Electron sets process.resourcesPath at runtime; provide a test value
+    (process as any).resourcesPath = '/mock/resources';
     mockSession = createMockSession();
     mockWindow = createMockWindow();
     mockInfra = {
@@ -515,6 +536,82 @@ describe('setupIpcHandlers', () => {
 
       await invokeHandler('window:set-opacity', 0.5);
       expect(mockWindow.setOpacity).toHaveBeenCalledWith(0.5);
+    });
+  });
+
+  // ── Figma plugin setup ─────────────────────────────────────────
+
+  describe('Figma plugin setup', () => {
+    it('plugin:check returns installed true when manifest exists', async () => {
+      (existsSync as any).mockReturnValueOnce(true);
+
+      const result = await invokeHandler('plugin:check');
+
+      expect(result).toEqual({ installed: true });
+      expect(existsSync).toHaveBeenCalledWith(expect.stringContaining('figma-plugin/manifest.json'));
+    });
+
+    it('plugin:check returns installed false when manifest missing', async () => {
+      (existsSync as any).mockReturnValueOnce(false);
+
+      const result = await invokeHandler('plugin:check');
+
+      expect(result).toEqual({ installed: false });
+    });
+
+    it('plugin:install uses dev path when packaged manifest missing', async () => {
+      // getPluginSourcePath: packaged manifest missing → dev manifest found
+      (existsSync as any)
+        .mockReturnValueOnce(false) // packaged path: no manifest
+        .mockReturnValueOnce(true); // dev path: manifest found
+
+      const result = await invokeHandler('plugin:install');
+
+      expect(result).toEqual({ success: true, path: expect.stringContaining('figma-plugin') });
+      expect(cpSync).toHaveBeenCalledWith(
+        expect.stringContaining('appPath/figma-desktop-bridge'),
+        expect.stringContaining('figma-plugin'),
+        { recursive: true, force: true },
+      );
+      expect(shell.showItemInFolder).toHaveBeenCalledWith(expect.stringContaining('manifest.json'));
+    });
+
+    it('plugin:install uses packaged path when manifest exists there', async () => {
+      // getPluginSourcePath: packaged manifest found on first candidate
+      (existsSync as any).mockReturnValueOnce(true); // packaged manifest exists
+
+      const result = await invokeHandler('plugin:install');
+
+      expect(result).toEqual({ success: true, path: expect.stringContaining('figma-plugin') });
+      expect(cpSync).toHaveBeenCalledWith(
+        expect.stringContaining('resources/figma-desktop-bridge'),
+        expect.stringContaining('figma-plugin'),
+        { recursive: true, force: true },
+      );
+    });
+
+    it('plugin:install returns error when no source has manifest', async () => {
+      // getPluginSourcePath: both candidates fail → returns null
+      (existsSync as any)
+        .mockReturnValueOnce(false) // packaged: no manifest
+        .mockReturnValueOnce(false); // dev: no manifest
+
+      const result = await invokeHandler('plugin:install');
+
+      expect(result).toEqual({ success: false, error: 'Plugin files not found in app bundle.' });
+      expect(cpSync).not.toHaveBeenCalled();
+    });
+
+    it('plugin:install returns error when copy fails', async () => {
+      (existsSync as any).mockReturnValueOnce(true); // packaged manifest found
+      (cpSync as any).mockImplementationOnce(() => {
+        throw new Error('EACCES: permission denied');
+      });
+
+      const result = await invokeHandler('plugin:install');
+
+      expect(result).toEqual({ success: false, error: 'EACCES: permission denied' });
+      expect(shell.showItemInFolder).not.toHaveBeenCalled();
     });
   });
 });
