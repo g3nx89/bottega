@@ -10,16 +10,33 @@ export function createMockSession(): AgentSessionLike & {
   subscribers: Array<(event: any) => void>;
   _promptFn: ReturnType<typeof vi.fn>;
   _abortFn: ReturnType<typeof vi.fn>;
+  _newSessionFn: ReturnType<typeof vi.fn>;
+  _switchSessionFn: ReturnType<typeof vi.fn>;
+  _messages: any[];
+  _sessionFile: string | undefined;
 } {
   const subscribers: Array<(event: any) => void> = [];
   const _promptFn = vi.fn<(text: string, options?: any) => Promise<void>>().mockResolvedValue(undefined);
   const _abortFn = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const _newSessionFn = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
+  const _switchSessionFn = vi.fn<(path: string) => Promise<boolean>>().mockResolvedValue(true);
 
-  return {
+  const mock = {
     prompt: _promptFn,
     abort: _abortFn,
     subscribe(callback: (event: any) => void) {
       subscribers.push(callback);
+    },
+    newSession: _newSessionFn,
+    switchSession: _switchSessionFn,
+    setThinkingLevel: vi.fn(),
+    _messages: [] as any[],
+    _sessionFile: undefined as string | undefined,
+    get messages() {
+      return mock._messages;
+    },
+    get sessionFile() {
+      return mock._sessionFile;
     },
     emitEvent(event: any) {
       for (const cb of subscribers) cb(event);
@@ -27,5 +44,9 @@ export function createMockSession(): AgentSessionLike & {
     subscribers,
     _promptFn,
     _abortFn,
+    _newSessionFn,
+    _switchSessionFn,
   };
+
+  return mock;
 }

@@ -1,0 +1,236 @@
+import { describe, expect, it } from 'vitest';
+import { extractRenderableMessages, type RenderableTurn } from '../src/main/renderable-messages.js';
+
+/** Type guard for assistant turns (have tools/images from tool results). */
+function isAssistant(turn: RenderableTurn): turn is Extract<RenderableTurn, { role: 'assistant' }> {
+  return turn.role === 'assistant';
+}
+
+describe('extractRenderableMessages', () => {
+  it('should return empty array for empty messages', () => {
+    expect(extractRenderableMessages([])).toEqual([]);
+  });
+
+  it('should return empty array for null/undefined content', () => {
+    expect(extractRenderableMessages([{ role: 'user' }])).toEqual([]);
+    expect(extractRenderableMessages([{ role: 'user', content: [] }])).toEqual([]);
+  });
+
+  it('should extract a simple user message', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'Hello' }] },
+    ];
+    expect(extractRenderableMessages(messages)).toEqual([
+      { role: 'user', text: 'Hello' },
+    ]);
+  });
+
+  it('should extract user message with images', () => {
+    const messages = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Look at this' },
+          { type: 'image', data: 'base64img' },
+        ],
+      },
+    ];
+    expect(extractRenderableMessages(messages)).toEqual([
+      { role: 'user', text: 'Look at this', images: ['base64img'] },
+    ]);
+  });
+
+  it('should extract a simple assistant text response', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'Hi' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Hello! How can I help?' }] },
+    ];
+    const turns = extractRenderableMessages(messages);
+    expect(turns).toHaveLength(2);
+    expect(turns[1]).toEqual({ role: 'assistant', text: 'Hello! How can I help?' });
+  });
+
+  it('should concatenate multiple text blocks in assistant message', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Part 1. ' },
+          { type: 'text', text: 'Part 2.' },
+        ],
+      },
+    ];
+    const turns = extractRenderableMessages(messages);
+    expect(turns[0].text).toBe('Part 1. Part 2.');
+  });
+
+  it('should extract tool calls with their results', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'Take a screenshot' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Taking a screenshot...' },
+          { type: 'toolCall', name: 'figma_screenshot', toolCallId: 'tc-1', input: {} },
+        ],
+      },
+      {
+        role: 'tool_result',
+        toolCallId: 'tc-1',
+        isError: false,
+        content: [
+          { type: 'text', text: 'Screenshot captured' },
+          { type: 'image', data: 'screenshot-base64' },
+        ],
+      },
+    ];
+    const turns = extractRenderableMessages(messages);
+    expect(turns).toHaveLength(2);
+    expect(turns[1]).toEqual({
+      role: 'assistant',
+      text: 'Taking a screenshot...',
+      tools: [{ name: 'figma_screenshot', id: 'tc-1', success: true }],
+      images: ['screenshot-base64'],
+    });
+  });
+
+  it('should mark failed tool calls as unsuccessful', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'toolCall', name: 'figma_execute', toolCallId: 'tc-2', input: {} },
+        ],
+      },
+      {
+        role: 'tool_result',
+        toolCallId: 'tc-2',
+        isError: true,
+        content: [{ type: 'text', text: 'Error: node not found' }],
+      },
+    ];
+    const turns = extractRenderableMessages(messages);
+    expect(turns).toHaveLength(1);
+    expect(isAssistant(turns[0]) && turns[0].tools![0].success).toBe(false);
+  });
+
+  it('should handle tool call without matching result (defaults to success)', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Running...' },
+          { type: 'toolCall', name: 'figma_status', toolCallId: 'tc-orphan', input: {} },
+        ],
+      },
+    ];
+    const turns = extractRenderableMessages(messages);
+    expect(isAssistant(turns[0]) && turns[0].tools![0].success).toBe(true);
+  });
+
+  it('should handle multiple tool calls in one assistant message', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'toolCall', name: 'figma_get_selection', toolCallId: 'tc-a', input: {} },
+          { type: 'toolCall', name: 'figma_screenshot', toolCallId: 'tc-b', input: {} },
+        ],
+      },
+      { role: 'tool_result', toolCallId: 'tc-a', isError: false, content: [{ type: 'text', text: 'ok' }] },
+      {
+        role: 'tool_result',
+        toolCallId: 'tc-b',
+        isError: false,
+        content: [{ type: 'image', data: 'img-data' }],
+      },
+    ];
+    const turns = extractRenderableMessages(messages);
+    expect(turns).toHaveLength(1);
+    const t = turns[0];
+    expect(isAssistant(t) && t.tools).toHaveLength(2);
+    expect(t.images).toEqual(['img-data']);
+  });
+
+  it('should handle consecutive user messages', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'First' }] },
+      { role: 'user', content: [{ type: 'text', text: 'Second' }] },
+    ];
+    const turns = extractRenderableMessages(messages);
+    expect(turns).toHaveLength(2);
+    expect(turns[0].text).toBe('First');
+    expect(turns[1].text).toBe('Second');
+  });
+
+  it('should handle consecutive assistant messages', () => {
+    const messages = [
+      { role: 'assistant', content: [{ type: 'text', text: 'Response 1' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Response 2' }] },
+    ];
+    const turns = extractRenderableMessages(messages);
+    expect(turns).toHaveLength(2);
+    expect(turns[0].text).toBe('Response 1');
+    expect(turns[1].text).toBe('Response 2');
+  });
+
+  it('should filter out empty assistant turns (no text, no tools, no images)', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'Hi' }] },
+      { role: 'assistant', content: [] }, // empty
+      { role: 'user', content: [{ type: 'text', text: 'Hello?' }] },
+    ];
+    const turns = extractRenderableMessages(messages);
+    expect(turns).toHaveLength(2);
+    expect(turns.every((t) => t.role === 'user')).toBe(true);
+  });
+
+  it('should skip tool_result and custom messages in output', () => {
+    const messages = [
+      { role: 'tool_result', toolCallId: 'tc-1', content: [{ type: 'text', text: 'result' }] },
+      { role: 'custom', customType: 'notification', content: 'hello' },
+    ];
+    expect(extractRenderableMessages(messages)).toEqual([]);
+  });
+
+  it('should handle a realistic multi-turn conversation', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'Create a button' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'I\'ll create a button for you.' },
+          { type: 'toolCall', name: 'figma_create_child', toolCallId: 'tc-1', input: {} },
+        ],
+      },
+      { role: 'tool_result', toolCallId: 'tc-1', isError: false, content: [{ type: 'text', text: 'Created' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Here\'s a screenshot of the result.' },
+          { type: 'toolCall', name: 'figma_screenshot', toolCallId: 'tc-2', input: {} },
+        ],
+      },
+      {
+        role: 'tool_result',
+        toolCallId: 'tc-2',
+        isError: false,
+        content: [{ type: 'image', data: 'final-screenshot' }],
+      },
+      { role: 'user', content: [{ type: 'text', text: 'Make it purple' }] },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Done! The button is now purple.' }],
+      },
+    ];
+    const turns = extractRenderableMessages(messages);
+    expect(turns).toHaveLength(5); // user, assistant+tool, assistant+screenshot, user, assistant
+    expect(turns[0]).toEqual({ role: 'user', text: 'Create a button' });
+    const t1 = turns[1];
+    expect(isAssistant(t1) && t1.tools).toHaveLength(1);
+    expect(isAssistant(t1) && t1.tools![0].name).toBe('figma_create_child');
+    expect(turns[2].images).toEqual(['final-screenshot']);
+    expect(turns[3]).toEqual({ role: 'user', text: 'Make it purple' });
+    expect(turns[4].text).toBe('Done! The button is now purple.');
+  });
+});

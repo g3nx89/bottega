@@ -1352,6 +1352,10 @@ body {
   justify-content: center;
 }
 
+.reset-chip {
+  margin-left: auto;
+}
+
 .input-hint {
   font-size: 10px;
   color: var(--text-secondary);

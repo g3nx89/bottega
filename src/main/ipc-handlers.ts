@@ -13,10 +13,21 @@ import {
   OAUTH_PROVIDER_MAP,
 } from './agent.js';
 import { checkForUpdates, downloadUpdate, getAppVersion, quitAndInstall } from './auto-updater.js';
+import { OperationQueue } from './operation-queue.js';
 import { effectiveApiKey, type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
 import { DEFAULT_IMAGE_MODEL, IMAGE_GEN_MODELS, ImageGenerator } from './image-gen/image-generator.js';
 import { PromptSuggester } from './prompt-suggester.js';
 import { safeSend } from './safe-send.js';
+import { extractRenderableMessages, type RenderableTurn } from './renderable-messages.js';
+import { type SessionStore } from './session-store.js';
+
+export { extractRenderableMessages, type RenderableTurn };
+
+/** Controller returned by setupIpcHandlers for cross-module coordination. */
+export interface IpcController {
+  /** Switch the agent session to match a Figma file. Restores existing session or starts new. */
+  switchToFile(fileKey: string, fileName: string): Promise<void>;
+}
 
 const log = createChildLogger({ component: 'ipc' });
 
@@ -24,6 +35,12 @@ export interface AgentSessionLike {
   prompt(text: string, options?: { streamingBehavior?: 'steer' | 'followUp' }): Promise<void>;
   abort(): Promise<void>;
   subscribe(callback: (event: any) => void): void;
+  // Session persistence methods (Pi SDK AgentSession)
+  newSession(options?: { parentSession?: string }): Promise<boolean>;
+  switchSession(sessionPath: string): Promise<boolean>;
+  setThinkingLevel?(level: string): void;
+  readonly sessionFile: string | undefined;
+  readonly messages: any[];
 }
 
 export interface ImageGenState {
@@ -36,13 +53,32 @@ export function setupIpcHandlers(
   mainWindow: BrowserWindow,
   infra: AgentInfra,
   imageGenState?: ImageGenState,
-) {
+  sessionStore?: SessionStore,
+): IpcController {
   let session = initialSession;
   let isStreaming = false;
   let currentModelConfig: ModelConfig = DEFAULT_MODEL;
+  let currentFileKey: string | null = null;
+  let currentFileName: string | null = null;
 
   // Prompt suggester — generates follow-up suggestions after each agent turn
   const suggester = new PromptSuggester(infra.authStorage, infra.modelRegistry);
+  const switchQueue = new OperationQueue();
+
+  /** Abort the current agent stream if active. */
+  async function abortIfStreaming(): Promise<void> {
+    if (isStreaming) {
+      await session.abort();
+      isStreaming = false;
+    }
+  }
+
+  /** Persist the current file→session mapping to disk. */
+  function persistSessionMapping(): void {
+    if (sessionStore && currentFileKey && currentFileName && session.sessionFile) {
+      sessionStore.set(currentFileKey, session.sessionFile, currentFileName);
+    }
+  }
 
   function subscribeToSession(s: AgentSessionLike) {
     s.subscribe((event: any) => {
@@ -177,6 +213,8 @@ export function setupIpcHandlers(
       );
       safeSend(mainWindow.webContents, 'agent:end');
     }
+
+    persistSessionMapping();
   });
 
   ipcMain.handle('agent:abort', async () => {
@@ -367,32 +405,31 @@ export function setupIpcHandlers(
   });
 
   ipcMain.handle('agent:set-thinking', (_event, level: string) => {
-    (session as any).setThinkingLevel?.(level);
+    session.setThinkingLevel?.(level);
     log.info({ level }, 'Thinking level changed');
   });
 
-  ipcMain.handle('auth:switch-model', async (_event, config: ModelConfig) => {
-    log.info({ provider: config.provider, model: config.modelId }, 'Switching model');
-    try {
-      // Abort current session if streaming
-      if (isStreaming) {
-        await session.abort();
-        isStreaming = false;
-      }
+  ipcMain.handle('auth:switch-model', (_event, config: ModelConfig) =>
+    switchQueue.execute(async () => {
+      log.info({ provider: config.provider, model: config.modelId }, 'Switching model');
+      try {
+        await abortIfStreaming();
 
-      // Create new session with new model
-      const result = await createFigmaAgent(infra, config);
-      session = result.session as unknown as AgentSessionLike;
-      subscribeToSession(session);
-      currentModelConfig = config;
-      suggester.reset();
-      log.info({ provider: config.provider, model: config.modelId }, 'Model switched');
-      return { success: true };
-    } catch (err: any) {
-      log.error({ err }, 'Failed to switch model');
-      return { success: false, error: err.message };
-    }
-  });
+        const result = await createFigmaAgent(infra, config);
+        session = result.session as unknown as AgentSessionLike;
+        subscribeToSession(session);
+        currentModelConfig = config;
+        suggester.reset();
+        persistSessionMapping();
+
+        log.info({ provider: config.provider, model: config.modelId }, 'Model switched');
+        return { success: true };
+      } catch (err: any) {
+        log.error({ err }, 'Failed to switch model');
+        return { success: false, error: err.message };
+      }
+    }),
+  );
 
   // ── Image Generation settings ────────────
 
@@ -500,9 +537,91 @@ export function setupIpcHandlers(
     }
   });
 
+  // ── Session persistence ─────────────────
+
+  ipcMain.handle('session:reset', () =>
+    switchQueue.execute(async () => {
+      try {
+        await abortIfStreaming();
+        await session.newSession();
+        suggester.reset();
+        persistSessionMapping();
+
+        log.info({ fileKey: currentFileKey }, 'Session reset');
+        return { success: true };
+      } catch (err: any) {
+        log.error({ err }, 'Failed to reset session');
+        return { success: false, error: err.message };
+      }
+    }),
+  );
+
+  ipcMain.handle('session:get-messages', () => {
+    try {
+      const messages = session.messages || [];
+      return extractRenderableMessages(messages);
+    } catch (err: any) {
+      log.warn({ err }, 'Failed to extract session messages');
+      return [];
+    }
+  });
+
   // ── Auto-update ────────────────────────
   ipcMain.handle('update:get-version', () => getAppVersion());
   ipcMain.handle('update:download', () => downloadUpdate());
   ipcMain.handle('update:check', () => checkForUpdates());
   ipcMain.handle('update:install', () => quitAndInstall());
+
+  // ── Controller for cross-module coordination ──
+
+  async function switchToFile(fileKey: string, fileName: string): Promise<void> {
+    await switchQueue.execute(() => switchToFileImpl(fileKey, fileName));
+  }
+
+  async function switchToFileImpl(fileKey: string, fileName: string): Promise<void> {
+    currentFileKey = fileKey;
+    currentFileName = fileName;
+
+    if (!sessionStore) return;
+
+    const entry = sessionStore.get(fileKey);
+
+    if (entry && existsSync(entry.sessionPath)) {
+      try {
+        await abortIfStreaming();
+        await session.switchSession(entry.sessionPath);
+        sessionStore.touch(fileKey);
+        suggester.reset();
+
+        const messages = extractRenderableMessages(session.messages || []);
+        safeSend(mainWindow.webContents, 'session:restored', messages);
+        log.info({ fileKey, fileName, turns: messages.length }, 'Session restored for file');
+      } catch (err) {
+        log.warn({ err, fileKey }, 'Failed to restore session — starting fresh');
+        safeSend(mainWindow.webContents, 'session:restore-failed', { fileKey, fileName });
+        await startNewSessionForFile(fileKey, fileName);
+      }
+    } else {
+      await startNewSessionForFile(fileKey, fileName);
+    }
+  }
+
+  async function startNewSessionForFile(fileKey: string, fileName: string): Promise<void> {
+    try {
+      await abortIfStreaming();
+      await session.newSession();
+      suggester.reset();
+
+      if (sessionStore && session.sessionFile) {
+        sessionStore.set(fileKey, session.sessionFile, fileName);
+      }
+      // Signal renderer to clear any stale chat from a previous file
+      safeSend(mainWindow.webContents, 'session:restored', []);
+      log.info({ fileKey, fileName }, 'New session started for file');
+    } catch (err) {
+      log.warn({ err, fileKey }, 'Failed to start new session for file');
+    }
+  }
+
+  return { switchToFile };
 }
