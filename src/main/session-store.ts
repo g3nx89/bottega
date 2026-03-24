@@ -24,7 +24,10 @@ export class SessionStore {
   /** Live reference — load() returns this, mutators modify in place. */
   private cache: FileSessionMap | null = null;
 
-  constructor(storePath?: string, private maxEntries = 100) {
+  constructor(
+    storePath?: string,
+    private maxEntries = 100,
+  ) {
     this.storePath = storePath || DEFAULT_STORE_PATH;
     this.prune();
   }

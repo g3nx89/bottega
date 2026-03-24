@@ -1147,6 +1147,77 @@ if (setupFigmaBtn) {
     .catch(() => {});
 }
 
+// ── Diagnostics ─────────────────────────
+
+const exportLogsBtn = document.getElementById('export-logs-btn');
+const copySysinfoBtn = document.getElementById('copy-sysinfo-btn');
+const diagnosticsExportStatus = document.getElementById('diagnostics-export-status');
+const sendDiagnosticsToggle = document.getElementById('send-diagnostics-toggle');
+const diagnosticsRestartHint = document.getElementById('diagnostics-restart-hint');
+
+if (exportLogsBtn) {
+  exportLogsBtn.addEventListener('click', async () => {
+    exportLogsBtn.disabled = true;
+    exportLogsBtn.textContent = 'Exporting…';
+    diagnosticsExportStatus.textContent = '';
+    try {
+      const result = await window.api.exportDiagnostics();
+      if (result.success) {
+        diagnosticsExportStatus.textContent = 'Exported successfully';
+        diagnosticsExportStatus.className = 'key-status success';
+      } else if (!result.canceled) {
+        diagnosticsExportStatus.textContent = result.error || 'Export failed';
+        diagnosticsExportStatus.className = 'key-status error';
+      }
+    } catch {
+      diagnosticsExportStatus.textContent = 'Export failed';
+      diagnosticsExportStatus.className = 'key-status error';
+    } finally {
+      exportLogsBtn.disabled = false;
+      exportLogsBtn.textContent = 'Export Logs';
+    }
+  });
+}
+
+if (copySysinfoBtn) {
+  copySysinfoBtn.addEventListener('click', async () => {
+    try {
+      const info = await window.api.copyDiagnosticsInfo();
+      await navigator.clipboard.writeText(info);
+      copySysinfoBtn.textContent = 'Copied!';
+    } catch {
+      copySysinfoBtn.textContent = 'Copy failed';
+    }
+    setTimeout(() => {
+      copySysinfoBtn.textContent = 'Copy System Info';
+    }, 1500);
+  });
+}
+
+if (sendDiagnosticsToggle) {
+  // Load saved state
+  window.api
+    .getDiagnosticsConfig()
+    .then((config) => {
+      sendDiagnosticsToggle.checked = config.sendDiagnostics;
+    })
+    .catch(() => {});
+
+  sendDiagnosticsToggle.addEventListener('change', async () => {
+    const prev = !sendDiagnosticsToggle.checked;
+    try {
+      const result = await window.api.setDiagnosticsConfig({
+        sendDiagnostics: sendDiagnosticsToggle.checked,
+      });
+      if (result.requiresRestart && diagnosticsRestartHint) {
+        diagnosticsRestartHint.classList.remove('hidden');
+      }
+    } catch {
+      sendDiagnosticsToggle.checked = prev;
+    }
+  });
+}
+
 // ── Pin (always-on-top) ─────────────────
 
 pinBtn.addEventListener('click', async () => {
@@ -1342,11 +1413,12 @@ function showSuggestions(suggestions) {
     suggestionsContainer.classList.add('hidden');
     return;
   }
-  suggestions.forEach((text) => {
+  suggestions.forEach((text, index) => {
     const chip = document.createElement('button');
     chip.className = 'suggestion-chip';
     chip.textContent = text;
     chip.addEventListener('click', () => {
+      window.api.trackSuggestionClicked(index);
       inputField.value = text;
       autoResizeInput();
       hideSuggestions();

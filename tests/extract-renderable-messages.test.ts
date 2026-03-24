@@ -17,12 +17,8 @@ describe('extractRenderableMessages', () => {
   });
 
   it('should extract a simple user message', () => {
-    const messages = [
-      { role: 'user', content: [{ type: 'text', text: 'Hello' }] },
-    ];
-    expect(extractRenderableMessages(messages)).toEqual([
-      { role: 'user', text: 'Hello' },
-    ]);
+    const messages = [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }];
+    expect(extractRenderableMessages(messages)).toEqual([{ role: 'user', text: 'Hello' }]);
   });
 
   it('should extract user message with images', () => {
@@ -98,9 +94,7 @@ describe('extractRenderableMessages', () => {
     const messages = [
       {
         role: 'assistant',
-        content: [
-          { type: 'toolCall', name: 'figma_execute', toolCallId: 'tc-2', input: {} },
-        ],
+        content: [{ type: 'toolCall', name: 'figma_execute', toolCallId: 'tc-2', input: {} }],
       },
       {
         role: 'tool_result',
@@ -199,7 +193,7 @@ describe('extractRenderableMessages', () => {
       {
         role: 'assistant',
         content: [
-          { type: 'text', text: 'I\'ll create a button for you.' },
+          { type: 'text', text: "I'll create a button for you." },
           { type: 'toolCall', name: 'figma_create_child', toolCallId: 'tc-1', input: {} },
         ],
       },
@@ -207,7 +201,7 @@ describe('extractRenderableMessages', () => {
       {
         role: 'assistant',
         content: [
-          { type: 'text', text: 'Here\'s a screenshot of the result.' },
+          { type: 'text', text: "Here's a screenshot of the result." },
           { type: 'toolCall', name: 'figma_screenshot', toolCallId: 'tc-2', input: {} },
         ],
       },

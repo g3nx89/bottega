@@ -62,10 +62,7 @@ export function extractRenderableMessages(messages: any[]): RenderableTurn[] {
       }
       currentAssistant = null;
       const text = extractText(msg.content);
-      const images =
-        msg.content
-          ?.filter((c: any) => c.type === 'image' && c.data)
-          .map((c: any) => c.data) || [];
+      const images = msg.content?.filter((c: any) => c.type === 'image' && c.data).map((c: any) => c.data) || [];
       if (text || images.length) turns.push({ role: 'user', text, ...(images.length ? { images } : {}) });
     } else if (msg.role === 'assistant') {
       if (currentAssistant && hasContent(currentAssistant)) {

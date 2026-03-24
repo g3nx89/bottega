@@ -1,6 +1,6 @@
 import { cpSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { app, type BrowserWindow, ipcMain, shell } from 'electron';
+import { app, type BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { createChildLogger } from '../figma/logger.js';
 import {
   type AgentInfra,
@@ -13,13 +13,21 @@ import {
   OAUTH_PROVIDER_MAP,
 } from './agent.js';
 import { checkForUpdates, downloadUpdate, getAppVersion, quitAndInstall } from './auto-updater.js';
-import { OperationQueue } from './operation-queue.js';
+import { categorizeToolName } from './compression/metrics.js';
+import { exportDiagnosticsZip, formatSystemInfoForClipboard } from './diagnostics.js';
 import { effectiveApiKey, type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
 import { DEFAULT_IMAGE_MODEL, IMAGE_GEN_MODELS, ImageGenerator } from './image-gen/image-generator.js';
+import { OperationQueue } from './operation-queue.js';
 import { PromptSuggester } from './prompt-suggester.js';
-import { safeSend } from './safe-send.js';
+import {
+  loadDiagnosticsConfig,
+  reloadDiagnosticsConfig,
+  saveDiagnosticsConfig,
+  type UsageTracker,
+} from './remote-logger.js';
 import { extractRenderableMessages, type RenderableTurn } from './renderable-messages.js';
-import { type SessionStore } from './session-store.js';
+import { safeSend } from './safe-send.js';
+import type { SessionStore } from './session-store.js';
 
 export { extractRenderableMessages, type RenderableTurn };
 
@@ -27,6 +35,8 @@ export { extractRenderableMessages, type RenderableTurn };
 export interface IpcController {
   /** Switch the agent session to match a Figma file. Restores existing session or starts new. */
   switchToFile(fileKey: string, fileName: string): Promise<void>;
+  /** Register a callback for model config changes. */
+  onModelChange(cb: (config: ModelConfig) => void): void;
 }
 
 const log = createChildLogger({ component: 'ipc' });
@@ -48,14 +58,18 @@ export interface ImageGenState {
   settings: ImageGenSettings;
 }
 
-export function setupIpcHandlers(
-  initialSession: AgentSessionLike,
-  mainWindow: BrowserWindow,
-  infra: AgentInfra,
-  imageGenState?: ImageGenState,
-  sessionStore?: SessionStore,
-): IpcController {
-  let session = initialSession;
+export interface SetupIpcDeps {
+  initialSession: AgentSessionLike;
+  mainWindow: BrowserWindow;
+  infra: AgentInfra;
+  imageGenState?: ImageGenState;
+  sessionStore?: SessionStore;
+  usageTracker?: UsageTracker;
+}
+
+export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
+  const { mainWindow, infra, imageGenState, sessionStore, usageTracker } = deps;
+  let session = deps.initialSession;
   let isStreaming = false;
   let currentModelConfig: ModelConfig = DEFAULT_MODEL;
   let currentFileKey: string | null = null;
@@ -64,12 +78,14 @@ export function setupIpcHandlers(
   // Prompt suggester — generates follow-up suggestions after each agent turn
   const suggester = new PromptSuggester(infra.authStorage, infra.modelRegistry);
   const switchQueue = new OperationQueue();
+  const modelChangeListeners: Array<(config: ModelConfig) => void> = [];
 
   /** Abort the current agent stream if active. */
   async function abortIfStreaming(): Promise<void> {
     if (isStreaming) {
       await session.abort();
       isStreaming = false;
+      toolStartTimes.clear();
     }
   }
 
@@ -79,6 +95,9 @@ export function setupIpcHandlers(
       sessionStore.set(currentFileKey, session.sessionFile, currentFileName);
     }
   }
+
+  // Track tool execution timing for usage analytics
+  const toolStartTimes = new Map<string, number>();
 
   function subscribeToSession(s: AgentSessionLike) {
     s.subscribe((event: any) => {
@@ -96,6 +115,7 @@ export function setupIpcHandlers(
         case 'tool_execution_start':
           log.info({ tool: event.toolName, callId: event.toolCallId, params: event.toolParams }, 'Tool start');
           safeSend(wc, 'agent:tool-start', event.toolName, event.toolCallId);
+          toolStartTimes.set(event.toolCallId, Date.now());
           break;
         case 'tool_execution_end': {
           const resultPreview = event.result?.content
@@ -115,6 +135,23 @@ export function setupIpcHandlers(
             'Tool end',
           );
           safeSend(wc, 'agent:tool-end', event.toolName, event.toolCallId, !event.isError, event.result);
+          const startTime = toolStartTimes.get(event.toolCallId);
+          const durationMs = startTime ? Date.now() - startTime : 0;
+          toolStartTimes.delete(event.toolCallId);
+          const category = categorizeToolName(event.toolName);
+          if (event.isError) {
+            usageTracker?.trackToolError(event.toolName, String(resultPreview), undefined);
+          }
+          usageTracker?.trackToolCall(event.toolName, category, !event.isError, durationMs);
+          // Image gen tools emit a second event for the image-specific Axiom dashboard
+          if (
+            event.toolName.startsWith('figma_generate_') ||
+            event.toolName.startsWith('figma_edit_') ||
+            event.toolName === 'figma_restore_image'
+          ) {
+            const imageType = event.toolName.replace('figma_', '');
+            usageTracker?.trackImageGen(imageType, 'gemini', !event.isError, durationMs);
+          }
           if (event.toolName === 'figma_screenshot' && !event.isError && event.result?.content) {
             const imageContent = event.result.content.find((c: any) => c.type === 'image');
             if (imageContent) {
@@ -147,24 +184,29 @@ export function setupIpcHandlers(
           isStreaming = false;
           safeSend(wc, 'agent:end');
           // Generate suggestions asynchronously — don't block the UI
-          suggester
-            .suggest(currentModelConfig)
-            .then((suggestions) => {
-              if (suggestions.length > 0) {
-                safeSend(wc, 'agent:suggestions', suggestions);
-              }
-              suggester.resetAssistantText();
-            })
-            .catch((err) => {
-              log.warn({ err }, 'Failed to generate suggestions');
-              suggester.resetAssistantText();
-            });
+          {
+            const suggestStart = Date.now();
+            suggester
+              .suggest(currentModelConfig)
+              .then((suggestions) => {
+                usageTracker?.trackSuggestionsGenerated(suggestions.length, Date.now() - suggestStart);
+                if (suggestions.length > 0) {
+                  safeSend(wc, 'agent:suggestions', suggestions);
+                }
+                suggester.resetAssistantText();
+              })
+              .catch((err) => {
+                log.warn({ err }, 'Failed to generate suggestions');
+                suggester.resetAssistantText();
+              });
+          }
           break;
         case 'auto_compaction_start':
           safeSend(wc, 'agent:compaction', true);
           break;
         case 'auto_compaction_end':
           safeSend(wc, 'agent:compaction', false);
+          usageTracker?.trackCompaction(0, 0); // SDK does not expose token counts; zeros signal "compaction occurred"
           break;
         case 'auto_retry_start':
           safeSend(wc, 'agent:retry', true);
@@ -196,6 +238,7 @@ export function setupIpcHandlers(
 
     suggester.trackUserPrompt(text);
     suggester.resetAssistantText();
+    usageTracker?.trackPrompt(text.length, isStreaming);
     try {
       if (isStreaming) {
         await session.prompt(text, { streamingBehavior: 'followUp' });
@@ -206,6 +249,8 @@ export function setupIpcHandlers(
     } catch (err: any) {
       log.error({ err }, 'Prompt failed');
       isStreaming = false;
+      const errType = err.code === 'EAUTH' ? 'auth' : err.status === 429 ? 'rate_limit' : 'unknown';
+      usageTracker?.trackAgentError(errType, err.message || 'Prompt failed');
       safeSend(
         mainWindow.webContents,
         'agent:text-delta',
@@ -404,14 +449,20 @@ export function setupIpcHandlers(
     return true;
   });
 
+  let currentThinkingLevel = 'medium';
+
   ipcMain.handle('agent:set-thinking', (_event, level: string) => {
+    const before = currentThinkingLevel;
     session.setThinkingLevel?.(level);
+    currentThinkingLevel = level;
+    usageTracker?.trackThinkingChange(before, level);
     log.info({ level }, 'Thinking level changed');
   });
 
   ipcMain.handle('auth:switch-model', (_event, config: ModelConfig) =>
     switchQueue.execute(async () => {
       log.info({ provider: config.provider, model: config.modelId }, 'Switching model');
+      const previousModel = { provider: currentModelConfig.provider, modelId: currentModelConfig.modelId };
       try {
         await abortIfStreaming();
 
@@ -419,8 +470,12 @@ export function setupIpcHandlers(
         session = result.session as unknown as AgentSessionLike;
         subscribeToSession(session);
         currentModelConfig = config;
+        currentThinkingLevel = 'medium'; // reset to default for new session
         suggester.reset();
         persistSessionMapping();
+        usageTracker?.trackModelSwitch(previousModel, { provider: config.provider, modelId: config.modelId });
+        // Notify external listeners (e.g., SettingsRefs in index.ts)
+        modelChangeListeners.forEach((cb) => cb(config));
 
         log.info({ provider: config.provider, model: config.modelId }, 'Model switched');
         return { success: true };
@@ -481,7 +536,9 @@ export function setupIpcHandlers(
 
   ipcMain.handle('compression:set-profile', (_event, profile: string) => {
     try {
+      const before = infra.configManager.getActiveProfile();
       infra.configManager.setProfile(profile as any);
+      usageTracker?.trackCompressionProfileChange(before, profile);
       log.info({ profile }, 'Compression profile changed');
       return { success: true };
     } catch (err: any) {
@@ -530,11 +587,55 @@ export function setupIpcHandlers(
       cpSync(src, dest, { recursive: true, force: true });
       shell.showItemInFolder(join(dest, PLUGIN_MANIFEST));
       log.info({ dest }, 'Figma plugin copied and revealed in Finder');
+      usageTracker?.trackFigmaPluginInstalled(true);
       return { success: true, path: dest };
     } catch (err: any) {
       log.error({ err }, 'Failed to copy Figma plugin');
+      usageTracker?.trackFigmaPluginInstalled(false);
       return { success: false, error: err.message };
     }
+  });
+
+  // ── Usage tracking (renderer → main) ────
+  ipcMain.handle('usage:suggestion-clicked', (_event, index: number) => {
+    usageTracker?.trackSuggestionClicked(index);
+  });
+
+  // ── Diagnostics ─────────────────────────
+
+  ipcMain.handle('diagnostics:export', async () => {
+    const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export Diagnostics',
+      defaultPath: `bottega-diagnostics-${new Date().toISOString().slice(0, 10)}.zip`,
+      filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+    });
+    if (canceled || !filePath) return { success: false, canceled: true };
+    try {
+      await exportDiagnosticsZip(filePath);
+      log.info({ filePath }, 'Diagnostics exported');
+      return { success: true, path: filePath };
+    } catch (err: any) {
+      log.error({ err }, 'Diagnostics export failed');
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('diagnostics:copy-info', () => {
+    return formatSystemInfoForClipboard();
+  });
+
+  ipcMain.handle('diagnostics:get-config', () => {
+    const config = loadDiagnosticsConfig();
+    return { sendDiagnostics: config.sendDiagnostics };
+  });
+
+  ipcMain.handle('diagnostics:set-config', async (_event, config: { sendDiagnostics: boolean }) => {
+    const current = loadDiagnosticsConfig();
+    const updated = { ...current, sendDiagnostics: config.sendDiagnostics };
+    await saveDiagnosticsConfig(updated);
+    reloadDiagnosticsConfig();
+    log.info({ sendDiagnostics: updated.sendDiagnostics }, 'Diagnostics preference updated');
+    return { success: true, requiresRestart: true };
   });
 
   // ── Session persistence ─────────────────
@@ -623,5 +724,8 @@ export function setupIpcHandlers(
     }
   }
 
-  return { switchToFile };
+  return {
+    switchToFile,
+    onModelChange: (cb: (config: ModelConfig) => void) => modelChangeListeners.push(cb),
+  };
 }

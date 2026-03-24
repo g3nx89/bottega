@@ -17,12 +17,14 @@
     "package": "npm run build && npx electron-builder --mac"
   },
   "dependencies": {
+    "@axiomhq/pino": "^1.5.0",
     "@google/genai": "^1.46.0",
     "@iconify/core": "^2.0.0",
     "@iconify/utils": "^2.0.0",
     "@mariozechner/pi-ai": "^0.61.0",
     "@mariozechner/pi-coding-agent": "^0.61.0",
     "@sinclair/typebox": "^0.34.0",
+    "archiver": "^7.0.1",
     "electron-updater": "^6.8.3",
     "esbuild": "^0.25.0",
     "pino": "^9.5.0",
@@ -32,6 +34,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.8",
     "@playwright/test": "^1.58.2",
+    "@types/archiver": "^7.0.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.0",
     "electron": "^33.0.0",

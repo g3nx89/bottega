@@ -8,6 +8,9 @@ vi.mock('electron', () => ({
     getAppPath: vi.fn().mockReturnValue('/mock/appPath'),
     isPackaged: false,
   },
+  dialog: {
+    showSaveDialog: vi.fn().mockResolvedValue({ filePath: '/tmp/test.zip', canceled: false }),
+  },
   ipcMain: { handle: vi.fn() },
   shell: { openExternal: vi.fn(), showItemInFolder: vi.fn() },
 }));
@@ -60,6 +63,17 @@ vi.mock('../src/main/image-gen/image-generator.js', () => ({
   },
 }));
 
+vi.mock('../src/main/diagnostics.js', () => ({
+  exportDiagnosticsZip: vi.fn().mockResolvedValue(undefined),
+  formatSystemInfoForClipboard: vi.fn().mockReturnValue('Bottega v0.3.0\nmacOS'),
+}));
+
+vi.mock('../src/main/remote-logger.js', () => ({
+  loadDiagnosticsConfig: vi.fn().mockReturnValue({ sendDiagnostics: false, anonymousId: 'test-id' }),
+  reloadDiagnosticsConfig: vi.fn().mockReturnValue({ sendDiagnostics: true, anonymousId: 'test-id' }),
+  saveDiagnosticsConfig: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../src/main/prompt-suggester.js', () => ({
   PromptSuggester: class {
     trackUserPrompt = vi.fn();
@@ -76,9 +90,11 @@ vi.mock('../src/main/prompt-suggester.js', () => ({
 // ── Imports (after mocks) ─────────────────────────────────────────
 
 import { cpSync, existsSync } from 'node:fs';
-import { app, ipcMain, shell } from 'electron';
+import { app, dialog, ipcMain, shell } from 'electron';
 import { createFigmaAgent } from '../src/main/agent.js';
+import { exportDiagnosticsZip, formatSystemInfoForClipboard } from '../src/main/diagnostics.js';
 import { setupIpcHandlers } from '../src/main/ipc-handlers.js';
+import { loadDiagnosticsConfig, saveDiagnosticsConfig } from '../src/main/remote-logger.js';
 import { createMockSession } from './helpers/mock-session.js';
 import { createMockWindow } from './helpers/mock-window.js';
 
@@ -134,7 +150,7 @@ describe('setupIpcHandlers', () => {
       designSystemCache: { invalidate: vi.fn() },
       metricsCollector: { finalize: vi.fn() },
     };
-    setupIpcHandlers(mockSession as any, mockWindow as any, mockInfra);
+    setupIpcHandlers({ initialSession: mockSession as any, mainWindow: mockWindow as any, infra: mockInfra });
   });
 
   // ── safeSend (cross-cutting, R6) ──────────────────────────────
@@ -653,6 +669,54 @@ describe('setupIpcHandlers', () => {
 
       expect(result).toEqual({ success: false, error: 'EACCES: permission denied' });
       expect(shell.showItemInFolder).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Diagnostics ──────────────────────────────────────────────
+
+  describe('diagnostics:export', () => {
+    it('should export diagnostics zip via save dialog', async () => {
+      const result = await invokeHandler('diagnostics:export');
+
+      expect(dialog.showSaveDialog).toHaveBeenCalled();
+      expect(exportDiagnosticsZip).toHaveBeenCalledWith('/tmp/test.zip');
+      expect(result).toEqual({ success: true, path: '/tmp/test.zip' });
+    });
+
+    it('should return canceled when user cancels dialog', async () => {
+      (dialog.showSaveDialog as any).mockResolvedValueOnce({ filePath: undefined, canceled: true });
+
+      const result = await invokeHandler('diagnostics:export');
+
+      expect(exportDiagnosticsZip).not.toHaveBeenCalled();
+      expect(result).toEqual({ success: false, canceled: true });
+    });
+  });
+
+  describe('diagnostics:copy-info', () => {
+    it('should return formatted system info', async () => {
+      const result = await invokeHandler('diagnostics:copy-info');
+
+      expect(formatSystemInfoForClipboard).toHaveBeenCalled();
+      expect(result).toBe('Bottega v0.3.0\nmacOS');
+    });
+  });
+
+  describe('diagnostics:get-config', () => {
+    it('should return diagnostics config', async () => {
+      const result = await invokeHandler('diagnostics:get-config');
+
+      expect(loadDiagnosticsConfig).toHaveBeenCalled();
+      expect(result).toEqual({ sendDiagnostics: false });
+    });
+  });
+
+  describe('diagnostics:set-config', () => {
+    it('should save config and return requiresRestart', async () => {
+      const result = await invokeHandler('diagnostics:set-config', { sendDiagnostics: true });
+
+      expect(saveDiagnosticsConfig).toHaveBeenCalledWith(expect.objectContaining({ sendDiagnostics: true }));
+      expect(result).toEqual({ success: true, requiresRestart: true });
     });
   });
 });

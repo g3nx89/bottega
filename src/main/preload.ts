@@ -95,6 +95,22 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('auth:login-event', (_event, data) => cb(data));
   },
 
+  // Usage tracking
+  trackSuggestionClicked: (index: number) => ipcRenderer.invoke('usage:suggestion-clicked', index),
+
+  // Diagnostics
+  exportDiagnostics: () =>
+    ipcRenderer.invoke('diagnostics:export') as Promise<{
+      success: boolean;
+      canceled?: boolean;
+      path?: string;
+      error?: string;
+    }>,
+  copyDiagnosticsInfo: () => ipcRenderer.invoke('diagnostics:copy-info') as Promise<string>,
+  getDiagnosticsConfig: () => ipcRenderer.invoke('diagnostics:get-config') as Promise<{ sendDiagnostics: boolean }>,
+  setDiagnosticsConfig: (config: { sendDiagnostics: boolean }) =>
+    ipcRenderer.invoke('diagnostics:set-config', config) as Promise<{ success: boolean; requiresRestart: boolean }>,
+
   // Figma plugin
   checkFigmaPlugin: () => ipcRenderer.invoke('plugin:check') as Promise<{ installed: boolean }>,
   installFigmaPlugin: () =>

@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Module mocks (must be before imports) ─────────────────────────
@@ -137,7 +137,12 @@ describe('Session persistence IPC', () => {
     };
 
     sessionStore = new SessionStore(join(tmpDir, 'file-sessions.json'), 100);
-    controller = setupIpcHandlers(mockSession as any, mockWindow as any, mockInfra, undefined, sessionStore);
+    controller = setupIpcHandlers({
+      initialSession: mockSession as any,
+      mainWindow: mockWindow as any,
+      infra: mockInfra,
+      sessionStore,
+    });
   });
 
   afterEach(() => {

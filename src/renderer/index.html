@@ -154,6 +154,22 @@
           </div>
           <div class="setting-divider"></div>
           <div class="setting-group">
+            <label class="setting-label">Diagnostics</label>
+            <span class="setting-hint">Export logs and crash reports for troubleshooting.</span>
+            <div class="diagnostics-row">
+              <button id="export-logs-btn" class="setting-btn-small">Export Logs</button>
+              <button id="copy-sysinfo-btn" class="setting-btn-small">Copy System Info</button>
+            </div>
+            <span id="diagnostics-export-status" class="key-status"></span>
+            <div class="setting-divider-inner"></div>
+            <label class="setting-sublabel diagnostics-toggle-label">
+              <input type="checkbox" id="send-diagnostics-toggle">
+              Send anonymous diagnostics
+            </label>
+            <span class="setting-hint">Help improve Bottega by sending anonymized usage data and error logs. No personal information, API keys, or file contents are ever sent. <span id="diagnostics-restart-hint" class="hidden" style="color: var(--accent);">Restart to apply.</span></span>
+          </div>
+          <div class="setting-divider"></div>
+          <div class="setting-group">
             <label class="setting-label">Updates</label>
             <div class="update-row">
               <span id="update-status" class="setting-hint">Checking…</span>

@@ -99,7 +99,7 @@ describe('Agent pipeline with ScriptedSession', () => {
       designSystemCache: { invalidate: vi.fn() },
       metricsCollector: { finalize: vi.fn() },
     };
-    setupIpcHandlers(session as any, mockWindow as any, mockInfra);
+    setupIpcHandlers({ initialSession: session as any, mainWindow: mockWindow as any, infra: mockInfra });
   }
 
   // ── Text streaming ──────────────────────────

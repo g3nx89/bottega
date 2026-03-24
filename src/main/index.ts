@@ -1,13 +1,15 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, crashReporter } from 'electron';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { createChildLogger, logFilePath } from '../figma/logger.js';
+import { createChildLogger, logFilePath, logger, sessionUid } from '../figma/logger.js';
 import { createAgentInfra, createFigmaAgent } from './agent.js';
 import { initAutoUpdater } from './auto-updater.js';
+import { cleanOldLogs, collectSystemInfo } from './diagnostics.js';
 import { createFigmaCore } from './figma-core.js';
 import { effectiveApiKey, loadImageGenSettings } from './image-gen/config.js';
 import { ImageGenerator } from './image-gen/image-generator.js';
 import { setupIpcHandlers } from './ipc-handlers.js';
+import { loadDiagnosticsConfig, UsageTracker } from './remote-logger.js';
 import { safeSend } from './safe-send.js';
 import { SessionStore } from './session-store.js';
 
@@ -16,7 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ── Ensure PATH includes node/npm location ──────────
 // When launched from Finder, macOS provides a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin).
 // Pi SDK needs `npm` to resolve global packages. We scan common install locations.
-import { existsSync, readdirSync } from 'fs';
+import { existsSync, readdirSync } from 'node:fs';
 
 {
   const home = process.env.HOME || '';
@@ -64,11 +66,20 @@ const log = createChildLogger({ component: 'main' });
 crashReporter.start({ uploadToServer: false });
 
 process.on('uncaughtException', (err) => {
+  // Track before exit — appState.usageTracker is null until app.whenReady()
+  appState.usageTracker?.trackUncaughtException({ name: err.name, message: err.message, stack: err.stack });
   log.fatal({ err }, 'Uncaught exception');
-  app.exit(1);
+  // Flush pino async transports before exiting — callback exits immediately on success, timeout as safety net
+  logger.flush(() => app.exit(1));
+  setTimeout(() => app.exit(1), 1000);
 });
 
 process.on('unhandledRejection', (reason: any) => {
+  appState.usageTracker?.trackUnhandledRejection({
+    name: reason?.name,
+    code: reason?.code,
+    message: reason?.message,
+  });
   log.error(
     {
       message: reason?.message,
@@ -85,13 +96,24 @@ process.on('unhandledRejection', (reason: any) => {
 
 let mainWindow: BrowserWindow | null = null;
 let figmaCore: Awaited<ReturnType<typeof createFigmaCore>> | null = null;
-const appState: { infra: Awaited<ReturnType<typeof createAgentInfra>> | null } = { infra: null };
+const appState: {
+  infra: Awaited<ReturnType<typeof createAgentInfra>> | null;
+  usageTracker: UsageTracker | null;
+} = { infra: null, usageTracker: null };
 let cleaningUp = false;
 
 async function cleanup(exitCode = 0): Promise<void> {
   if (cleaningUp) return;
   cleaningUp = true;
   log.info('Shutting down');
+  try {
+    if (appState.usageTracker) {
+      appState.usageTracker.trackAppQuit(Math.round(process.uptime()), 0);
+      appState.usageTracker.stopHeartbeat();
+    }
+  } catch {
+    // best-effort
+  }
   try {
     if (appState.infra) await appState.infra.metricsCollector.finalize();
   } catch (err) {
@@ -115,7 +137,11 @@ process.on('SIGTERM', () => {
 // ── App startup ──────────────────────────────
 
 app.whenReady().then(async () => {
-  log.info({ logFile: logFilePath }, 'App starting');
+  const appStartTime = Date.now();
+  log.info({ logFile: logFilePath, sessionUid }, 'App starting');
+
+  // Clean up log files older than 30 days (async, fire-and-forget — don't block startup)
+  cleanOldLogs().catch(() => {});
 
   const isTestMode = !!process.env.BOTTEGA_TEST_MODE;
 
@@ -205,6 +231,7 @@ app.whenReady().then(async () => {
     }
   }
   appState.infra = infra;
+  // usageTracker assigned after IPC setup (step 7 below)
 
   // 4. Create window
   mainWindow = new BrowserWindow({
@@ -222,29 +249,65 @@ app.whenReady().then(async () => {
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
-  // Log renderer crashes
-  mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    log.fatal({ reason: details.reason, exitCode: details.exitCode }, 'Renderer process crashed');
+  // 5. Usage tracker (remote diagnostics — opt-in, created before IPC to pass it)
+  // Mutable ref for model config — updated by IPC handler after model switch
+  const currentModel = { provider: 'anthropic', modelId: 'claude-sonnet-4-20250514' };
+  const diagConfig = loadDiagnosticsConfig();
+  const usageTracker = new UsageTracker(createChildLogger({ component: 'usage' }), diagConfig, {
+    getModelConfig: () => currentModel,
+    getCompressionProfile: () => infra.configManager.getActiveProfile(),
+    getDiagnosticsEnabled: () => diagConfig.sendDiagnostics,
+    getImageGenInfo: () => ({
+      hasKey: !!imageGenState.generator,
+      model: imageGenState.generator?.model || 'unknown',
+    }),
   });
+  usageTracker.startHeartbeat();
+  appState.usageTracker = usageTracker;
 
-  mainWindow.webContents.on('unresponsive', () => {
-    log.warn('Renderer became unresponsive');
-  });
-
-  mainWindow.webContents.on('responsive', () => {
-    log.info('Renderer became responsive again');
-  });
-
-  // 5. Setup IPC between agent and renderer (with session persistence)
+  // 6. Setup IPC between agent and renderer (with session persistence + usage tracker)
   const sessionStore = new SessionStore();
-  const ipcController = setupIpcHandlers(session as any, mainWindow, infra, imageGenState, sessionStore);
+  const ipcController = setupIpcHandlers({
+    initialSession: session as any,
+    mainWindow,
+    infra,
+    imageGenState,
+    sessionStore,
+    usageTracker,
+  });
 
-  // 6. Auto-updater (GitHub Releases)
+  // Sync model config ref when model switches in IPC
+  ipcController.onModelChange((config) => {
+    currentModel.provider = config.provider;
+    currentModel.modelId = config.modelId;
+  });
+
+  // 7. Auto-updater (GitHub Releases)
   initAutoUpdater(mainWindow);
 
-  // 7. Forward Figma connection events to the UI + restore session
+  // 8. Emit app_launch event with full system info + settings snapshot
+  const startupMs = Date.now() - appStartTime;
+  usageTracker.trackAppLaunch(collectSystemInfo(), startupMs, false);
+
+  // Consolidated renderer event listeners (logging + tracker in one place)
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    log.fatal({ reason: details.reason, exitCode: details.exitCode }, 'Renderer process crashed');
+    usageTracker.trackRendererCrash(details.reason, details.exitCode);
+  });
+  mainWindow.webContents.on('unresponsive', () => {
+    log.warn('Renderer became unresponsive');
+    usageTracker.setRendererResponsive(false);
+  });
+  mainWindow.webContents.on('responsive', () => {
+    log.info('Renderer became responsive again');
+    usageTracker.setRendererResponsive(true);
+  });
+
+  // 9. Forward Figma connection events to the UI + restore session
   figmaCore.wsServer.on('fileConnected', (info: { fileKey: string; fileName: string }) => {
     log.info({ fileName: info.fileName, fileKey: info.fileKey }, 'Figma file connected');
+    usageTracker.setFigmaConnected(true);
+    usageTracker.trackFigmaConnected(info.fileKey, 0);
     if (mainWindow) safeSend(mainWindow.webContents, 'figma:connected', info.fileName);
     // Restore or create session for this file
     ipcController.switchToFile(info.fileKey, info.fileName).catch((err) => {
@@ -253,10 +316,12 @@ app.whenReady().then(async () => {
   });
   figmaCore.wsServer.on('disconnected', () => {
     log.info('Figma disconnected');
+    usageTracker.setFigmaConnected(false);
+    usageTracker.trackFigmaDisconnected();
     if (mainWindow) safeSend(mainWindow.webContents, 'figma:disconnected');
   });
 
-  // 7. Invalidate compression caches on Figma document changes
+  // 10. Invalidate compression caches on Figma document changes
   figmaCore.wsServer.on('documentChange', (data: any) => {
     if (data.hasStyleChanges || data.hasNodeChanges) {
       infra.designSystemCache.invalidate();
