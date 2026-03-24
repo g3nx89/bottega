@@ -70,7 +70,9 @@ export class WebSocketConnector implements IFigmaConnector {
   }
 
   async executeCodeViaUI(code: string, timeoutMs = 5000): Promise<any> {
-    return this.wsServer.sendCommand('EXECUTE_CODE', { code, timeout: timeoutMs }, timeoutMs + 2000);
+    const raw = await this.wsServer.sendCommand('EXECUTE_CODE', { code, timeout: timeoutMs }, timeoutMs + 2000);
+    // WS relay wraps responses in { success, result } — unwrap to return the actual plugin output
+    return raw?.result !== undefined ? raw.result : raw;
   }
 
   // ============================================================================

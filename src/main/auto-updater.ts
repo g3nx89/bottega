@@ -53,16 +53,21 @@ export async function initAutoUpdater(mainWindow: BrowserWindow): Promise<void> 
     safeSend(mainWindow.webContents, 'update:downloaded', info.version);
   });
 
-  autoUpdater.on('error', (err: Error) => {
+  autoUpdater.on('error', (err: Error & { code?: string }) => {
+    // Suppress "channel file not found" errors — they happen when the GitHub release
+    // doesn't include latest-mac.yml and are not actionable by the user.
+    if (err.code === 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND') {
+      log.warn('Auto-update channel file missing (latest-mac.yml) — skipping update check');
+      return;
+    }
     log.error({ err }, 'Auto-update error');
     safeSend(mainWindow.webContents, 'update:error', err.message);
   });
 
-  // Check after a short delay to avoid slowing down startup
+  // Check after a short delay to avoid slowing down startup.
+  // Errors are handled by the 'error' event above — swallow .catch to avoid duplicate logs.
   setTimeout(() => {
-    autoUpdater.checkForUpdates().catch((err: Error) => {
-      log.warn({ err }, 'Failed to check for updates');
-    });
+    autoUpdater.checkForUpdates().catch(() => {});
   }, 5_000);
 }
 
@@ -73,11 +78,12 @@ export async function downloadUpdate(): Promise<void> {
   await autoUpdater.downloadUpdate();
 }
 
-/** Manually check for updates. */
+/** Manually check for updates. Errors are handled by the 'error' event listener. */
 export async function checkForUpdates(): Promise<void> {
   const mod = await import('electron-updater');
   const autoUpdater = mod.autoUpdater ?? mod.default?.autoUpdater;
-  await autoUpdater.checkForUpdates();
+  // Swallow rejection — the autoUpdater 'error' event handler decides what to surface.
+  await autoUpdater.checkForUpdates().catch(() => {});
 }
 
 /** Quit and install the downloaded update immediately. */

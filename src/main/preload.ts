@@ -79,6 +79,8 @@ contextBridge.exposeInMainWorld('api', {
   loginRespond: (response: string) => ipcRenderer.invoke('auth:login-respond', response),
   loginCancel: () => ipcRenderer.invoke('auth:login-cancel'),
   logout: (provider: string) => ipcRenderer.invoke('auth:logout', provider),
+  setGoogleProject: (projectId: string) => ipcRenderer.invoke('auth:set-google-project', projectId),
+  getGoogleProject: () => ipcRenderer.invoke('auth:get-google-project') as Promise<string>,
   onLoginEvent: (cb: (event: any) => void) => {
     ipcRenderer.on('auth:login-event', (_event, data) => cb(data));
   },

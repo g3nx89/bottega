@@ -93,12 +93,17 @@ export function setupIpcHandlers(
         case 'message_end': {
           // Forward token usage for context bar
           const msg = event.message;
-          if (msg?.usage) {
-            safeSend(wc, 'agent:usage', {
-              input: msg.usage.input,
-              output: msg.usage.output,
-              total: msg.usage.totalTokens,
-            });
+          if (msg?.role === 'assistant') {
+            const usage = msg.usage;
+            if (usage) {
+              safeSend(wc, 'agent:usage', {
+                input: usage.input,
+                output: usage.output,
+                total: usage.totalTokens,
+              });
+            } else {
+              log.warn('Assistant message_end has no usage data — context bar will not update');
+            }
           }
           break;
         }
@@ -239,6 +244,20 @@ export function setupIpcHandlers(
     return status;
   });
 
+  ipcMain.handle('auth:set-google-project', (_event, projectId: string) => {
+    if (projectId) {
+      process.env.GOOGLE_CLOUD_PROJECT = projectId;
+      log.info({ projectId }, 'Google Cloud Project ID set');
+    } else {
+      delete process.env.GOOGLE_CLOUD_PROJECT;
+    }
+    return true;
+  });
+
+  ipcMain.handle('auth:get-google-project', () => {
+    return process.env.GOOGLE_CLOUD_PROJECT || '';
+  });
+
   ipcMain.handle('auth:login', async (_event, displayGroup: string) => {
     const oauthId = OAUTH_PROVIDER_MAP[displayGroup];
     if (!oauthId) return { success: false, error: `Unknown provider: ${displayGroup}` };
@@ -304,6 +323,19 @@ export function setupIpcHandlers(
         return { success: false, error: 'Login cancelled' };
       }
       log.error({ displayGroup, err }, 'OAuth login failed');
+      // Detect Google Workspace accounts that need a Cloud Project ID
+      if (
+        displayGroup === 'google' &&
+        typeof err.message === 'string' &&
+        err.message.includes('GOOGLE_CLOUD_PROJECT')
+      ) {
+        return {
+          success: false,
+          error:
+            'This Google account requires a Cloud Project ID. Enter your Google Cloud Project ID in the field below and try again.',
+          code: 'GOOGLE_CLOUD_PROJECT_REQUIRED',
+        };
+      }
       return { success: false, error: err.message };
     } finally {
       loginAbortController = null;

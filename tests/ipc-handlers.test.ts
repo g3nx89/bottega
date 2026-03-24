@@ -39,8 +39,11 @@ vi.mock('../src/main/agent.js', () => ({
   ],
   CONTEXT_SIZES: { default: 128000, large: 1000000 },
   DEFAULT_MODEL: { provider: 'anthropic', modelId: 'claude-sonnet-4' },
-  OAUTH_PROVIDER_MAP: { Anthropic: 'anthropic-oauth' } as Record<string, string>,
-  OAUTH_PROVIDER_INFO: { Anthropic: { description: 'Claude' } } as Record<string, { description: string }>,
+  OAUTH_PROVIDER_MAP: { Anthropic: 'anthropic-oauth', google: 'google-gemini-cli' } as Record<string, string>,
+  OAUTH_PROVIDER_INFO: {
+    Anthropic: { description: 'Claude' },
+    google: { description: 'Gemini' },
+  } as Record<string, { description: string }>,
   createFigmaAgent: vi.fn(),
 }));
 
@@ -304,6 +307,7 @@ describe('setupIpcHandlers', () => {
       mockSession.emitEvent({
         type: 'message_end',
         message: {
+          role: 'assistant',
           usage: { input: 1000, output: 500, totalTokens: 1500 },
         },
       });
@@ -313,6 +317,29 @@ describe('setupIpcHandlers', () => {
         output: 500,
         total: 1500,
       });
+    });
+
+    it('should NOT forward usage for non-assistant message_end', () => {
+      mockSession.emitEvent({
+        type: 'message_end',
+        message: {
+          role: 'toolResult',
+          usage: { input: 999, output: 999, totalTokens: 1998 },
+        },
+      });
+
+      const usageCalls = mockWindow.webContents.send.mock.calls.filter((c: any[]) => c[0] === 'agent:usage');
+      expect(usageCalls).toHaveLength(0);
+    });
+
+    it('should not crash when assistant message_end has no usage', () => {
+      mockSession.emitEvent({
+        type: 'message_end',
+        message: { role: 'assistant' },
+      });
+
+      const usageCalls = mockWindow.webContents.send.mock.calls.filter((c: any[]) => c[0] === 'agent:usage');
+      expect(usageCalls).toHaveLength(0);
     });
   });
 
@@ -330,6 +357,20 @@ describe('setupIpcHandlers', () => {
         expect.stringContaining('No credentials configured'),
       );
       expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end');
+    });
+
+    it('should return GOOGLE_CLOUD_PROJECT_REQUIRED code for Workspace accounts', async () => {
+      mockInfra.authStorage.login.mockRejectedValueOnce(
+        new Error(
+          'This account requires setting the GOOGLE_CLOUD_PROJECT or GOOGLE_CLOUD_PROJECT_ID environment variable.',
+        ),
+      );
+
+      const result = await invokeHandler('auth:login', 'google');
+
+      expect(result.success).toBe(false);
+      expect(result.code).toBe('GOOGLE_CLOUD_PROJECT_REQUIRED');
+      expect(result.error).toContain('Cloud Project ID');
     });
 
     it('should reset streaming state on abort', async () => {

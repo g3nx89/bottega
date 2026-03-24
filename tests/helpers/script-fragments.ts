@@ -80,7 +80,7 @@ export function usageEvent(input: number, output: number): ScriptEvent[] {
   return [
     {
       type: 'message_end',
-      data: { message: { usage: { input, output, totalTokens: input + output } } },
+      data: { message: { role: 'assistant', usage: { input, output, totalTokens: input + output } } },
     },
   ];
 }

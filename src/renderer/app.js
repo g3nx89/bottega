@@ -650,6 +650,39 @@ async function startLogin(displayGroup) {
       }
       updateContextBar(0);
     }
+  } else if (result.code === 'GOOGLE_CLOUD_PROJECT_REQUIRED') {
+    // Google Workspace accounts need a Cloud Project ID — show inline prompt
+    loginArea.classList.remove('hidden');
+    clearChildren(loginArea);
+
+    const msgEl = document.createElement('span');
+    msgEl.className = 'login-message';
+    msgEl.textContent = 'This Google account requires a Cloud Project ID.';
+    loginArea.appendChild(msgEl);
+
+    const row = document.createElement('div');
+    row.className = 'login-prompt-row';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'login-prompt-input';
+    input.placeholder = 'Google Cloud Project ID';
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'login-prompt-submit';
+    submitBtn.textContent = 'Retry';
+    submitBtn.addEventListener('click', async () => {
+      const projectId = input.value.trim();
+      if (!projectId) return;
+      localStorage.setItem('bottega:google-project', projectId);
+      await window.api.setGoogleProject(projectId);
+      loginArea.classList.add('hidden');
+      startLogin(displayGroup);
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitBtn.click();
+    });
+    row.appendChild(input);
+    row.appendChild(submitBtn);
+    loginArea.appendChild(row);
   } else if (result.error && result.error !== 'Login cancelled') {
     keyStatus.textContent = result.error;
     keyStatus.className = 'key-status error';
@@ -810,6 +843,10 @@ modelSelect.addEventListener('change', async () => {
 // ── Init auth UI ─────────────────────────
 
 async function initAuthUI() {
+  // Restore persisted Google Cloud Project ID for Workspace accounts
+  const savedGoogleProject = localStorage.getItem('bottega:google-project');
+  if (savedGoogleProject) await window.api.setGoogleProject(savedGoogleProject);
+
   availableModels = await window.api.getModels();
   populateModelSelect();
   await renderAccountCards();

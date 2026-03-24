@@ -81,6 +81,31 @@ describe('WebSocketConnector', () => {
     await expect(connector.executeCodeViaUI('bad code')).rejects.toThrow('Connection lost');
   });
 
+  // ── executeCodeViaUI unwrap behavior ──────────────
+  it('executeCodeViaUI unwraps { success, result } envelope', async () => {
+    mockSendCommand.mockResolvedValue({ success: true, result: { nodes: [1, 2] } });
+    const result = await connector.executeCodeViaUI('code');
+    expect(result).toEqual({ nodes: [1, 2] });
+  });
+
+  it('executeCodeViaUI unwraps result even when falsy (null)', async () => {
+    mockSendCommand.mockResolvedValue({ success: true, result: null });
+    const result = await connector.executeCodeViaUI('code');
+    expect(result).toBeNull();
+  });
+
+  it('executeCodeViaUI passes through when no result key', async () => {
+    mockSendCommand.mockResolvedValue({ success: false, error: 'Plugin failed' });
+    const result = await connector.executeCodeViaUI('code');
+    expect(result).toEqual({ success: false, error: 'Plugin failed' });
+  });
+
+  it('executeCodeViaUI passes through plain string', async () => {
+    mockSendCommand.mockResolvedValue('raw string');
+    const result = await connector.executeCodeViaUI('code');
+    expect(result).toBe('raw string');
+  });
+
   // ── Edge cases: gap-filling ────────────────────────
 
   it('initialize() throws when no client is connected', async () => {
