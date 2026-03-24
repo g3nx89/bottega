@@ -106,7 +106,21 @@ checkUpdatesBtn.addEventListener('click', () => {
 // "What's New" modal
 function showWhatsNewModal(version, notes) {
   whatsNewVersion.textContent = `v${version}`;
-  whatsNewNotes.textContent = notes || 'Bug fixes and improvements.';
+  // Release notes come as HTML from GitHub — render them safely
+  if (notes) {
+    // Strip raw HTML tags and extract readable text
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(notes, 'text/html');
+    const text = doc.body.textContent || '';
+    // If it's just a "Full Changelog" link, show a friendly default
+    if (text.trim().startsWith('Full Changelog') || text.trim().length < 10) {
+      whatsNewNotes.textContent = 'Bug fixes and improvements.';
+    } else {
+      whatsNewNotes.textContent = text.trim();
+    }
+  } else {
+    whatsNewNotes.textContent = 'Bug fixes and improvements.';
+  }
   whatsNewModal.classList.remove('hidden');
 }
 
