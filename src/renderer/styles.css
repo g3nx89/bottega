@@ -155,6 +155,13 @@ body {
   box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.2);
 }
 
+.app-version {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  font-weight: 400;
+}
+
 .status-text {
   font-size: 11px;
   color: var(--text-secondary);

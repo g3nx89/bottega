@@ -9,6 +9,12 @@ const sendBtn = document.getElementById('send-btn');
 const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const pinBtn = document.getElementById('pin-btn');
+const appVersion = document.getElementById('app-version');
+
+// Show app version in titlebar
+window.api.getAppVersion().then((v) => {
+  appVersion.textContent = `v${v}`;
+});
 
 // Utilities
 function clearChildren(el) {
