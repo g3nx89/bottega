@@ -9,6 +9,7 @@ import { effectiveApiKey, loadImageGenSettings } from './image-gen/config.js';
 import { ImageGenerator } from './image-gen/image-generator.js';
 import { setupIpcHandlers } from './ipc-handlers.js';
 import { safeSend } from './safe-send.js';
+import { SessionStore } from './session-store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -173,6 +174,10 @@ app.whenReady().then(async () => {
       prompt: async () => {},
       abort: async () => {},
       subscribe: () => {},
+      newSession: async () => true,
+      switchSession: async () => true,
+      sessionFile: undefined,
+      messages: [],
     };
   } else {
     try {
@@ -188,7 +193,15 @@ app.whenReady().then(async () => {
         'Agent session creation failed — starting without agent',
       );
       infra = infra!;
-      session = { prompt: async () => {}, abort: async () => {}, subscribe: () => {} };
+      session = {
+        prompt: async () => {},
+        abort: async () => {},
+        subscribe: () => {},
+        newSession: async () => true,
+        switchSession: async () => true,
+        sessionFile: undefined,
+        messages: [],
+      };
     }
   }
   appState.infra = infra;
@@ -222,16 +235,21 @@ app.whenReady().then(async () => {
     log.info('Renderer became responsive again');
   });
 
-  // 5. Setup IPC between agent and renderer
-  setupIpcHandlers(session as any, mainWindow, infra, imageGenState);
+  // 5. Setup IPC between agent and renderer (with session persistence)
+  const sessionStore = new SessionStore();
+  const ipcController = setupIpcHandlers(session as any, mainWindow, infra, imageGenState, sessionStore);
 
   // 6. Auto-updater (GitHub Releases)
   initAutoUpdater(mainWindow);
 
-  // 7. Forward Figma connection events to the UI
+  // 7. Forward Figma connection events to the UI + restore session
   figmaCore.wsServer.on('fileConnected', (info: { fileKey: string; fileName: string }) => {
     log.info({ fileName: info.fileName, fileKey: info.fileKey }, 'Figma file connected');
     if (mainWindow) safeSend(mainWindow.webContents, 'figma:connected', info.fileName);
+    // Restore or create session for this file
+    ipcController.switchToFile(info.fileKey, info.fileName).catch((err) => {
+      log.warn({ err, fileKey: info.fileKey }, 'Session switch on file connect failed');
+    });
   });
   figmaCore.wsServer.on('disconnected', () => {
     log.info('Figma disconnected');

@@ -40,11 +40,21 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   // Figma status
-  onFigmaConnected: (cb: (fileKey: string) => void) => {
-    ipcRenderer.on('figma:connected', (_event, key) => cb(key));
+  onFigmaConnected: (cb: (fileName: string) => void) => {
+    ipcRenderer.on('figma:connected', (_event, name) => cb(name));
   },
   onFigmaDisconnected: (cb: () => void) => {
     ipcRenderer.on('figma:disconnected', () => cb());
+  },
+
+  // Session persistence
+  resetSession: () => ipcRenderer.invoke('session:reset') as Promise<{ success: boolean; error?: string }>,
+  getSessionMessages: () => ipcRenderer.invoke('session:get-messages') as Promise<any[]>,
+  onSessionRestored: (cb: (messages: any[]) => void) => {
+    ipcRenderer.on('session:restored', (_event, messages) => cb(messages));
+  },
+  onSessionRestoreFailed: (cb: (info: { fileKey: string; fileName: string }) => void) => {
+    ipcRenderer.on('session:restore-failed', (_event, info) => cb(info));
   },
 
   // Window pin (always-on-top)

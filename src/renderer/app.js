@@ -246,12 +246,13 @@ function completeToolCard(toolCallId, success) {
 }
 
 // Screenshots
-function addScreenshot(base64) {
+function addScreenshot(base64, { lazy = false } = {}) {
   if (!currentAssistantBubble) currentAssistantBubble = createAssistantBubble();
   const img = document.createElement('img');
   img.className = 'screenshot';
   img.src = 'data:image/png;base64,' + base64;
   img.alt = 'Figma screenshot';
+  if (lazy) img.loading = 'lazy';
   currentAssistantBubble.appendChild(img);
   scrollToBottom();
 }
@@ -308,6 +309,80 @@ function updateInputState() {
     inputField.focus();
   }
 }
+
+// ── Session restore / reset ──────────────
+
+/**
+ * Clear all chat messages from the UI.
+ */
+function clearChat() {
+  chatArea.textContent = '';
+  currentAssistantBubble = null;
+  isStreaming = false;
+  hideSuggestions();
+  updateInputState();
+}
+
+/**
+ * Batch-render historical messages from a restored session.
+ * Reuses addUserMessage, addToolCard, completeToolCard, addScreenshot to keep
+ * a single source of truth for DOM construction.
+ */
+function restoreChat(turns) {
+  clearChat();
+  if (!turns || turns.length === 0) return;
+
+  for (const turn of turns) {
+    if (turn.role === 'user') {
+      addUserMessage(turn.text, turn.images || []);
+    } else if (turn.role === 'assistant') {
+      currentAssistantBubble = createAssistantBubble();
+
+      if (turn.tools) {
+        for (const tool of turn.tools) {
+          addToolCard(tool.name, tool.id);
+          completeToolCard(tool.id, tool.success);
+        }
+      }
+
+      if (turn.images) {
+        for (const base64 of turn.images) {
+          addScreenshot(base64, { lazy: true });
+        }
+      }
+
+      // Render text with markdown — renderMarkdown() calls escapeHtml() first (safe)
+      if (turn.text) {
+        const content = currentAssistantBubble.querySelector('.message-content');
+        const safeHtml = renderMarkdown(turn.text);
+        content.insertAdjacentHTML('beforeend', safeHtml);
+      }
+
+      currentAssistantBubble = null;
+    }
+  }
+
+  scrollToBottom();
+}
+
+// Listen for session restore from main process (on file reconnect)
+window.api.onSessionRestored((messages) => {
+  restoreChat(messages);
+});
+
+// Notify user when session restore failed and a fresh session was started
+window.api.onSessionRestoreFailed(() => {
+  clearChat();
+});
+
+// Reset button — main process handles abort, so we just call resetSession
+const resetSessionBtn = document.getElementById('reset-session-btn');
+resetSessionBtn.addEventListener('click', async () => {
+  const result = await window.api.resetSession();
+  if (result.success) {
+    clearChat();
+  }
+});
 
 // ── Event listeners ──────────────────────
 
