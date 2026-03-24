@@ -85,9 +85,11 @@ contextBridge.exposeInMainWorld('api', {
 
   // Auto-update
   getAppVersion: () => ipcRenderer.invoke('update:get-version') as Promise<string>,
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  checkForUpdates: () => ipcRenderer.invoke('update:check'),
   installUpdate: () => ipcRenderer.invoke('update:install'),
-  onUpdateAvailable: (cb: (version: string) => void) => {
-    ipcRenderer.on('update:available', (_event, version) => cb(version));
+  onUpdateAvailable: (cb: (info: { version: string; releaseNotes: string }) => void) => {
+    ipcRenderer.on('update:available', (_event, info) => cb(info));
   },
   onUpdateDownloaded: (cb: (version: string) => void) => {
     ipcRenderer.on('update:downloaded', (_event, version) => cb(version));

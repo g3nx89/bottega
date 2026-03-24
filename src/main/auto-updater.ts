@@ -20,7 +20,7 @@ export async function initAutoUpdater(mainWindow: BrowserWindow): Promise<void> 
   }
 
   autoUpdater.logger = null; // We use pino instead
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload = false; // User decides via modal
   autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on('checking-for-update', () => {
@@ -29,8 +29,14 @@ export async function initAutoUpdater(mainWindow: BrowserWindow): Promise<void> 
   });
 
   autoUpdater.on('update-available', (info: any) => {
-    log.info({ version: info.version }, 'Update available');
-    safeSend(mainWindow.webContents, 'update:available', info.version);
+    log.info({ version: info.version, releaseNotes: info.releaseNotes }, 'Update available');
+    safeSend(mainWindow.webContents, 'update:available', {
+      version: info.version,
+      releaseNotes:
+        typeof info.releaseNotes === 'string'
+          ? info.releaseNotes
+          : info.releaseNotes?.map((n: any) => n.note).join('\n') || '',
+    });
   });
 
   autoUpdater.on('update-not-available', () => {
@@ -58,6 +64,20 @@ export async function initAutoUpdater(mainWindow: BrowserWindow): Promise<void> 
       log.warn({ err }, 'Failed to check for updates');
     });
   }, 5_000);
+}
+
+/** Download the available update. */
+export async function downloadUpdate(): Promise<void> {
+  const mod = await import('electron-updater');
+  const autoUpdater = mod.autoUpdater ?? mod.default?.autoUpdater;
+  await autoUpdater.downloadUpdate();
+}
+
+/** Manually check for updates. */
+export async function checkForUpdates(): Promise<void> {
+  const mod = await import('electron-updater');
+  const autoUpdater = mod.autoUpdater ?? mod.default?.autoUpdater;
+  await autoUpdater.checkForUpdates();
 }
 
 /** Quit and install the downloaded update immediately. */

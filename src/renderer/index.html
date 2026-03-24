@@ -133,6 +133,46 @@
             <p id="compression-profile-desc" class="setting-description"></p>
             <button id="compression-refresh-btn" class="setting-btn-small" title="Invalidate all compression caches">Refresh caches</button>
           </div>
+          <div class="setting-divider"></div>
+          <div class="setting-group">
+            <label class="setting-label">Updates</label>
+            <div class="update-row">
+              <span id="update-status" class="setting-hint">Checking…</span>
+              <button id="check-updates-btn" class="setting-btn-small">Check for updates</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Update available modal -->
+    <div id="update-modal" class="modal-overlay hidden">
+      <div class="modal-panel">
+        <div class="modal-header">Update Available</div>
+        <div class="modal-body">
+          <p>A new version <strong id="update-modal-version"></strong> is available.</p>
+          <p class="modal-hint">Would you like to download and install it?</p>
+          <div id="update-progress-bar" class="update-progress hidden">
+            <div id="update-progress-fill" class="update-progress-fill"></div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="update-later-btn" class="modal-btn secondary">Later</button>
+          <button id="update-download-btn" class="modal-btn primary">Download & Install</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- What's New modal (shown after update) -->
+    <div id="whatsnew-modal" class="modal-overlay hidden">
+      <div class="modal-panel">
+        <div class="modal-header">What's New</div>
+        <div class="modal-body">
+          <p>You're now running <strong id="whatsnew-version"></strong></p>
+          <div id="whatsnew-notes" class="whatsnew-notes"></div>
+        </div>
+        <div class="modal-actions">
+          <button id="whatsnew-close-btn" class="modal-btn primary">Got it</button>
         </div>
       </div>
     </div>
