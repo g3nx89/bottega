@@ -67,8 +67,17 @@ process.on('uncaughtException', (err) => {
   app.exit(1);
 });
 
-process.on('unhandledRejection', (reason) => {
-  log.error({ reason }, 'Unhandled promise rejection');
+process.on('unhandledRejection', (reason: any) => {
+  log.error(
+    {
+      message: reason?.message,
+      code: reason?.code,
+      name: reason?.name,
+      stack: reason?.stack,
+      raw: String(reason),
+    },
+    'Unhandled promise rejection',
+  );
 });
 
 // ── Graceful shutdown ────────────────────────

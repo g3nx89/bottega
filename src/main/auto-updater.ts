@@ -4,23 +4,21 @@ import { safeSend } from './safe-send.js';
 
 const log = createChildLogger({ component: 'auto-updater' });
 
-/** Lazy-loaded autoUpdater — electron-updater calls app.getVersion() on import, which fails in tests. */
-let _autoUpdater: any;
-function getAutoUpdater() {
-  if (!_autoUpdater) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('electron-updater');
-    _autoUpdater = mod.autoUpdater || mod.default?.autoUpdater;
-  }
-  return _autoUpdater;
-}
-
 /**
  * Initializes auto-update checking via electron-updater.
- * Publishes events to the renderer so the UI can show update status.
+ * Uses dynamic import() because electron-updater calls app.getVersion() on import,
+ * which fails in test environments where Electron is not available.
  */
-export function initAutoUpdater(mainWindow: BrowserWindow): void {
-  const autoUpdater = getAutoUpdater();
+export async function initAutoUpdater(mainWindow: BrowserWindow): Promise<void> {
+  let autoUpdater: any;
+  try {
+    const mod = await import('electron-updater');
+    autoUpdater = mod.autoUpdater ?? mod.default?.autoUpdater;
+  } catch (err) {
+    log.warn({ err }, 'Failed to load electron-updater — auto-updates disabled');
+    return;
+  }
+
   autoUpdater.logger = null; // We use pino instead
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
@@ -63,8 +61,10 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
 }
 
 /** Quit and install the downloaded update immediately. */
-export function quitAndInstall(): void {
-  getAutoUpdater().quitAndInstall();
+export async function quitAndInstall(): Promise<void> {
+  const mod = await import('electron-updater');
+  const autoUpdater = mod.autoUpdater ?? mod.default?.autoUpdater;
+  autoUpdater.quitAndInstall();
 }
 
 /** Returns the current app version. */
