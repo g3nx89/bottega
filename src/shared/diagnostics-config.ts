@@ -71,9 +71,14 @@ export function generateSessionUid(): string {
 
 // ── Axiom transport factory ──────────────────────
 
-/** Axiom ingest token — write-only ingest-scope only. */
-const AXIOM_TOKEN = process.env.BOTTEGA_AXIOM_TOKEN ?? '';
-const AXIOM_DATASET = process.env.BOTTEGA_AXIOM_DATASET ?? 'bottega-logs';
+/**
+ * Axiom ingest token — write-only, scoped to bottega-logs dataset only.
+ * Safe to embed: this token can only append data, never read or delete.
+ * Override via BOTTEGA_AXIOM_TOKEN env var for development/testing.
+ */
+const DEFAULT_AXIOM_TOKEN = 'xaat-39a0811f-08b4-47fa-987b-aa7b154673e6';
+const AXIOM_TOKEN = process.env.BOTTEGA_AXIOM_TOKEN || DEFAULT_AXIOM_TOKEN;
+const AXIOM_DATASET = process.env.BOTTEGA_AXIOM_DATASET || 'bottega-logs';
 
 export function createAxiomTransport(
   config: DiagnosticsConfig,

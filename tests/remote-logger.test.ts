@@ -62,18 +62,15 @@ describe('createAxiomTransport', () => {
     expect(createAxiomTransport(config)).toBeNull();
   });
 
-  it('should return null when no token is set', () => {
-    delete process.env.BOTTEGA_AXIOM_TOKEN;
-    const config: DiagnosticsConfig = { sendDiagnostics: true, anonymousId: 'test' };
-    expect(createAxiomTransport(config)).toBeNull();
-  });
-
-  it('should return null when enabled but no token (token is read at module load)', () => {
-    // AXIOM_TOKEN is captured at module load time, not per-call.
-    // Since tests run without BOTTEGA_AXIOM_TOKEN set, it will always be empty.
+  it('should return transport config when enabled (default token is embedded)', () => {
     const config: DiagnosticsConfig = { sendDiagnostics: true, anonymousId: 'test' };
     const transport = createAxiomTransport(config);
-    expect(transport).toBeNull();
+
+    expect(transport).not.toBeNull();
+    expect(transport!.target).toBe('@axiomhq/pino');
+    expect(transport!.level).toBe('info');
+    expect(transport!.options).toHaveProperty('dataset', 'bottega-logs');
+    expect(transport!.options).toHaveProperty('token');
   });
 });
 
