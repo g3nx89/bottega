@@ -46,7 +46,7 @@ export function collectSystemInfo(): SystemInfo {
 
   return {
     app: {
-      version: app.getVersion(),
+      version: __APP_VERSION__,
       electron: process.versions.electron || 'unknown',
       node: process.versions.node,
       chrome: process.versions.chrome || 'unknown',

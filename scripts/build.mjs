@@ -1,5 +1,7 @@
 import { build } from 'esbuild'
-import { cpSync, mkdirSync } from 'fs'
+import { cpSync, mkdirSync, readFileSync } from 'fs'
+
+const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
 
 const common = {
   bundle: true,
@@ -9,6 +11,7 @@ const common = {
   sourcemap: true,
   packages: 'external',  // Don't bundle node_modules — resolve at runtime
   external: ['electron'],
+  define: { '__APP_VERSION__': JSON.stringify(pkg.version) },
 }
 
 await Promise.all([

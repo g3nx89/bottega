@@ -3,11 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+declare const __APP_VERSION__: string;
+
 // ── Module mocks ─────────────────────────────────
 
 vi.mock('electron', () => ({
   app: {
-    getVersion: vi.fn().mockReturnValue('0.3.0'),
     getLocale: vi.fn().mockReturnValue('en-US'),
   },
 }));
@@ -54,7 +55,8 @@ describe('collectSystemInfo', () => {
   it('should return an object with expected shape', () => {
     const info = collectSystemInfo();
 
-    expect(info).toHaveProperty('app.version', '0.3.0');
+    expect(__APP_VERSION__).toMatch(/^\d+\.\d+\.\d+/);
+    expect(info).toHaveProperty('app.version', __APP_VERSION__);
     expect(info).toHaveProperty('app.node');
     expect(info).toHaveProperty('os.platform');
     expect(info).toHaveProperty('os.arch');
@@ -78,7 +80,7 @@ describe('formatSystemInfoForClipboard', () => {
   it('should return a multi-line string with key info', () => {
     const text = formatSystemInfoForClipboard();
 
-    expect(text).toContain('Bottega v0.3.0');
+    expect(text).toContain(`Bottega v${__APP_VERSION__}`);
     expect(text).toContain('Electron');
     expect(text).toContain('Node');
     expect(text).toContain('RAM:');

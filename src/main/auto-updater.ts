@@ -1,4 +1,4 @@
-import { app, type BrowserWindow } from 'electron';
+import type { BrowserWindow } from 'electron';
 import { createChildLogger } from '../figma/logger.js';
 import { safeSend } from './safe-send.js';
 
@@ -95,5 +95,5 @@ export async function quitAndInstall(): Promise<void> {
 
 /** Returns the current app version. */
 export function getAppVersion(): string {
-  return app.getVersion();
+  return __APP_VERSION__;
 }
