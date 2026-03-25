@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, crashReporter } from 'electron';
+import { app, BrowserWindow, crashReporter, dialog } from 'electron';
 import { createChildLogger, logFilePath, logger, sessionUid } from '../figma/logger.js';
+import { DEFAULT_WS_PORT } from '../figma/port-discovery.js';
 import { createAgentInfra, createFigmaAgent } from './agent.js';
 import { initAutoUpdater } from './auto-updater.js';
 import { cleanOldLogs, collectSystemInfo } from './diagnostics.js';
@@ -9,9 +10,16 @@ import { createFigmaCore } from './figma-core.js';
 import { effectiveApiKey, loadImageGenSettings } from './image-gen/config.js';
 import { ImageGenerator } from './image-gen/image-generator.js';
 import { setupIpcHandlers } from './ipc-handlers.js';
+import {
+  MSG_PORT_IN_USE_BODY,
+  MSG_PORT_IN_USE_TITLE,
+  MSG_STARTUP_ERROR_BODY,
+  MSG_STARTUP_ERROR_TITLE,
+} from './messages.js';
 import { loadDiagnosticsConfig, UsageTracker } from './remote-logger.js';
 import { safeSend } from './safe-send.js';
 import { SessionStore } from './session-store.js';
+import { handleSecondInstance, isPortConflict } from './startup-guards.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -134,204 +142,234 @@ process.on('SIGTERM', () => {
   app.quit();
 });
 
-// ── App startup ──────────────────────────────
+// ── Single instance lock ─────────────────────
+// Prevent multiple Bottega instances from conflicting on the WebSocket port.
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  log.warn('Another Bottega instance is already running — quitting');
+  app.quit();
+} else {
+  app.on('second-instance', () => handleSecondInstance(mainWindow));
 
-app.whenReady().then(async () => {
-  const appStartTime = Date.now();
-  log.info({ logFile: logFilePath, sessionUid }, 'App starting');
+  // ── App startup ──────────────────────────────
+  // Inside the else branch so a second instance never reaches startup code,
+  // even if app.quit() hasn't completed before whenReady resolves.
 
-  // Clean up log files older than 30 days (async, fire-and-forget — don't block startup)
-  cleanOldLogs().catch(() => {});
+  app
+    .whenReady()
+    .then(async () => {
+      const appStartTime = Date.now();
+      log.info({ logFile: logFilePath, sessionUid }, 'App starting');
 
-  const isTestMode = !!process.env.BOTTEGA_TEST_MODE;
+      // Clean up log files older than 30 days (async, fire-and-forget — don't block startup)
+      cleanOldLogs().catch(() => {});
 
-  // 1. Start Figma core (WebSocket server — port 0 in test mode for auto-assign)
-  const wsPort = isTestMode ? 0 : 9223;
-  figmaCore = await createFigmaCore({ port: wsPort });
-  await figmaCore.start();
-  log.info({ port: figmaCore.wsServer.address()?.port ?? wsPort }, 'Figma WebSocket server started');
+      const isTestMode = !!process.env.BOTTEGA_TEST_MODE;
 
-  // 2. Image generation state (shared between tools and IPC handlers)
-  const imageGenSettings = loadImageGenSettings();
-  const apiKey = effectiveApiKey(imageGenSettings);
-  const imageGenState = {
-    generator: new ImageGenerator({ apiKey, model: imageGenSettings.model }),
-    settings: imageGenSettings,
-  };
-  log.info(
-    { model: imageGenState.generator.model, isDefault: !imageGenSettings.apiKey },
-    'Image generator initialized',
-  );
+      // 1. Start Figma core (WebSocket server — port 0 in test mode for auto-assign)
+      const wsPort = isTestMode ? 0 : DEFAULT_WS_PORT;
+      figmaCore = await createFigmaCore({ port: wsPort });
+      try {
+        await figmaCore.start();
+      } catch (err: unknown) {
+        if (isPortConflict(err)) {
+          log.error({ port: wsPort }, 'Port already in use — cannot start WebSocket server');
+          dialog.showErrorBox(MSG_PORT_IN_USE_TITLE, MSG_PORT_IN_USE_BODY(wsPort));
+          figmaCore = null; // never started — nothing to clean up
+          app.quit();
+          return;
+        }
+        throw err;
+      }
+      log.info({ port: figmaCore.wsServer.address()?.port ?? wsPort }, 'Figma WebSocket server started');
 
-  // 3. Create agent infrastructure and session
-  //    In test mode, skip real agent session creation (Pi SDK may hang without credentials).
-  let infra: Awaited<ReturnType<typeof createAgentInfra>>;
-  let session: any;
-
-  if (isTestMode) {
-    log.info('Test mode: using stub agent session');
-    const { CompressionConfigManager } = await import('./compression/compression-config.js');
-    const { DesignSystemCache } = await import('./compression/design-system-cache.js');
-    const { CompressionMetricsCollector } = await import('./compression/metrics.js');
-
-    const configManager = new CompressionConfigManager();
-    const designSystemCache = new DesignSystemCache(() => 60_000);
-    const metricsCollector = new CompressionMetricsCollector('test', 'pending', 1_000_000);
-
-    infra = {
-      authStorage: {
-        getApiKey: async () => 'test',
-        get: () => null,
-        set() {},
-        remove() {},
-        login: async () => {},
-        logout() {},
-      },
-      modelRegistry: {},
-      sessionManager: {},
-      figmaTools: [],
-      configManager,
-      designSystemCache,
-      metricsCollector,
-      compressionExtensionFactory: () => ({}),
-    } as any;
-
-    session = {
-      prompt: async () => {},
-      abort: async () => {},
-      subscribe: () => {},
-      newSession: async () => true,
-      switchSession: async () => true,
-      sessionFile: undefined,
-      messages: [],
-    };
-  } else {
-    try {
-      infra = await createAgentInfra(figmaCore, {
-        getImageGenerator: () => imageGenState.generator,
-      });
-      const result = await createFigmaAgent(infra);
-      session = result.session;
-      log.info('Figma agent session created');
-    } catch (err: any) {
-      log.error(
-        { message: err?.message, code: err?.code, name: err?.name, stack: err?.stack, raw: String(err) },
-        'Agent session creation failed — starting without agent',
-      );
-      infra = infra!;
-      session = {
-        prompt: async () => {},
-        abort: async () => {},
-        subscribe: () => {},
-        newSession: async () => true,
-        switchSession: async () => true,
-        sessionFile: undefined,
-        messages: [],
+      // 2. Image generation state (shared between tools and IPC handlers)
+      const imageGenSettings = loadImageGenSettings();
+      const apiKey = effectiveApiKey(imageGenSettings);
+      const imageGenState = {
+        generator: new ImageGenerator({ apiKey, model: imageGenSettings.model }),
+        settings: imageGenSettings,
       };
-    }
-  }
-  appState.infra = infra;
-  // usageTracker assigned after IPC setup (step 7 below)
-
-  // 4. Create window
-  mainWindow = new BrowserWindow({
-    width: 480,
-    height: 720,
-    titleBarStyle: 'hiddenInset',
-    vibrancy: 'sidebar',
-    trafficLightPosition: { x: 12, y: 12 },
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-
-  // 5. Usage tracker (remote diagnostics — opt-in, created before IPC to pass it)
-  // Mutable ref for model config — updated by IPC handler after model switch
-  const currentModel = { provider: 'anthropic', modelId: 'claude-sonnet-4-20250514' };
-  const diagConfig = loadDiagnosticsConfig();
-  const usageTracker = new UsageTracker(createChildLogger({ component: 'usage' }), diagConfig, {
-    getModelConfig: () => currentModel,
-    getCompressionProfile: () => infra.configManager.getActiveProfile(),
-    getDiagnosticsEnabled: () => diagConfig.sendDiagnostics,
-    getImageGenInfo: () => ({
-      hasKey: !!imageGenState.generator,
-      model: imageGenState.generator?.model || 'unknown',
-    }),
-  });
-  usageTracker.startHeartbeat();
-  appState.usageTracker = usageTracker;
-
-  // 6. Setup IPC between agent and renderer (with session persistence + usage tracker)
-  const sessionStore = new SessionStore();
-  const ipcController = setupIpcHandlers({
-    initialSession: session as any,
-    mainWindow,
-    infra,
-    imageGenState,
-    sessionStore,
-    usageTracker,
-  });
-
-  // Sync model config ref when model switches in IPC
-  ipcController.onModelChange((config) => {
-    currentModel.provider = config.provider;
-    currentModel.modelId = config.modelId;
-  });
-
-  // 7. Auto-updater (GitHub Releases)
-  initAutoUpdater(mainWindow);
-
-  // 8. Emit app_launch event with full system info + settings snapshot
-  const startupMs = Date.now() - appStartTime;
-  usageTracker.trackAppLaunch(collectSystemInfo(), startupMs, false);
-
-  // Consolidated renderer event listeners (logging + tracker in one place)
-  mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    log.fatal({ reason: details.reason, exitCode: details.exitCode }, 'Renderer process crashed');
-    usageTracker.trackRendererCrash(details.reason, details.exitCode);
-  });
-  mainWindow.webContents.on('unresponsive', () => {
-    log.warn('Renderer became unresponsive');
-    usageTracker.setRendererResponsive(false);
-  });
-  mainWindow.webContents.on('responsive', () => {
-    log.info('Renderer became responsive again');
-    usageTracker.setRendererResponsive(true);
-  });
-
-  // 9. Forward Figma connection events to the UI + restore session
-  figmaCore.wsServer.on('fileConnected', (info: { fileKey: string; fileName: string }) => {
-    log.info({ fileName: info.fileName, fileKey: info.fileKey }, 'Figma file connected');
-    usageTracker.setFigmaConnected(true);
-    usageTracker.trackFigmaConnected(info.fileKey, 0);
-    if (mainWindow) safeSend(mainWindow.webContents, 'figma:connected', info.fileName);
-    // Restore or create session for this file
-    ipcController.switchToFile(info.fileKey, info.fileName).catch((err) => {
-      log.warn({ err, fileKey: info.fileKey }, 'Session switch on file connect failed');
-    });
-  });
-  figmaCore.wsServer.on('disconnected', () => {
-    log.info('Figma disconnected');
-    usageTracker.setFigmaConnected(false);
-    usageTracker.trackFigmaDisconnected();
-    if (mainWindow) safeSend(mainWindow.webContents, 'figma:disconnected');
-  });
-
-  // 10. Invalidate compression caches on Figma document changes
-  figmaCore.wsServer.on('documentChange', (data: any) => {
-    if (data.hasStyleChanges || data.hasNodeChanges) {
-      infra.designSystemCache.invalidate();
-      log.debug(
-        { hasStyleChanges: data.hasStyleChanges, hasNodeChanges: data.hasNodeChanges },
-        'Compression cache invalidated via documentChange',
+      log.info(
+        { model: imageGenState.generator.model, isDefault: !imageGenSettings.apiKey },
+        'Image generator initialized',
       );
-    }
-  });
-});
+
+      // 3. Create agent infrastructure and session
+      //    In test mode, skip real agent session creation (Pi SDK may hang without credentials).
+      let infra: Awaited<ReturnType<typeof createAgentInfra>>;
+      let session: any;
+
+      if (isTestMode) {
+        log.info('Test mode: using stub agent session');
+        const { CompressionConfigManager } = await import('./compression/compression-config.js');
+        const { DesignSystemCache } = await import('./compression/design-system-cache.js');
+        const { CompressionMetricsCollector } = await import('./compression/metrics.js');
+
+        const configManager = new CompressionConfigManager();
+        const designSystemCache = new DesignSystemCache(() => 60_000);
+        const metricsCollector = new CompressionMetricsCollector('test', 'pending', 1_000_000);
+
+        infra = {
+          authStorage: {
+            getApiKey: async () => 'test',
+            get: () => null,
+            set() {},
+            remove() {},
+            login: async () => {},
+            logout() {},
+          },
+          modelRegistry: {},
+          sessionManager: {},
+          figmaTools: [],
+          configManager,
+          designSystemCache,
+          metricsCollector,
+          compressionExtensionFactory: () => ({}),
+        } as any;
+
+        session = {
+          prompt: async () => {},
+          abort: async () => {},
+          subscribe: () => {},
+          newSession: async () => true,
+          switchSession: async () => true,
+          sessionFile: undefined,
+          messages: [],
+        };
+      } else {
+        try {
+          infra = await createAgentInfra(figmaCore, {
+            getImageGenerator: () => imageGenState.generator,
+          });
+          const result = await createFigmaAgent(infra);
+          session = result.session;
+          log.info('Figma agent session created');
+        } catch (err: any) {
+          log.error(
+            { message: err?.message, code: err?.code, name: err?.name, stack: err?.stack, raw: String(err) },
+            'Agent session creation failed — starting without agent',
+          );
+          infra = infra!;
+          session = {
+            prompt: async () => {},
+            abort: async () => {},
+            subscribe: () => {},
+            newSession: async () => true,
+            switchSession: async () => true,
+            sessionFile: undefined,
+            messages: [],
+          };
+        }
+      }
+      appState.infra = infra;
+      // usageTracker assigned after IPC setup (step 7 below)
+
+      // 4. Create window
+      mainWindow = new BrowserWindow({
+        width: 480,
+        height: 720,
+        titleBarStyle: 'hiddenInset',
+        vibrancy: 'sidebar',
+        trafficLightPosition: { x: 12, y: 12 },
+        webPreferences: {
+          preload: path.join(__dirname, 'preload.js'),
+          contextIsolation: true,
+          nodeIntegration: false,
+        },
+      });
+
+      mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+      // 5. Usage tracker (remote diagnostics — opt-in, created before IPC to pass it)
+      // Mutable ref for model config — updated by IPC handler after model switch
+      const currentModel = { provider: 'anthropic', modelId: 'claude-sonnet-4-20250514' };
+      const diagConfig = loadDiagnosticsConfig();
+      const usageTracker = new UsageTracker(createChildLogger({ component: 'usage' }), diagConfig, {
+        getModelConfig: () => currentModel,
+        getCompressionProfile: () => infra.configManager.getActiveProfile(),
+        getDiagnosticsEnabled: () => diagConfig.sendDiagnostics,
+        getImageGenInfo: () => ({
+          hasKey: !!imageGenState.generator,
+          model: imageGenState.generator?.model || 'unknown',
+        }),
+      });
+      usageTracker.startHeartbeat();
+      appState.usageTracker = usageTracker;
+
+      // 6. Setup IPC between agent and renderer (with session persistence + usage tracker)
+      const sessionStore = new SessionStore();
+      const ipcController = setupIpcHandlers({
+        initialSession: session as any,
+        mainWindow,
+        infra,
+        imageGenState,
+        sessionStore,
+        usageTracker,
+      });
+
+      // Sync model config ref when model switches in IPC
+      ipcController.onModelChange((config) => {
+        currentModel.provider = config.provider;
+        currentModel.modelId = config.modelId;
+      });
+
+      // 7. Auto-updater (GitHub Releases)
+      initAutoUpdater(mainWindow);
+
+      // 8. Emit app_launch event with full system info + settings snapshot
+      const startupMs = Date.now() - appStartTime;
+      usageTracker.trackAppLaunch(collectSystemInfo(), startupMs, false);
+
+      // Consolidated renderer event listeners (logging + tracker in one place)
+      mainWindow.webContents.on('render-process-gone', (_event, details) => {
+        log.fatal({ reason: details.reason, exitCode: details.exitCode }, 'Renderer process crashed');
+        usageTracker.trackRendererCrash(details.reason, details.exitCode);
+      });
+      mainWindow.webContents.on('unresponsive', () => {
+        log.warn('Renderer became unresponsive');
+        usageTracker.setRendererResponsive(false);
+      });
+      mainWindow.webContents.on('responsive', () => {
+        log.info('Renderer became responsive again');
+        usageTracker.setRendererResponsive(true);
+      });
+
+      // 9. Forward Figma connection events to the UI + restore session
+      figmaCore.wsServer.on('fileConnected', (info: { fileKey: string; fileName: string }) => {
+        log.info({ fileName: info.fileName, fileKey: info.fileKey }, 'Figma file connected');
+        usageTracker.setFigmaConnected(true);
+        usageTracker.trackFigmaConnected(info.fileKey, 0);
+        if (mainWindow) safeSend(mainWindow.webContents, 'figma:connected', info.fileName);
+        // Restore or create session for this file
+        ipcController.switchToFile(info.fileKey, info.fileName).catch((err) => {
+          log.warn({ err, fileKey: info.fileKey }, 'Session switch on file connect failed');
+        });
+      });
+      figmaCore.wsServer.on('disconnected', () => {
+        log.info('Figma disconnected');
+        usageTracker.setFigmaConnected(false);
+        usageTracker.trackFigmaDisconnected();
+        if (mainWindow) safeSend(mainWindow.webContents, 'figma:disconnected');
+      });
+
+      // 10. Invalidate compression caches on Figma document changes
+      figmaCore.wsServer.on('documentChange', (data: any) => {
+        if (data.hasStyleChanges || data.hasNodeChanges) {
+          infra.designSystemCache.invalidate();
+          log.debug(
+            { hasStyleChanges: data.hasStyleChanges, hasNodeChanges: data.hasNodeChanges },
+            'Compression cache invalidated via documentChange',
+          );
+        }
+      });
+    })
+    .catch((err: unknown) => {
+      log.fatal({ err }, 'Fatal error during app startup');
+      dialog.showErrorBox(MSG_STARTUP_ERROR_TITLE, MSG_STARTUP_ERROR_BODY(err));
+      app.quit();
+    });
+} // end single-instance else
 
 app.on('before-quit', (event) => {
   if (!cleaningUp) {

@@ -17,6 +17,20 @@ import { categorizeToolName } from './compression/metrics.js';
 import { exportDiagnosticsZip, formatSystemInfoForClipboard } from './diagnostics.js';
 import { effectiveApiKey, type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
 import { DEFAULT_IMAGE_MODEL, IMAGE_GEN_MODELS, ImageGenerator } from './image-gen/image-generator.js';
+import {
+  MSG_EXPORT_DIALOG_TITLE,
+  MSG_EXPORT_FILTER_NAME,
+  MSG_GOOGLE_PROJECT_REQUIRED,
+  MSG_IMAGEGEN_NOT_INITIALIZED,
+  MSG_LOGIN_CANCELLED,
+  MSG_LOGIN_IN_PROGRESS,
+  MSG_NO_CREDENTIALS,
+  MSG_PASTE_AUTH_CODE,
+  MSG_PASTE_AUTH_CODE_PLACEHOLDER,
+  MSG_PLUGIN_NOT_FOUND,
+  MSG_REQUEST_FAILED_FALLBACK,
+  MSG_UNKNOWN_PROVIDER,
+} from './messages.js';
 import { OperationQueue } from './operation-queue.js';
 import { PromptSuggester } from './prompt-suggester.js';
 import {
@@ -227,11 +241,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     // Without this, the SDK may hang indefinitely on an unauthenticated API call.
     const apiKey = await infra.authStorage.getApiKey(currentModelConfig.provider);
     if (!apiKey) {
-      safeSend(
-        mainWindow.webContents,
-        'agent:text-delta',
-        'No credentials configured for this model. Open Settings to log in or add an API key.',
-      );
+      safeSend(mainWindow.webContents, 'agent:text-delta', MSG_NO_CREDENTIALS);
       safeSend(mainWindow.webContents, 'agent:end');
       return;
     }
@@ -251,11 +261,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
       isStreaming = false;
       const errType = err.code === 'EAUTH' ? 'auth' : err.status === 429 ? 'rate_limit' : 'unknown';
       usageTracker?.trackAgentError(errType, err.message || 'Prompt failed');
-      safeSend(
-        mainWindow.webContents,
-        'agent:text-delta',
-        `\n\nError: ${err.message || 'Request failed. Check your credentials in Settings.'}`,
-      );
+      safeSend(mainWindow.webContents, 'agent:text-delta', `\n\nError: ${err.message || MSG_REQUEST_FAILED_FALLBACK}`);
       safeSend(mainWindow.webContents, 'agent:end');
     }
 
@@ -343,11 +349,11 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
 
   ipcMain.handle('auth:login', async (_event, displayGroup: string) => {
     const oauthId = OAUTH_PROVIDER_MAP[displayGroup];
-    if (!oauthId) return { success: false, error: `Unknown provider: ${displayGroup}` };
+    if (!oauthId) return { success: false, error: MSG_UNKNOWN_PROVIDER(displayGroup) };
 
     // Concurrency guard: only one login at a time
     if (loginAbortController) {
-      return { success: false, error: 'Login already in progress' };
+      return { success: false, error: MSG_LOGIN_IN_PROGRESS };
     }
 
     loginAbortController = new AbortController();
@@ -390,8 +396,8 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
             loginPromptResolver = resolve;
             safeSend(mainWindow.webContents, 'auth:login-event', {
               type: 'prompt',
-              message: 'Paste the authorization code or callback URL:',
-              placeholder: 'Code or URL…',
+              message: MSG_PASTE_AUTH_CODE,
+              placeholder: MSG_PASTE_AUTH_CODE_PLACEHOLDER,
             });
           });
         },
@@ -403,7 +409,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     } catch (err: any) {
       if (err.name === 'AbortError') {
         log.info({ displayGroup }, 'OAuth login cancelled');
-        return { success: false, error: 'Login cancelled' };
+        return { success: false, error: MSG_LOGIN_CANCELLED };
       }
       log.error({ displayGroup, err }, 'OAuth login failed');
       // Detect Google Workspace accounts that need a Cloud Project ID
@@ -414,8 +420,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
       ) {
         return {
           success: false,
-          error:
-            'This Google account requires a Cloud Project ID. Enter your Google Cloud Project ID in the field below and try again.',
+          error: MSG_GOOGLE_PROJECT_REQUIRED,
           code: 'GOOGLE_CLOUD_PROJECT_REQUIRED',
         };
       }
@@ -498,7 +503,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   });
 
   ipcMain.handle('imagegen:set-config', async (_event, config: { apiKey?: string; model?: string }) => {
-    if (!imageGenState) return { success: false, error: 'Image generation not initialized' };
+    if (!imageGenState) return { success: false, error: MSG_IMAGEGEN_NOT_INITIALIZED };
 
     if (config.apiKey !== undefined) {
       imageGenState.settings.apiKey = config.apiKey || undefined;
@@ -580,7 +585,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     const src = getPluginSourcePath();
     if (!src) {
       log.error('Plugin source not found in any candidate path');
-      return { success: false, error: 'Plugin files not found in app bundle.' };
+      return { success: false, error: MSG_PLUGIN_NOT_FOUND };
     }
     const dest = getPluginTargetPath();
     try {
@@ -605,9 +610,9 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
 
   ipcMain.handle('diagnostics:export', async () => {
     const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
-      title: 'Export Diagnostics',
+      title: MSG_EXPORT_DIALOG_TITLE,
       defaultPath: `bottega-diagnostics-${new Date().toISOString().slice(0, 10)}.zip`,
-      filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+      filters: [{ name: MSG_EXPORT_FILTER_NAME, extensions: ['zip'] }],
     });
     if (canceled || !filePath) return { success: false, canceled: true };
     try {
