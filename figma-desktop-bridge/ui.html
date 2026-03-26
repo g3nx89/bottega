@@ -104,7 +104,7 @@
     <div class="bridge-status" id="status-container">
       <div class="status-indicator loading" id="status-dot"></div>
       <div class="status-text">
-        <span class="label">MCP</span>
+        <span class="label">Bottega</span>
         <span class="state" id="status-state">connecting</span>
       </div>
     </div>
@@ -791,8 +791,7 @@
 
       /**
        * Broadcast a message to ALL active WebSocket connections.
-       * Events like variable changes, selections, document changes need to
-       * reach every MCP server instance so they all have current state.
+       * Forward a message to the active Bottega server connection.
        */
       function broadcastToAll(message) {
         var json = JSON.stringify(message);
@@ -803,35 +802,35 @@
         });
       }
 
-      // Forward VARIABLES_DATA to all connected MCP servers
+      // Forward VARIABLES_DATA to the Bottega server
       window.__wsForwardVariables = function(data) {
         if (wsConnected) {
           broadcastToAll({ type: 'VARIABLES_DATA', data: data });
         }
       };
 
-      // Forward DOCUMENT_CHANGE events to all servers for cache invalidation
+      // Forward DOCUMENT_CHANGE events for cache invalidation
       window.__wsForwardDocumentChange = function(data) {
         if (wsConnected) {
           broadcastToAll({ type: 'DOCUMENT_CHANGE', data: data });
         }
       };
 
-      // Forward CONSOLE_CAPTURE events to all servers for console monitoring
+      // Forward CONSOLE_CAPTURE events for console monitoring
       window.__wsForwardConsoleCapture = function(data) {
         if (wsConnected) {
           broadcastToAll({ type: 'CONSOLE_CAPTURE', data: data });
         }
       };
 
-      // Forward SELECTION_CHANGE events to all servers for selection tracking
+      // Forward SELECTION_CHANGE events for selection tracking
       window.__wsForwardSelectionChange = function(data) {
         if (wsConnected) {
           broadcastToAll({ type: 'SELECTION_CHANGE', data: data });
         }
       };
 
-      // Forward PAGE_CHANGE events to all servers for page tracking
+      // Forward PAGE_CHANGE events for page tracking
       window.__wsForwardPageChange = function(data) {
         if (wsConnected) {
           broadcastToAll({ type: 'PAGE_CHANGE', data: data });

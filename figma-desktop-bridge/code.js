@@ -2240,14 +2240,6 @@ figma.ui.onmessage = async (msg) => {
   }
 
   // ============================================================================
-  // STORE_CLOUD_CONFIG - Persist cloud pairing config in clientStorage
-  // ============================================================================
-  else if (msg.type === 'STORE_CLOUD_CONFIG') {
-    figma.clientStorage.setAsync('cloudConfig', { code: msg.code, timestamp: Date.now() })
-      .catch(function() { /* non-critical */ });
-  }
-
-  // ============================================================================
   // RELOAD_UI - Reload the plugin UI iframe (re-establishes WebSocket connection)
   // Uses figma.showUI(__html__) to reload without restarting code.js
   // ============================================================================
