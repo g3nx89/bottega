@@ -3,7 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, crashReporter, dialog } from 'electron';
 import { createChildLogger, logFilePath, logger, sessionUid } from '../figma/logger.js';
 import { DEFAULT_WS_PORT } from '../figma/port-discovery.js';
-import { createAgentInfra, createFigmaAgent } from './agent.js';
+import { createAgentInfra } from './agent.js';
+import { AppStatePersistence } from './app-state-persistence.js';
 import { initAutoUpdater } from './auto-updater.js';
 import { cleanOldLogs, collectSystemInfo } from './diagnostics.js';
 import { createFigmaCore } from './figma-core.js';
@@ -19,6 +20,7 @@ import {
 import { loadDiagnosticsConfig, UsageTracker } from './remote-logger.js';
 import { safeSend } from './safe-send.js';
 import { SessionStore } from './session-store.js';
+import { SlotManager } from './slot-manager.js';
 import { handleSecondInstance, isPortConflict } from './startup-guards.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -107,13 +109,21 @@ let figmaCore: Awaited<ReturnType<typeof createFigmaCore>> | null = null;
 const appState: {
   infra: Awaited<ReturnType<typeof createAgentInfra>> | null;
   usageTracker: UsageTracker | null;
-} = { infra: null, usageTracker: null };
+  slotManager: InstanceType<typeof SlotManager> | null;
+} = { infra: null, usageTracker: null, slotManager: null };
 let cleaningUp = false;
 
 async function cleanup(exitCode = 0): Promise<void> {
   if (cleaningUp) return;
   cleaningUp = true;
   log.info('Shutting down');
+  try {
+    if (appState.slotManager) {
+      appState.slotManager.persistStateSync();
+    }
+  } catch {
+    // best-effort
+  }
   try {
     if (appState.usageTracker) {
       appState.usageTracker.trackAppQuit(Math.round(process.uptime()), 0);
@@ -195,71 +205,85 @@ if (!gotTheLock) {
         'Image generator initialized',
       );
 
-      // 3. Create agent infrastructure and session
-      //    In test mode, skip real agent session creation (Pi SDK may hang without credentials).
+      // 3. Create agent infrastructure (tools are created per-slot, not globally)
+      //    In test mode, use stub infra.
       let infra: Awaited<ReturnType<typeof createAgentInfra>>;
-      let session: any;
 
       if (isTestMode) {
-        log.info('Test mode: using stub agent session');
+        log.info('Test mode: using stub agent infra');
         const { CompressionConfigManager } = await import('./compression/compression-config.js');
         const { DesignSystemCache } = await import('./compression/design-system-cache.js');
         const { CompressionMetricsCollector } = await import('./compression/metrics.js');
+        const { OperationQueueManager } = await import('./operation-queue-manager.js');
+        const { AuthStorage, ModelRegistry, SessionManager } = await import('@mariozechner/pi-coding-agent');
 
         const configManager = new CompressionConfigManager();
         const designSystemCache = new DesignSystemCache(() => 60_000);
         const metricsCollector = new CompressionMetricsCollector('test', 'pending', 1_000_000);
+        // Always use real AuthStorage (Pi SDK internals depend on it).
+        // BOTTEGA_TEST_MOCK_AUTH=1 → override getApiKey to block real API calls.
+        const authStorage = AuthStorage.create();
+        if (process.env.BOTTEGA_TEST_MOCK_AUTH) {
+          authStorage.getApiKey = async () => undefined;
+        }
+        const modelRegistry = new ModelRegistry(authStorage);
+        const tmpDir = app.getPath('temp');
+        const sessionManager = SessionManager.create(tmpDir, path.join(tmpDir, '.bottega-test-sessions'));
 
         infra = {
-          authStorage: {
-            getApiKey: async () => 'test',
-            get: () => null,
-            set() {},
-            remove() {},
-            login: async () => {},
-            logout() {},
-          },
-          modelRegistry: {},
-          sessionManager: {},
-          figmaTools: [],
+          authStorage,
+          modelRegistry,
+          sessionManager,
           configManager,
           designSystemCache,
           metricsCollector,
           compressionExtensionFactory: () => ({}),
+          wsServer: figmaCore.wsServer,
+          figmaAPI: figmaCore.figmaAPI,
+          queueManager: new OperationQueueManager(),
+          getImageGenerator: () => imageGenState.generator,
         } as any;
-
-        session = {
-          prompt: async () => {},
-          abort: async () => {},
-          subscribe: () => {},
-          newSession: async () => true,
-          switchSession: async () => true,
-          sessionFile: undefined,
-          messages: [],
-        };
       } else {
         try {
           infra = await createAgentInfra(figmaCore, {
             getImageGenerator: () => imageGenState.generator,
           });
-          const result = await createFigmaAgent(infra);
-          session = result.session;
-          log.info('Figma agent session created');
+          log.info('Agent infrastructure created');
         } catch (err: any) {
           log.error(
             { message: err?.message, code: err?.code, name: err?.name, stack: err?.stack, raw: String(err) },
-            'Agent session creation failed — starting without agent',
+            'Agent infra creation failed',
           );
-          infra = infra!;
-          session = {
-            prompt: async () => {},
-            abort: async () => {},
-            subscribe: () => {},
-            newSession: async () => true,
-            switchSession: async () => true,
-            sessionFile: undefined,
-            messages: [],
-          };
+          // Graceful degradation: create stub infra so the UI can load and the user can configure credentials
+          log.warn('Starting with stub infrastructure — agent features will be unavailable');
+          infra = {
+            authStorage: {
+              get: () => null,
+              set() {},
+              remove() {},
+              getApiKey: async () => undefined,
+              login: async () => {},
+              logout() {},
+            },
+            modelRegistry: {},
+            sessionManager: {},
+            configManager: {
+              getActiveConfig: () => ({ designSystemCacheTtlMs: 60_000 }),
+              getActiveProfile: () => 'balanced',
+            },
+            designSystemCache: {
+              get: () => null,
+              set: (r: any) => ({ compact: {}, raw: r }),
+              invalidate: () => {},
+              isValid: () => false,
+            },
+            metricsCollector: { record: () => {}, getSummary: () => ({}), finalize: async () => {} },
+            compressionExtensionFactory: () => ({}),
+            wsServer: figmaCore.wsServer,
+            figmaAPI: figmaCore.figmaAPI,
+            queueManager: { getQueue: () => ({ execute: <T>(fn: () => Promise<T>) => fn() }), removeQueue: () => {} },
+            getImageGenerator: () => imageGenState.generator,
+          } as any;
         }
       }
       appState.infra = infra;
@@ -297,16 +321,36 @@ if (!gotTheLock) {
       usageTracker.startHeartbeat();
       appState.usageTracker = usageTracker;
 
-      // 6. Setup IPC between agent and renderer (with session persistence + usage tracker)
+      // 6. Setup SlotManager + IPC between agent and renderer
       const sessionStore = new SessionStore();
+      const appStatePersistence = new AppStatePersistence();
+      const slotManager = new SlotManager(infra, sessionStore, appStatePersistence, figmaCore.wsServer, usageTracker);
+      appState.slotManager = slotManager;
+
+      // Restore slots from previous session (tabs + prompt queues)
+      try {
+        const restoredCount = await slotManager.restoreFromDisk();
+        if (restoredCount > 0) {
+          log.info({ restoredCount }, 'Slots restored from previous session');
+        }
+      } catch (err: any) {
+        log.warn({ err }, 'Failed to restore slots from disk');
+      }
+
       const ipcController = setupIpcHandlers({
-        initialSession: session as any,
+        slotManager,
         mainWindow,
         infra,
         imageGenState,
         sessionStore,
         usageTracker,
       });
+
+      // Subscribe restored slots to IPC events
+      for (const slotInfo of slotManager.listSlots()) {
+        const slot = slotManager.getSlot(slotInfo.id);
+        if (slot) ipcController.subscribeSlot(slot);
+      }
 
       // Sync model config ref when model switches in IPC
       ipcController.onModelChange((config) => {
@@ -335,16 +379,42 @@ if (!gotTheLock) {
         usageTracker.setRendererResponsive(true);
       });
 
-      // 9. Forward Figma connection events to the UI + restore session
+      // 9. Forward Figma connection events → auto-create tabs via SlotManager
+      const pendingCreations = new Set<string>(); // guard against concurrent createSlot for same fileKey
       figmaCore.wsServer.on('fileConnected', (info: { fileKey: string; fileName: string }) => {
         log.info({ fileName: info.fileName, fileKey: info.fileKey }, 'Figma file connected');
         usageTracker.setFigmaConnected(true);
         usageTracker.trackFigmaConnected(info.fileKey, 0);
+        // Emit global figma:connected for status dot in renderer
         if (mainWindow) safeSend(mainWindow.webContents, 'figma:connected', info.fileName);
-        // Restore or create session for this file
-        ipcController.switchToFile(info.fileKey, info.fileName).catch((err) => {
-          log.warn({ err, fileKey: info.fileKey }, 'Session switch on file connect failed');
-        });
+
+        // Auto-create tab if not already open for this file
+        const existing = slotManager.getSlotByFileKey(info.fileKey);
+        if (existing) {
+          const slotInfo = slotManager.getSlotInfo(existing.id);
+          if (slotInfo && mainWindow) safeSend(mainWindow.webContents, 'tab:updated', slotInfo);
+        } else if (!pendingCreations.has(info.fileKey)) {
+          pendingCreations.add(info.fileKey);
+          slotManager
+            .createSlot(info.fileKey, info.fileName)
+            .then((slot) => {
+              ipcController.subscribeSlot(slot);
+              const slotInfo = slotManager.getSlotInfo(slot.id);
+              if (slotInfo && mainWindow) safeSend(mainWindow.webContents, 'tab:created', slotInfo);
+            })
+            .catch((err: any) => {
+              log.warn({ err, fileKey: info.fileKey }, 'Auto-tab creation failed');
+            })
+            .finally(() => pendingCreations.delete(info.fileKey));
+        }
+      });
+      figmaCore.wsServer.on('fileDisconnected', (info: { fileKey: string; fileName: string }) => {
+        log.info({ fileKey: info.fileKey }, 'Figma file disconnected');
+        // Notify renderer that this specific tab lost connection
+        const slot = slotManager.getSlotByFileKey(info.fileKey);
+        if (slot && mainWindow) {
+          safeSend(mainWindow.webContents, 'tab:updated', slotManager.getSlotInfo(slot.id));
+        }
       });
       figmaCore.wsServer.on('disconnected', () => {
         log.info('Figma disconnected');
@@ -356,9 +426,9 @@ if (!gotTheLock) {
       // 10. Invalidate compression caches on Figma document changes
       figmaCore.wsServer.on('documentChange', (data: any) => {
         if (data.hasStyleChanges || data.hasNodeChanges) {
-          infra.designSystemCache.invalidate();
+          infra.designSystemCache.invalidate(data.fileKey);
           log.debug(
-            { hasStyleChanges: data.hasStyleChanges, hasNodeChanges: data.hasNodeChanges },
+            { hasStyleChanges: data.hasStyleChanges, hasNodeChanges: data.hasNodeChanges, fileKey: data.fileKey },
             'Compression cache invalidated via documentChange',
           );
         }

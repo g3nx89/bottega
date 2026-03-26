@@ -6,8 +6,7 @@ import {
   type AgentInfra,
   AVAILABLE_MODELS,
   CONTEXT_SIZES,
-  createFigmaAgent,
-  DEFAULT_MODEL,
+  isThinkingLevel,
   type ModelConfig,
   OAUTH_PROVIDER_INFO,
   OAUTH_PROVIDER_MAP,
@@ -31,8 +30,6 @@ import {
   MSG_REQUEST_FAILED_FALLBACK,
   MSG_UNKNOWN_PROVIDER,
 } from './messages.js';
-import { OperationQueue } from './operation-queue.js';
-import { PromptSuggester } from './prompt-suggester.js';
 import {
   loadDiagnosticsConfig,
   reloadDiagnosticsConfig,
@@ -42,13 +39,14 @@ import {
 import { extractRenderableMessages, type RenderableTurn } from './renderable-messages.js';
 import { safeSend } from './safe-send.js';
 import type { SessionStore } from './session-store.js';
+import type { SessionSlot, SlotManager } from './slot-manager.js';
 
 export { extractRenderableMessages, type RenderableTurn };
 
 /** Controller returned by setupIpcHandlers for cross-module coordination. */
 export interface IpcController {
-  /** Switch the agent session to match a Figma file. Restores existing session or starts new. */
-  switchToFile(fileKey: string, fileName: string): Promise<void>;
+  /** Subscribe a slot's session events to the renderer. Call after creating or restoring a slot. */
+  subscribeSlot(slot: SessionSlot): void;
   /** Register a callback for model config changes. */
   onModelChange(cb: (config: ModelConfig) => void): void;
 }
@@ -56,7 +54,7 @@ export interface IpcController {
 const log = createChildLogger({ component: 'ipc' });
 
 export interface AgentSessionLike {
-  prompt(text: string, options?: { streamingBehavior?: 'steer' | 'followUp' }): Promise<void>;
+  prompt(text: string): Promise<void>;
   abort(): Promise<void>;
   subscribe(callback: (event: any) => void): void;
   // Session persistence methods (Pi SDK AgentSession)
@@ -73,7 +71,7 @@ export interface ImageGenState {
 }
 
 export interface SetupIpcDeps {
-  initialSession: AgentSessionLike;
+  slotManager: SlotManager;
   mainWindow: BrowserWindow;
   infra: AgentInfra;
   imageGenState?: ImageGenState;
@@ -82,198 +80,357 @@ export interface SetupIpcDeps {
 }
 
 export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
-  const { mainWindow, infra, imageGenState, sessionStore, usageTracker } = deps;
-  let session = deps.initialSession;
-  let isStreaming = false;
-  let currentModelConfig: ModelConfig = DEFAULT_MODEL;
-  let currentFileKey: string | null = null;
-  let currentFileName: string | null = null;
-
-  // Prompt suggester — generates follow-up suggestions after each agent turn
-  const suggester = new PromptSuggester(infra.authStorage, infra.modelRegistry);
-  const switchQueue = new OperationQueue();
+  const { slotManager, mainWindow, infra, imageGenState, sessionStore, usageTracker } = deps;
   const modelChangeListeners: Array<(config: ModelConfig) => void> = [];
 
-  /** Abort the current agent stream if active. */
-  async function abortIfStreaming(): Promise<void> {
-    if (isStreaming) {
-      await session.abort();
-      isStreaming = false;
-      toolStartTimes.clear();
-    }
-  }
-
-  /** Persist the current file→session mapping to disk. */
-  function persistSessionMapping(): void {
-    if (sessionStore && currentFileKey && currentFileName && session.sessionFile) {
-      sessionStore.set(currentFileKey, session.sessionFile, currentFileName);
-    }
-  }
-
-  // Track tool execution timing for usage analytics
+  // Track tool execution timing for usage analytics (per toolCallId, across all slots)
   const toolStartTimes = new Map<string, number>();
+  // Track which sessions have been subscribed to prevent duplicate listeners on model switch
+  const subscribedSessions = new WeakSet<AgentSessionLike>();
 
-  function subscribeToSession(s: AgentSessionLike) {
-    s.subscribe((event: any) => {
-      const wc = mainWindow.webContents;
+  /** Helper: get slot or throw. */
+  function requireSlot(slotId: string): SessionSlot {
+    const slot = slotManager.getSlot(slotId);
+    if (!slot) throw new Error(`Slot not found: ${slotId}`);
+    return slot;
+  }
+
+  /** Persist the file→session mapping to disk for a slot. */
+  function persistSlotSession(slot: SessionSlot): void {
+    if (sessionStore && slot.fileKey && slot.fileName && slot.session.sessionFile) {
+      sessionStore.set(slot.fileKey, slot.session.sessionFile, slot.fileName);
+    }
+  }
+
+  // ── Per-event handlers for slot subscription ───────
+
+  function handleMessageUpdate(wc: Electron.WebContents, slot: SessionSlot, event: any) {
+    if (event.assistantMessageEvent?.type === 'text_delta') {
+      safeSend(wc, 'agent:text-delta', slot.id, event.assistantMessageEvent.delta);
+      slot.suggester.appendAssistantText(event.assistantMessageEvent.delta);
+    }
+    if (event.assistantMessageEvent?.type === 'thinking_delta') {
+      safeSend(wc, 'agent:thinking', slot.id, event.assistantMessageEvent.delta);
+    }
+  }
+
+  function handleToolStart(wc: Electron.WebContents, slot: SessionSlot, event: any) {
+    log.info({ tool: event.toolName, callId: event.toolCallId, slotId: slot.id }, 'Tool start');
+    safeSend(wc, 'agent:tool-start', slot.id, event.toolName, event.toolCallId);
+    toolStartTimes.set(event.toolCallId, Date.now());
+  }
+
+  function handleToolEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
+    const resultPreview = event.result?.content
+      ? event.result.content.map((c: any) => ({
+          type: c.type,
+          ...(c.type === 'text' ? { text: (c.text || '').slice(0, 200) } : {}),
+          ...(c.type === 'image' ? { hasData: !!c.data, dataLen: c.data?.length } : {}),
+        }))
+      : 'no content';
+    log.info({ tool: event.toolName, callId: event.toolCallId, isError: event.isError, slotId: slot.id }, 'Tool end');
+    log.debug({ tool: event.toolName, callId: event.toolCallId, resultContent: resultPreview }, 'Tool result detail');
+    safeSend(wc, 'agent:tool-end', slot.id, event.toolName, event.toolCallId, !event.isError, event.result);
+
+    const startTime = toolStartTimes.get(event.toolCallId);
+    const durationMs = startTime ? Date.now() - startTime : 0;
+    toolStartTimes.delete(event.toolCallId);
+    const category = categorizeToolName(event.toolName);
+    if (event.isError) {
+      usageTracker?.trackToolError(event.toolName, JSON.stringify(resultPreview), undefined);
+    }
+    usageTracker?.trackToolCall(event.toolName, category, !event.isError, durationMs);
+
+    if (
+      event.toolName.startsWith('figma_generate_') ||
+      event.toolName.startsWith('figma_edit_') ||
+      event.toolName === 'figma_restore_image'
+    ) {
+      usageTracker?.trackImageGen(event.toolName.replace('figma_', ''), 'gemini', !event.isError, durationMs);
+    }
+    if (event.toolName === 'figma_screenshot' && !event.isError && event.result?.content) {
+      const imageContent = event.result.content.find((c: any) => c.type === 'image');
+      if (imageContent) safeSend(wc, 'agent:screenshot', slot.id, imageContent.data);
+    }
+  }
+
+  function handleMessageEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
+    const msg = event.message;
+    if (msg?.role === 'assistant' && msg.usage) {
+      safeSend(wc, 'agent:usage', slot.id, {
+        input: msg.usage.input,
+        output: msg.usage.output,
+        total: msg.usage.totalTokens,
+      });
+    }
+  }
+
+  function handleAgentEnd(wc: Electron.WebContents, slot: SessionSlot) {
+    if (!slot.isStreaming) return; // stale event after abort — ignore
+    const next = slot.promptQueue.dequeue();
+    if (next) {
+      safeSend(wc, 'queue:updated', slot.id, slot.promptQueue.list());
+      safeSend(wc, 'agent:queued-prompt-start', slot.id, next.text);
+      usageTracker?.trackPromptDequeued(slot.promptQueue.length);
+      persistSlotSession(slot);
+      slotManager.persistState();
+      slot.session.prompt(next.text).catch((err: any) => {
+        log.error({ err, slotId: slot.id }, 'Queued prompt failed');
+        slot.isStreaming = false;
+        slot.promptQueue.clear();
+        safeSend(wc, 'agent:text-delta', slot.id, `\n\nError: ${err.message || MSG_REQUEST_FAILED_FALLBACK}`);
+        safeSend(wc, 'agent:end', slot.id);
+        safeSend(wc, 'queue:updated', slot.id, []);
+      });
+    } else {
+      slot.isStreaming = false;
+      safeSend(wc, 'agent:end', slot.id);
+      persistSlotSession(slot);
+      slotManager.persistState();
+      const suggestStart = Date.now();
+      slot.suggester
+        .suggest(slot.modelConfig)
+        .then((suggestions) => {
+          usageTracker?.trackSuggestionsGenerated(suggestions.length, Date.now() - suggestStart);
+          if (suggestions.length > 0) safeSend(wc, 'agent:suggestions', slot.id, suggestions);
+          slot.suggester.resetAssistantText();
+        })
+        .catch((err) => {
+          log.warn({ err, slotId: slot.id }, 'Failed to generate suggestions');
+          slot.suggester.resetAssistantText();
+        });
+    }
+  }
+
+  /**
+   * Subscribe to a slot's session events and route them to the renderer with slotId.
+   * Called once per slot (after creation or restore), and again after model switch
+   * (which creates a new session object).
+   *
+   * Listener lifecycle: Pi SDK's subscribe() has no unsubscribe API. When a model switch
+   * replaces slot.session, the old session's listener becomes a no-op via the stale-event
+   * guard below. The old listener closure is GC'd when the old AgentSession is collected.
+   * This is bounded by MAX_SLOTS * model_switches_per_session.
+   */
+  function subscribeToSlot(slot: SessionSlot) {
+    if (subscribedSessions.has(slot.session)) return;
+    subscribedSessions.add(slot.session);
+    const wc = mainWindow.webContents;
+    const boundSession = slot.session; // capture identity for stale-event guard
+    slot.session.subscribe((event: any) => {
+      // Stale-event guard: if session was replaced (model switch) or slot removed, bail
+      if (slot.session !== boundSession || !slotManager.getSlot(slot.id)) return;
       switch (event.type) {
         case 'message_update':
-          if (event.assistantMessageEvent?.type === 'text_delta') {
-            safeSend(wc, 'agent:text-delta', event.assistantMessageEvent.delta);
-            suggester.appendAssistantText(event.assistantMessageEvent.delta);
-          }
-          if (event.assistantMessageEvent?.type === 'thinking_delta') {
-            safeSend(wc, 'agent:thinking', event.assistantMessageEvent.delta);
-          }
+          handleMessageUpdate(wc, slot, event);
           break;
         case 'tool_execution_start':
-          log.info({ tool: event.toolName, callId: event.toolCallId, params: event.toolParams }, 'Tool start');
-          safeSend(wc, 'agent:tool-start', event.toolName, event.toolCallId);
-          toolStartTimes.set(event.toolCallId, Date.now());
+          handleToolStart(wc, slot, event);
           break;
-        case 'tool_execution_end': {
-          const resultPreview = event.result?.content
-            ? event.result.content.map((c: any) => ({
-                type: c.type,
-                ...(c.type === 'text' ? { text: (c.text || '').slice(0, 200) } : {}),
-                ...(c.type === 'image' ? { hasData: !!c.data, dataLen: c.data?.length } : {}),
-              }))
-            : 'no content';
-          log.info(
-            {
-              tool: event.toolName,
-              callId: event.toolCallId,
-              isError: event.isError,
-              resultContent: resultPreview,
-            },
-            'Tool end',
-          );
-          safeSend(wc, 'agent:tool-end', event.toolName, event.toolCallId, !event.isError, event.result);
-          const startTime = toolStartTimes.get(event.toolCallId);
-          const durationMs = startTime ? Date.now() - startTime : 0;
-          toolStartTimes.delete(event.toolCallId);
-          const category = categorizeToolName(event.toolName);
-          if (event.isError) {
-            usageTracker?.trackToolError(event.toolName, String(resultPreview), undefined);
-          }
-          usageTracker?.trackToolCall(event.toolName, category, !event.isError, durationMs);
-          // Image gen tools emit a second event for the image-specific Axiom dashboard
-          if (
-            event.toolName.startsWith('figma_generate_') ||
-            event.toolName.startsWith('figma_edit_') ||
-            event.toolName === 'figma_restore_image'
-          ) {
-            const imageType = event.toolName.replace('figma_', '');
-            usageTracker?.trackImageGen(imageType, 'gemini', !event.isError, durationMs);
-          }
-          if (event.toolName === 'figma_screenshot' && !event.isError && event.result?.content) {
-            const imageContent = event.result.content.find((c: any) => c.type === 'image');
-            if (imageContent) {
-              log.info({ dataLen: imageContent.data?.length }, 'Screenshot image forwarded to renderer');
-              safeSend(wc, 'agent:screenshot', imageContent.data);
-            } else {
-              log.warn({ content: resultPreview }, 'Screenshot tool succeeded but no image content found');
-            }
-          }
+        case 'tool_execution_end':
+          handleToolEnd(wc, slot, event);
           break;
-        }
-        case 'message_end': {
-          // Forward token usage for context bar
-          const msg = event.message;
-          if (msg?.role === 'assistant') {
-            const usage = msg.usage;
-            if (usage) {
-              safeSend(wc, 'agent:usage', {
-                input: usage.input,
-                output: usage.output,
-                total: usage.totalTokens,
-              });
-            } else {
-              log.warn('Assistant message_end has no usage data — context bar will not update');
-            }
-          }
+        case 'message_end':
+          handleMessageEnd(wc, slot, event);
           break;
-        }
         case 'agent_end':
-          isStreaming = false;
-          safeSend(wc, 'agent:end');
-          // Generate suggestions asynchronously — don't block the UI
-          {
-            const suggestStart = Date.now();
-            suggester
-              .suggest(currentModelConfig)
-              .then((suggestions) => {
-                usageTracker?.trackSuggestionsGenerated(suggestions.length, Date.now() - suggestStart);
-                if (suggestions.length > 0) {
-                  safeSend(wc, 'agent:suggestions', suggestions);
-                }
-                suggester.resetAssistantText();
-              })
-              .catch((err) => {
-                log.warn({ err }, 'Failed to generate suggestions');
-                suggester.resetAssistantText();
-              });
-          }
+          handleAgentEnd(wc, slot);
           break;
         case 'auto_compaction_start':
-          safeSend(wc, 'agent:compaction', true);
+          safeSend(wc, 'agent:compaction', slot.id, true);
           break;
         case 'auto_compaction_end':
-          safeSend(wc, 'agent:compaction', false);
-          usageTracker?.trackCompaction(0, 0); // SDK does not expose token counts; zeros signal "compaction occurred"
+          safeSend(wc, 'agent:compaction', slot.id, false);
+          usageTracker?.trackCompaction(0, 0);
           break;
         case 'auto_retry_start':
-          safeSend(wc, 'agent:retry', true);
+          safeSend(wc, 'agent:retry', slot.id, true);
           break;
         case 'auto_retry_end':
-          safeSend(wc, 'agent:retry', false);
+          safeSend(wc, 'agent:retry', slot.id, false);
           break;
       }
     });
   }
 
-  // Subscribe to initial session
-  subscribeToSession(session);
-
   // ── Agent prompt/abort ─────────────────
-  ipcMain.handle('agent:prompt', async (_event, text: string) => {
-    // Pre-check: ensure the current provider has credentials before calling prompt.
-    // Without this, the SDK may hang indefinitely on an unauthenticated API call.
-    const apiKey = await infra.authStorage.getApiKey(currentModelConfig.provider);
+
+  ipcMain.handle('agent:prompt', async (_event, slotId: string, text: string) => {
+    const slot = requireSlot(slotId);
+
+    // Pre-check credentials
+    const apiKey = await infra.authStorage.getApiKey(slot.modelConfig.provider);
     if (!apiKey) {
-      safeSend(mainWindow.webContents, 'agent:text-delta', MSG_NO_CREDENTIALS);
-      safeSend(mainWindow.webContents, 'agent:end');
+      safeSend(mainWindow.webContents, 'agent:text-delta', slot.id, MSG_NO_CREDENTIALS);
+      safeSend(mainWindow.webContents, 'agent:end', slot.id);
       return;
     }
 
-    suggester.trackUserPrompt(text);
-    suggester.resetAssistantText();
-    usageTracker?.trackPrompt(text.length, isStreaming);
-    try {
-      if (isStreaming) {
-        await session.prompt(text, { streamingBehavior: 'followUp' });
-      } else {
-        isStreaming = true;
-        await session.prompt(text);
-      }
-    } catch (err: any) {
-      log.error({ err }, 'Prompt failed');
-      isStreaming = false;
-      const errType = err.code === 'EAUTH' ? 'auth' : err.status === 429 ? 'rate_limit' : 'unknown';
-      usageTracker?.trackAgentError(errType, err.message || 'Prompt failed');
-      safeSend(mainWindow.webContents, 'agent:text-delta', `\n\nError: ${err.message || MSG_REQUEST_FAILED_FALLBACK}`);
-      safeSend(mainWindow.webContents, 'agent:end');
+    // If streaming → enqueue for later
+    if (slot.isStreaming) {
+      const queued = slot.promptQueue.enqueue(text);
+      safeSend(mainWindow.webContents, 'queue:updated', slot.id, slot.promptQueue.list());
+      usageTracker?.trackPromptEnqueued(slot.promptQueue.length);
+      slotManager.persistState();
+      log.info({ slotId, promptId: queued.id, queueLength: slot.promptQueue.length }, 'Prompt enqueued');
+      return;
     }
 
-    persistSessionMapping();
+    // Direct send
+    slot.suggester.trackUserPrompt(text);
+    slot.suggester.resetAssistantText();
+    usageTracker?.trackPrompt(text.length, false);
+    slot.isStreaming = true;
+    try {
+      await slot.session.prompt(text);
+    } catch (err: any) {
+      log.error({ err, slotId }, 'Prompt failed');
+      slot.isStreaming = false;
+      const errType = err.code === 'EAUTH' ? 'auth' : err.status === 429 ? 'rate_limit' : 'unknown';
+      usageTracker?.trackAgentError(errType, err.message || 'Prompt failed');
+      safeSend(
+        mainWindow.webContents,
+        'agent:text-delta',
+        slot.id,
+        `\n\nError: ${err.message || MSG_REQUEST_FAILED_FALLBACK}`,
+      );
+      safeSend(mainWindow.webContents, 'agent:end', slot.id);
+    }
+
+    persistSlotSession(slot);
   });
 
-  ipcMain.handle('agent:abort', async () => {
-    await session.abort();
-    isStreaming = false;
+  ipcMain.handle('agent:abort', async (_event, slotId: string) => {
+    const slot = requireSlot(slotId);
+    await slot.session.abort();
+    slot.promptQueue.clear();
+    slot.isStreaming = false;
+    safeSend(mainWindow.webContents, 'queue:updated', slot.id, []);
+    slotManager.persistState();
   });
 
-  // ── Window controls ────────────────────
+  // ── Thinking level (per-slot) ────────────
+
+  ipcMain.handle('agent:set-thinking', (_event, slotId: string, level: string) => {
+    if (!isThinkingLevel(level)) return;
+    const slot = requireSlot(slotId);
+    const before = slot.thinkingLevel;
+    slot.session.setThinkingLevel?.(level);
+    slot.thinkingLevel = level;
+    usageTracker?.trackThinkingChange(before, level);
+    log.info({ slotId, level }, 'Thinking level changed');
+  });
+
+  // ── Model switch (per-slot) ──────────────
+
+  ipcMain.handle('auth:switch-model', async (_event, slotId: string, config: ModelConfig) => {
+    if (!config?.provider || !config?.modelId) {
+      return { success: false, error: 'Invalid model config' };
+    }
+    // Validate model exists in known models (flat search across all groups)
+    const knownModels = Object.values(AVAILABLE_MODELS).flat();
+    const isKnown = knownModels.some(
+      (m: any) => (m.sdkProvider ?? m.provider) === config.provider && (m.id ?? m.modelId) === config.modelId,
+    );
+    if (!isKnown) {
+      return { success: false, error: `Unknown model: ${config.provider}/${config.modelId}` };
+    }
+    const slot = requireSlot(slotId);
+    log.info({ slotId, provider: config.provider, model: config.modelId }, 'Switching model');
+    const previousModel = { provider: slot.modelConfig.provider, modelId: slot.modelConfig.modelId };
+    try {
+      await slotManager.recreateSession(slotId, config);
+      // Re-subscribe to the new session
+      const updatedSlot = requireSlot(slotId);
+      subscribeToSlot(updatedSlot);
+      usageTracker?.trackModelSwitch(previousModel, { provider: config.provider, modelId: config.modelId });
+      modelChangeListeners.forEach((cb) => cb(config));
+      log.info({ slotId, provider: config.provider, model: config.modelId }, 'Model switched');
+      return { success: true };
+    } catch (err: any) {
+      log.error({ err, slotId }, 'Failed to switch model');
+      return { success: false, error: err.message };
+    }
+  });
+
+  // ── Tab management ────────────────────────
+
+  ipcMain.handle('tab:create', async (_event, fileKey?: string, fileName?: string) => {
+    try {
+      const slot = await slotManager.createSlot(fileKey, fileName);
+      subscribeToSlot(slot);
+      const slotInfo = slotManager.getSlotInfo(slot.id);
+      if (slotInfo) safeSend(mainWindow.webContents, 'tab:created', slotInfo);
+      return { success: true, slot: slotInfo };
+    } catch (err: any) {
+      log.error({ err, fileKey }, 'Failed to create tab');
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('tab:close', async (_event, slotId: string) => {
+    try {
+      await slotManager.removeSlot(slotId);
+      safeSend(mainWindow.webContents, 'tab:removed', slotId);
+      return { success: true };
+    } catch (err: any) {
+      log.error({ err, slotId }, 'Failed to close tab');
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('tab:activate', (_event, slotId: string) => {
+    try {
+      slotManager.setActiveSlot(slotId);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('tab:list', () => {
+    return slotManager.listSlots();
+  });
+
+  // ── Queue management ──────────────────────
+
+  ipcMain.handle('queue:remove', (_event, slotId: string, promptId: string) => {
+    const slot = requireSlot(slotId);
+    const removed = slot.promptQueue.remove(promptId);
+    if (removed) {
+      safeSend(mainWindow.webContents, 'queue:updated', slot.id, slot.promptQueue.list());
+      usageTracker?.trackPromptQueueCancelled();
+      slotManager.persistState();
+    }
+    return removed;
+  });
+
+  ipcMain.handle('queue:edit', (_event, slotId: string, promptId: string, newText: string) => {
+    const slot = requireSlot(slotId);
+    const edited = slot.promptQueue.edit(promptId, newText);
+    if (edited) {
+      safeSend(mainWindow.webContents, 'queue:updated', slot.id, slot.promptQueue.list());
+      usageTracker?.trackPromptQueueEdited();
+      slotManager.persistState();
+    }
+    return edited;
+  });
+
+  ipcMain.handle('queue:clear', (_event, slotId: string) => {
+    const slot = requireSlot(slotId);
+    const count = slot.promptQueue.clear();
+    safeSend(mainWindow.webContents, 'queue:updated', slot.id, []);
+    slotManager.persistState();
+    return count;
+  });
+
+  ipcMain.handle('queue:list', (_event, slotId: string) => {
+    const slot = requireSlot(slotId);
+    return slot.promptQueue.list();
+  });
+
+  // ── Window controls (global) ────────────────────
+
   ipcMain.handle('window:toggle-pin', () => {
     const next = !mainWindow.isAlwaysOnTop();
     mainWindow.setAlwaysOnTop(next, 'floating');
@@ -288,7 +445,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     mainWindow.setOpacity(Math.max(0.1, Math.min(1, opacity)));
   });
 
-  // ── Auth & Model management ────────────
+  // ── Auth & Model management (global) ────────────
 
   ipcMain.handle('auth:get-models', () => {
     return AVAILABLE_MODELS;
@@ -312,7 +469,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     return true;
   });
 
-  // ── OAuth login/logout ─────────────────
+  // ── OAuth login/logout (global) ─────────────────
 
   let loginAbortController: AbortController | null = null;
   let loginPromptResolver: ((value: string) => void) | null = null;
@@ -351,7 +508,6 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     const oauthId = OAUTH_PROVIDER_MAP[displayGroup];
     if (!oauthId) return { success: false, error: MSG_UNKNOWN_PROVIDER(displayGroup) };
 
-    // Concurrency guard: only one login at a time
     if (loginAbortController) {
       return { success: false, error: MSG_LOGIN_IN_PROGRESS };
     }
@@ -360,7 +516,6 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     try {
       await infra.authStorage.login(oauthId, {
         onAuth: (info) => {
-          // Validate URL before opening in system browser
           try {
             const parsed = new URL(info.url);
             if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
@@ -412,17 +567,12 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
         return { success: false, error: MSG_LOGIN_CANCELLED };
       }
       log.error({ displayGroup, err }, 'OAuth login failed');
-      // Detect Google Workspace accounts that need a Cloud Project ID
       if (
         displayGroup === 'google' &&
         typeof err.message === 'string' &&
         err.message.includes('GOOGLE_CLOUD_PROJECT')
       ) {
-        return {
-          success: false,
-          error: MSG_GOOGLE_PROJECT_REQUIRED,
-          code: 'GOOGLE_CLOUD_PROJECT_REQUIRED',
-        };
+        return { success: false, error: MSG_GOOGLE_PROJECT_REQUIRED, code: 'GOOGLE_CLOUD_PROJECT_REQUIRED' };
       }
       return { success: false, error: err.message };
     } finally {
@@ -445,53 +595,14 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   ipcMain.handle('auth:logout', (_event, displayGroup: string) => {
     const oauthId = OAUTH_PROVIDER_MAP[displayGroup];
     if (oauthId) {
-      // logout() already calls remove() internally
       infra.authStorage.logout(oauthId);
     }
-    // Also remove API key credentials stored under the display group name
     infra.authStorage.remove(displayGroup);
     log.info({ displayGroup }, 'Logged out');
     return true;
   });
 
-  let currentThinkingLevel = 'medium';
-
-  ipcMain.handle('agent:set-thinking', (_event, level: string) => {
-    const before = currentThinkingLevel;
-    session.setThinkingLevel?.(level);
-    currentThinkingLevel = level;
-    usageTracker?.trackThinkingChange(before, level);
-    log.info({ level }, 'Thinking level changed');
-  });
-
-  ipcMain.handle('auth:switch-model', (_event, config: ModelConfig) =>
-    switchQueue.execute(async () => {
-      log.info({ provider: config.provider, model: config.modelId }, 'Switching model');
-      const previousModel = { provider: currentModelConfig.provider, modelId: currentModelConfig.modelId };
-      try {
-        await abortIfStreaming();
-
-        const result = await createFigmaAgent(infra, config);
-        session = result.session as unknown as AgentSessionLike;
-        subscribeToSession(session);
-        currentModelConfig = config;
-        currentThinkingLevel = 'medium'; // reset to default for new session
-        suggester.reset();
-        persistSessionMapping();
-        usageTracker?.trackModelSwitch(previousModel, { provider: config.provider, modelId: config.modelId });
-        // Notify external listeners (e.g., SettingsRefs in index.ts)
-        modelChangeListeners.forEach((cb) => cb(config));
-
-        log.info({ provider: config.provider, model: config.modelId }, 'Model switched');
-        return { success: true };
-      } catch (err: any) {
-        log.error({ err }, 'Failed to switch model');
-        return { success: false, error: err.message };
-      }
-    }),
-  );
-
-  // ── Image Generation settings ────────────
+  // ── Image Generation settings (global) ────────────
 
   ipcMain.handle('imagegen:get-config', () => {
     return {
@@ -512,15 +623,10 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
       imageGenState.settings.model = config.model;
     }
 
-    // Persist to disk
     await saveImageGenSettings(imageGenState.settings);
 
-    // Recreate generator with updated config (falls back to default key)
     const key = effectiveApiKey(imageGenState.settings);
-    imageGenState.generator = new ImageGenerator({
-      apiKey: key,
-      model: imageGenState.settings.model,
-    });
+    imageGenState.generator = new ImageGenerator({ apiKey: key, model: imageGenState.settings.model });
     log.info(
       { model: imageGenState.generator.model, isDefault: !imageGenState.settings.apiKey },
       'Image generator updated',
@@ -529,7 +635,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     return { success: true, hasCustomKey: !!imageGenState.settings.apiKey };
   });
 
-  // ── Compression profile & cache management ──────
+  // ── Compression profile & cache management (global) ──────
 
   ipcMain.handle('compression:get-profiles', () => {
     return infra.configManager.getProfiles();
@@ -558,14 +664,14 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     return { success: true };
   });
 
-  // ── Figma plugin setup ──────────────────
+  // ── Figma plugin setup (global) ──────────────────
 
   const PLUGIN_MANIFEST = 'manifest.json';
 
   function getPluginSourcePath(): string | null {
     const candidates = [
-      join(process.resourcesPath, 'figma-desktop-bridge'), // Packaged app
-      join(app.getAppPath(), 'figma-desktop-bridge'), // Dev mode
+      join(process.resourcesPath, 'figma-desktop-bridge'),
+      join(app.getAppPath(), 'figma-desktop-bridge'),
     ];
     for (const dir of candidates) {
       if (existsSync(join(dir, PLUGIN_MANIFEST))) return dir;
@@ -606,7 +712,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     usageTracker?.trackSuggestionClicked(index);
   });
 
-  // ── Diagnostics ─────────────────────────
+  // ── Diagnostics (global) ─────────────────────────
 
   ipcMain.handle('diagnostics:export', async () => {
     const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
@@ -643,94 +749,48 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     return { success: true, requiresRestart: true };
   });
 
-  // ── Session persistence ─────────────────
+  // ── Session persistence (per-slot) ─────────────────
 
-  ipcMain.handle('session:reset', () =>
-    switchQueue.execute(async () => {
-      try {
-        await abortIfStreaming();
-        await session.newSession();
-        suggester.reset();
-        persistSessionMapping();
-
-        log.info({ fileKey: currentFileKey }, 'Session reset');
-        return { success: true };
-      } catch (err: any) {
-        log.error({ err }, 'Failed to reset session');
-        return { success: false, error: err.message };
-      }
-    }),
-  );
-
-  ipcMain.handle('session:get-messages', () => {
+  ipcMain.handle('session:reset', async (_event, slotId: string) => {
+    const slot = requireSlot(slotId);
     try {
-      const messages = session.messages || [];
+      if (slot.isStreaming) {
+        await slot.session.abort();
+        slot.isStreaming = false;
+      }
+      await slot.session.newSession();
+      slot.suggester.reset();
+      persistSlotSession(slot);
+      slotManager.persistState();
+      log.info({ slotId, fileKey: slot.fileKey }, 'Session reset');
+      return { success: true };
+    } catch (err: any) {
+      log.error({ err, slotId }, 'Failed to reset session');
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('session:get-messages', (_event, slotId: string) => {
+    const slot = requireSlot(slotId);
+    try {
+      const messages = slot.session.messages || [];
       return extractRenderableMessages(messages);
     } catch (err: any) {
-      log.warn({ err }, 'Failed to extract session messages');
+      log.warn({ err, slotId }, 'Failed to extract session messages');
       return [];
     }
   });
 
-  // ── Auto-update ────────────────────────
+  // ── Auto-update (global) ────────────────────────
   ipcMain.handle('update:get-version', () => getAppVersion());
   ipcMain.handle('update:download', () => downloadUpdate());
   ipcMain.handle('update:check', () => checkForUpdates());
   ipcMain.handle('update:install', () => quitAndInstall());
 
-  // ── Controller for cross-module coordination ──
-
-  async function switchToFile(fileKey: string, fileName: string): Promise<void> {
-    await switchQueue.execute(() => switchToFileImpl(fileKey, fileName));
-  }
-
-  async function switchToFileImpl(fileKey: string, fileName: string): Promise<void> {
-    currentFileKey = fileKey;
-    currentFileName = fileName;
-
-    if (!sessionStore) return;
-
-    const entry = sessionStore.get(fileKey);
-
-    if (entry && existsSync(entry.sessionPath)) {
-      try {
-        await abortIfStreaming();
-        await session.switchSession(entry.sessionPath);
-        sessionStore.touch(fileKey);
-        suggester.reset();
-
-        const messages = extractRenderableMessages(session.messages || []);
-        safeSend(mainWindow.webContents, 'session:restored', messages);
-        log.info({ fileKey, fileName, turns: messages.length }, 'Session restored for file');
-      } catch (err) {
-        log.warn({ err, fileKey }, 'Failed to restore session — starting fresh');
-        safeSend(mainWindow.webContents, 'session:restore-failed', { fileKey, fileName });
-        await startNewSessionForFile(fileKey, fileName);
-      }
-    } else {
-      await startNewSessionForFile(fileKey, fileName);
-    }
-  }
-
-  async function startNewSessionForFile(fileKey: string, fileName: string): Promise<void> {
-    try {
-      await abortIfStreaming();
-      await session.newSession();
-      suggester.reset();
-
-      if (sessionStore && session.sessionFile) {
-        sessionStore.set(fileKey, session.sessionFile, fileName);
-      }
-      // Signal renderer to clear any stale chat from a previous file
-      safeSend(mainWindow.webContents, 'session:restored', []);
-      log.info({ fileKey, fileName }, 'New session started for file');
-    } catch (err) {
-      log.warn({ err, fileKey }, 'Failed to start new session for file');
-    }
-  }
+  // ── Return controller ──
 
   return {
-    switchToFile,
+    subscribeSlot: subscribeToSlot,
     onModelChange: (cb: (config: ModelConfig) => void) => modelChangeListeners.push(cb),
   };
 }
