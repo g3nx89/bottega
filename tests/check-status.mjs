@@ -8,7 +8,7 @@ import { setTimeout } from 'timers/promises';
 
 import WebSocket from 'ws';
 
-const ws = new WebSocket('ws://localhost:9223');
+const ws = new WebSocket('ws://localhost:9280');
 
 ws.on('open', () => {
   console.log('WebSocket connection to server: OK');

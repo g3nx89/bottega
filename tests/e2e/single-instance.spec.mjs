@@ -4,7 +4,7 @@
  * Tests real Electron behavior:
  * 1. Second instance exits immediately when first instance holds the lock
  * 2. First instance remains alive and responsive after second instance attempt
- * 3. App shows error and exits when port 9223 is occupied
+ * 3. App shows error and exits when port 9280 is occupied
  *
  * Run: npm run test:e2e
  */
@@ -22,7 +22,7 @@ const PORT_CONFLICT_WINDOW_MS = 5_000;
 const PORT_CONFLICT_EXIT_MS = 10_000;
 
 // ── Default WebSocket port (mirrors src/figma/port-discovery.ts) ──
-const DEFAULT_WS_PORT = 9223;
+const DEFAULT_WS_PORT = 9280;
 
 test.describe('Single instance lock (E2E)', () => {
   /** @type {import('@playwright/test').ElectronApplication} */

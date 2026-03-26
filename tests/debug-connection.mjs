@@ -5,7 +5,7 @@ import WebSocket from 'ws';
 async function main() {
   // 1. Check WS server - how many clients connected?
   console.log('=== WS Server Check ===');
-  const ws = new WebSocket('ws://localhost:9223');
+  const ws = new WebSocket('ws://localhost:9280');
 
   await new Promise((resolve, reject) => {
     ws.on('open', () => {

@@ -8,5 +8,5 @@ export interface FigmaConfig {
 }
 
 export function getDefaultConfig(): FigmaConfig {
-  return { port: 9223 };
+  return { port: 9280 };
 }

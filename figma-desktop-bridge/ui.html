@@ -587,13 +587,11 @@
     // WEBSOCKET BRIDGE CLIENT - Fallback transport when CDP is unavailable
     // ============================================================================
     (function() {
-      // Port range for multi-instance support (matches server's port-discovery.ts)
-      var WS_PORT_RANGE_START = 9223;
-      var WS_PORT_RANGE_END = 9232;
+      // Fixed port for Bottega Bridge (distinct from figma-console-mcp 9223-9232)
+      var WS_PORT = 9280;
 
-      // Multi-connection state: plugin connects to ALL active MCP servers
-      // so that every Claude tab/CLI instance gets Figma access.
-      var activeConnections = []; // Array of { port, ws }
+      // Single-connection state: Bottega is a single-instance app on a fixed port.
+      var activeConnections = []; // Array of { port, ws } (max 1 for Bottega)
       var isScanning = false;
 
       // Backward-compat: ws and wsConnected reflect "at least one connection"
@@ -717,9 +715,8 @@
 
       /**
        * Scan the port range and connect to ALL active MCP servers.
-       * Each server (e.g., Chat tab on 9223, Code tab on 9224) gets its own
-       * independent WebSocket connection so every Claude instance has Figma access.
-       * Falls back to retry with backoff if no servers found at all.
+       * Connects to Bottega server on the fixed port (9280).
+       * Falls back to retry with backoff if server not found.
        */
       // Maximum scan attempts on initial load (prevents infinite error loops).
       // After connecting, disconnect-triggered retries use per-port exponential backoff (no cap).
@@ -727,69 +724,49 @@
       var MAX_INITIAL_SCANS = 3;
 
       function wsScanAndConnect() {
-        if (isScanning) return;
+        if (isScanning || isPortConnected(WS_PORT)) return;
         isScanning = true;
 
-        var portsToTry = [];
-        for (var p = WS_PORT_RANGE_START; p <= WS_PORT_RANGE_END; p++) {
-          if (!isPortConnected(p)) portsToTry.push(p);
+        console.log('[Bottega Bridge] Connecting to ws://localhost:' + WS_PORT + '...');
+
+        try {
+          var testWs = new WebSocket('ws://localhost:' + WS_PORT);
+
+          var timeout = setTimeout(function() {
+            if (testWs.readyState !== 1) testWs.close();
+          }, 3000);
+
+          testWs.onopen = function() {
+            clearTimeout(timeout);
+            isScanning = false;
+            activeConnections.push({ port: WS_PORT, ws: testWs });
+            updateCompatState();
+            console.log('[Bottega Bridge] WebSocket connected to port ' + WS_PORT);
+            attachWsHandlers(testWs, WS_PORT);
+            initializeConnection(testWs, WS_PORT);
+          };
+
+          testWs.onerror = function() {
+            clearTimeout(timeout);
+          };
+
+          testWs.onclose = function() {
+            clearTimeout(timeout);
+            isScanning = false;
+            if (activeConnections.length === 0) {
+              initialScanAttempts++;
+              if (initialScanAttempts < MAX_INITIAL_SCANS) {
+                var delay = 3000 * initialScanAttempts; // 3s, 6s
+                console.log('[Bottega Bridge] Server not found, retry ' + initialScanAttempts + '/' + MAX_INITIAL_SCANS + ' in ' + (delay/1000) + 's');
+                setTimeout(wsScanAndConnect, delay);
+              } else {
+                console.log('[Bottega Bridge] Server not found after ' + MAX_INITIAL_SCANS + ' attempts. Restart plugin to retry.');
+              }
+            }
+          };
+        } catch (e) {
+          isScanning = false;
         }
-
-        if (portsToTry.length === 0) { isScanning = false; return; }
-
-        console.log('[MCP Bridge] Scanning ports ' + WS_PORT_RANGE_START + '-' + WS_PORT_RANGE_END + ' for MCP servers...');
-
-        var foundAny = false;
-        var pending = portsToTry.length;
-
-        portsToTry.forEach(function(port) {
-          try {
-            var testWs = new WebSocket('ws://localhost:' + port);
-
-            var timeout = setTimeout(function() {
-              if (testWs.readyState !== 1) testWs.close();
-            }, 3000);
-
-            testWs.onopen = function() {
-              clearTimeout(timeout);
-              foundAny = true;
-              activeConnections.push({ port: port, ws: testWs });
-              updateCompatState();
-              console.log('[MCP Bridge] WebSocket connected to port ' + port + ' (' + activeConnections.length + ' server(s) total)');
-              attachWsHandlers(testWs, port);
-              initializeConnection(testWs, port);
-              pending--;
-              if (pending <= 0) {
-                isScanning = false;
-              }
-            };
-
-            testWs.onerror = function() {
-              clearTimeout(timeout);
-            };
-
-            testWs.onclose = function() {
-              clearTimeout(timeout);
-              pending--;
-              if (pending <= 0) {
-                isScanning = false;
-                // Retry with backoff if no servers found, up to MAX_INITIAL_SCANS
-                if (!foundAny && activeConnections.length === 0) {
-                  initialScanAttempts++;
-                  if (initialScanAttempts < MAX_INITIAL_SCANS) {
-                    var delay = 3000 * initialScanAttempts; // 3s, 6s
-                    console.log('[MCP Bridge] No servers found, retry ' + initialScanAttempts + '/' + MAX_INITIAL_SCANS + ' in ' + (delay/1000) + 's');
-                    setTimeout(wsScanAndConnect, delay);
-                  } else {
-                    console.log('[MCP Bridge] No MCP servers found after ' + MAX_INITIAL_SCANS + ' scans. Restart plugin to retry.');
-                  }
-                }
-              }
-            };
-          } catch (e) {
-            pending--;
-          }
-        });
       }
 
       /**

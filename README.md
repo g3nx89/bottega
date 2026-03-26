@@ -17,7 +17,7 @@ A macOS desktop app for **design pair-programming**. Describe what you want in n
 ```
 ┌─────────────┐   IPC    ┌────────────────┐  WebSocket  ┌──────────────────┐
 │  Renderer    │◄────────►│  Electron Main │◄───────────►│  Figma Desktop   │
-│  (Chat UI)   │          │  (Pi Agent)    │   :9223     │  (Bridge Plugin) │
+│  (Chat UI)   │          │  (Pi Agent)    │   :9280     │  (Bridge Plugin) │
 └─────────────┘          └────────────────┘             └──────────────────┘
 ```
 
@@ -71,7 +71,7 @@ Bottega communicates with Figma Desktop through a plugin that relays commands ov
 
 1. In Figma Desktop, go to **Plugins → Development → Import plugin from manifest…**
 2. Select `figma-desktop-bridge/manifest.json` from this repo.
-3. Run the plugin — it connects to Bottega's WebSocket server on port `9223`.
+3. Run the plugin — it connects to Bottega's WebSocket server on port `9280`.
 
 The status indicator in Bottega's title bar turns green when connected.
 
@@ -101,7 +101,7 @@ src/
 │       ├── jsx-render.ts    # render JSX, icons, bind variables
 │       └── image-gen.ts     # generate/edit/restore images, icons, patterns, diagrams
 ├── figma/                   # Embedded from figma-console-mcp (MIT)
-│   ├── websocket-server.ts  # WS server on port 9223
+│   ├── websocket-server.ts  # WS server on port 9280
 │   ├── websocket-connector.ts
 │   ├── figma-api.ts         # Figma REST API client
 │   └── types.ts             # Shared types + TreeNode

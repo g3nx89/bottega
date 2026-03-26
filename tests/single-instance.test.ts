@@ -211,8 +211,8 @@ describe('isPortConflict', () => {
 
 describe('User-facing messages', () => {
   it('MSG_PORT_IN_USE_BODY includes the port number', () => {
-    const body = MSG_PORT_IN_USE_BODY(9223);
-    expect(body).toContain('9223');
+    const body = MSG_PORT_IN_USE_BODY(9280);
+    expect(body).toContain('9280');
     expect(body).toContain('Bottega');
   });
 

@@ -81,7 +81,7 @@ export function createMockWsServer() {
     getConnectedFiles: vi.fn().mockReturnValue([]),
     getCurrentSelection: vi.fn().mockReturnValue({ nodes: [], count: 0 }),
     getActiveFileKey: vi.fn().mockReturnValue('abc123'),
-    address: vi.fn().mockReturnValue({ port: 9223 }),
+    address: vi.fn().mockReturnValue({ port: 9280 }),
     on: vi.fn(),
     emit: vi.fn(),
   } as any;

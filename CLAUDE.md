@@ -34,7 +34,7 @@ Electron Main Process (src/main/)
     └── image-gen.ts      — generate_image, edit_image, restore_image, generate_icon, generate_pattern, generate_story, generate_diagram
 
 Figma Core (src/figma/)           — Embedded from figma-console-mcp (MIT), cloud relay removed
-├── websocket-server.ts           — WS server on port 9223, sendCommand with Promise correlation
+├── websocket-server.ts           — WS server on port 9280, sendCommand with Promise correlation
 ├── websocket-connector.ts        — IFigmaConnector impl + 3 figma-use methods
 ├── figma-connector.ts            — IFigmaConnector interface
 ├── figma-api.ts                  — Figma REST API client
