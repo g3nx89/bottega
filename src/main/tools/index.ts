@@ -22,8 +22,8 @@ export interface ToolDeps {
   getImageGenerator?: () => ImageGenerator | null;
   designSystemCache: DesignSystemCache;
   configManager: CompressionConfigManager;
-  /** File key for cache scoping in multi-tab. Undefined for legacy global connector. */
-  fileKey?: string;
+  /** File key for cache scoping in multi-tab (UNBOUND_FILE_KEY for tabs without a file). */
+  fileKey: string;
 }
 
 /** Standard text result wrapper — avoids repeating the same shape in every tool. */

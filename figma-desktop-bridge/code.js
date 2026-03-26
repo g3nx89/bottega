@@ -467,7 +467,7 @@ figma.ui.onmessage = async (msg) => {
       var errorMsg = error && error.message ? error.message : String(error);
       var errorStack = error && error.stack ? error.stack : '';
 
-      // Log error details as strings so they show up properly in Puppeteer
+      // Log error details as strings for reliable console output
       console.error('🌉 [Desktop Bridge] Code execution error: [' + errorName + '] ' + errorMsg);
       if (errorStack) {
         console.error('🌉 [Desktop Bridge] Stack:', errorStack);
@@ -2231,12 +2231,6 @@ figma.ui.onmessage = async (msg) => {
     }
   }
 
-  // ============================================================================
-  // RESIZE_UI - Dynamically resize the plugin window
-  // ============================================================================
-  else if (msg.type === 'RESIZE_UI') {
-    figma.ui.resize(msg.width || 120, msg.height || 36);
-  }
 
   // ============================================================================
   // RELOAD_UI - Reload the plugin UI iframe (re-establishes WebSocket connection)
@@ -3058,4 +3052,3 @@ console.log('🌉 [Desktop Bridge] Ready to handle component requests');
 console.log('🌉 [Desktop Bridge] Plugin will stay open until manually closed');
 
 // Plugin stays open - no auto-close
-// UI iframe remains accessible for Puppeteer to read data from window object

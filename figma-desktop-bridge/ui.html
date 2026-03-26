@@ -156,7 +156,7 @@
           }
         }
 
-        parent.postMessage({ pluginMessage: message }, '*');
+        parent.postMessage({ pluginMessage: message }, 'https://www.figma.com');
         console.log('[Bottega Bridge] Sent:', type);
       });
     };
@@ -632,7 +632,9 @@
           }, 3000);
 
           testWs.onopen = function() {
+            testWs.onclose = null; // prevent initial-scan onclose from firing
             clearTimeout(timeout);
+            initialScanAttempts = 0; // reset so future wsScanAndConnect calls can retry
             isScanning = false;
             activeConnections.push({ port: WS_PORT, ws: testWs });
             updateCompatState();
@@ -691,7 +693,7 @@
             activeConnections.push({ port: port, ws: testWs });
             updateCompatState();
             updateStatus('ready', true, false);
-            console.log('[Bottega Bridge] Reconnected to port ' + port + ' (' + activeConnections.length + ' server(s) total)');
+            console.log('[Bottega Bridge] Reconnected to port ' + port);
             attachWsHandlers(testWs, port);
             initializeConnection(testWs, port);
           };
@@ -762,7 +764,7 @@
 
         activeWs.onclose = function(event) {
           removeConnection(port);
-          console.log('[Bottega Bridge] WebSocket disconnected from port ' + port + ' (' + activeConnections.length + ' server(s) remaining)');
+          console.log('[Bottega Bridge] WebSocket disconnected from port ' + port);
 
           // If replaced by same file reconnecting (e.g., plugin reloaded), stop
           var wasReplaced = (event.code === 1000 && (
@@ -792,7 +794,7 @@
       /**
        * Forward a message to the active Bottega server connection.
        */
-      function broadcastToAll(message) {
+      function sendToServer(message) {
         var json = JSON.stringify(message);
         activeConnections.forEach(function(conn) {
           if (conn.ws.readyState === 1) {
@@ -804,35 +806,35 @@
       // Forward VARIABLES_DATA to the Bottega server
       window.__wsForwardVariables = function(data) {
         if (wsConnected) {
-          broadcastToAll({ type: 'VARIABLES_DATA', data: data });
+          sendToServer({ type: 'VARIABLES_DATA', data: data });
         }
       };
 
       // Forward DOCUMENT_CHANGE events for cache invalidation
       window.__wsForwardDocumentChange = function(data) {
         if (wsConnected) {
-          broadcastToAll({ type: 'DOCUMENT_CHANGE', data: data });
+          sendToServer({ type: 'DOCUMENT_CHANGE', data: data });
         }
       };
 
       // Forward CONSOLE_CAPTURE events for console monitoring
       window.__wsForwardConsoleCapture = function(data) {
         if (wsConnected) {
-          broadcastToAll({ type: 'CONSOLE_CAPTURE', data: data });
+          sendToServer({ type: 'CONSOLE_CAPTURE', data: data });
         }
       };
 
       // Forward SELECTION_CHANGE events for selection tracking
       window.__wsForwardSelectionChange = function(data) {
         if (wsConnected) {
-          broadcastToAll({ type: 'SELECTION_CHANGE', data: data });
+          sendToServer({ type: 'SELECTION_CHANGE', data: data });
         }
       };
 
       // Forward PAGE_CHANGE events for page tracking
       window.__wsForwardPageChange = function(data) {
         if (wsConnected) {
-          broadcastToAll({ type: 'PAGE_CHANGE', data: data });
+          sendToServer({ type: 'PAGE_CHANGE', data: data });
         }
       };
 
@@ -846,6 +848,7 @@
     // MESSAGE HANDLER - Process responses from plugin worker
     // ============================================================================
     window.onmessage = (event) => {
+      if (event.origin && event.origin !== 'null' && !event.origin.includes('figma.com')) return;
       const msg = event.data.pluginMessage;
       if (!msg) return;
 

@@ -11,16 +11,12 @@
   "documentAccess": "dynamic-page",
   "networkAccess": {
     "allowedDomains": [
-      "http://localhost",
       "http://localhost:9280",
-      "ws://localhost",
       "ws://localhost:9280"
     ],
     "reasoning": "Connects to local Bottega server via WebSocket on port 9280.",
     "devAllowedDomains": [
-      "http://localhost",
       "http://localhost:9280",
-      "ws://localhost",
       "ws://localhost:9280"
     ]
   }
