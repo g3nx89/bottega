@@ -1,15 +1,36 @@
-// State
-let currentAssistantBubble = null;
-let isStreaming = false;
+// ── Per-tab state ─────────────────────────
+const tabs = new Map(); // Map<slotId, TabState>
+let activeTabId = null;
+
+/*
+  TabState: {
+    id, fileKey, fileName, isStreaming, isConnected, modelConfig,
+    chatContainer (DOM element — detached when inactive),
+    currentAssistantBubble, thinkingBubble,
+    queuedPrompts: [] // mirrors server queue for UI display
+  }
+*/
+
+function getActiveTab() {
+  return activeTabId ? tabs.get(activeTabId) : null;
+}
+
+/** Run fn(tab) if the slot exists, no-op otherwise. */
+function withTab(slotId, fn) {
+  const tab = tabs.get(slotId);
+  if (tab) fn(tab);
+}
 
 // DOM references
 const chatArea = document.getElementById('chat-area');
 const inputField = document.getElementById('input-field');
 const sendBtn = document.getElementById('send-btn');
 const statusDot = document.getElementById('status-dot');
-const statusText = document.getElementById('status-text');
 const pinBtn = document.getElementById('pin-btn');
 const appVersion = document.getElementById('app-version');
+const tabList = document.getElementById('tab-list');
+const tabAddBtn = document.getElementById('tab-add-btn');
+const promptQueueEl = document.getElementById('prompt-queue');
 
 // Show app version in titlebar + check for post-update "What's New"
 window.api.getAppVersion().then((v) => {
@@ -147,37 +168,257 @@ function autoResizeInput() {
   inputField.style.height = Math.min(inputField.scrollHeight, 120) + 'px';
 }
 
-// Send message
+// ── Tab bar management ───────────────────
+
+let dragSourceId = null;
+
+function renderTabBar() {
+  const tabIds = [...tabs.keys()];
+  const existingEls = tabList.querySelectorAll('.tab-item');
+  const existingById = new Map();
+  existingEls.forEach((el) => existingById.set(el.dataset.slotId, el));
+
+  // Remove DOM elements for tabs that no longer exist
+  for (const [id, el] of existingById) {
+    if (!tabs.has(id)) {
+      el.remove();
+      existingById.delete(id);
+    }
+  }
+
+  // Update or create elements in order
+  let insertBefore = tabList.firstChild;
+  for (const id of tabIds) {
+    const tab = tabs.get(id);
+    let el = existingById.get(id);
+
+    if (!el) {
+      // Create new tab element with event listeners (only once)
+      el = document.createElement('div');
+      el.dataset.slotId = id;
+      el.draggable = true;
+      el.addEventListener('dragstart', (e) => {
+        dragSourceId = id;
+        el.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      el.addEventListener('dragend', () => {
+        dragSourceId = null;
+        el.classList.remove('dragging');
+        tabList.querySelectorAll('.tab-item.drag-over').forEach((d) => d.classList.remove('drag-over'));
+      });
+      el.addEventListener('dragover', (e) => {
+        if (!dragSourceId || dragSourceId === id) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        tabList.querySelectorAll('.tab-item.drag-over').forEach((d) => d.classList.remove('drag-over'));
+        el.classList.add('drag-over');
+      });
+      el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+      el.addEventListener('drop', (e) => {
+        e.preventDefault();
+        el.classList.remove('drag-over');
+        if (!dragSourceId || dragSourceId === id) return;
+        reorderTab(dragSourceId, id);
+        dragSourceId = null;
+      });
+
+      const dot = document.createElement('span');
+      dot.className = 'tab-dot';
+      el.appendChild(dot);
+
+      const label = document.createElement('span');
+      label.className = 'tab-label';
+      el.appendChild(label);
+
+      const close = document.createElement('span');
+      close.className = 'tab-close';
+      close.textContent = '\u00d7';
+      close.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.api.closeTab(id);
+      });
+      el.appendChild(close);
+
+      el.addEventListener('click', () => switchToTab(id));
+    }
+
+    // Reconcile classes and text (cheap in-place update)
+    el.className =
+      'tab-item' +
+      (id === activeTabId ? ' active' : '') +
+      (tab.isStreaming ? ' streaming' : '') +
+      (!tab.isConnected ? ' disconnected' : '');
+
+    const dot = el.querySelector('.tab-dot');
+    dot.className = 'tab-dot' + (tab.isConnected ? ' connected' : ' disconnected');
+
+    const label = el.querySelector('.tab-label');
+    const newLabel = tab.fileName || 'New Tab';
+    if (label.textContent !== newLabel) label.textContent = newLabel;
+
+    // Ensure correct DOM order
+    if (el !== insertBefore) tabList.insertBefore(el, insertBefore);
+    insertBefore = el.nextSibling;
+  }
+}
+
+/** Reorder tabs Map: move sourceId before targetId. */
+function reorderTab(sourceId, targetId) {
+  const entries = [...tabs.entries()];
+  const srcIdx = entries.findIndex(([id]) => id === sourceId);
+  const tgtIdx = entries.findIndex(([id]) => id === targetId);
+  if (srcIdx === -1 || tgtIdx === -1) return;
+  const [moved] = entries.splice(srcIdx, 1);
+  entries.splice(tgtIdx, 0, moved);
+  tabs.clear();
+  for (const [id, tab] of entries) tabs.set(id, tab);
+  renderTabBar();
+}
+
+function switchToTab(slotId) {
+  if (slotId === activeTabId) return;
+
+  // Detach current chat
+  const currentTab = getActiveTab();
+  if (currentTab && currentTab.chatContainer.parentNode) {
+    chatArea.removeChild(currentTab.chatContainer);
+  }
+
+  activeTabId = slotId;
+  window.api.activateTab(slotId);
+
+  // Attach new tab's chat
+  const newTab = tabs.get(slotId);
+  if (newTab) {
+    chatArea.appendChild(newTab.chatContainer);
+    updateInputState();
+    renderTabBar();
+    renderPromptQueue(newTab);
+    syncBarToTab(newTab);
+    scrollToBottom();
+  }
+}
+
+/** Update the model and effort bar labels to reflect a tab's actual config. */
+function syncBarToTab(tab) {
+  // Model label
+  if (tab.modelConfig && typeof availableModels === 'object') {
+    const allModels = Object.values(availableModels).flat();
+    const match = allModels.find((m) => m.sdkProvider === tab.modelConfig.provider && m.id === tab.modelConfig.modelId);
+    if (match && barModelLabel) barModelLabel.textContent = match.label.replace(/ \(.*\)/, '');
+  }
+  // Effort label — read from tab's thinkingLevel if present, else fall back to global
+  const effort = tab.thinkingLevel || currentEffort;
+  const level = EFFORT_LEVELS.find((e) => e.id === effort);
+  if (level && barEffortLabel) barEffortLabel.textContent = level.label;
+}
+
+function createTabState(slotInfo) {
+  const container = document.createElement('div');
+  container.className = 'tab-chat-container';
+
+  return {
+    id: slotInfo.id,
+    fileKey: slotInfo.fileKey,
+    fileName: slotInfo.fileName,
+    isStreaming: slotInfo.isStreaming || false,
+    isConnected: slotInfo.isConnected !== false,
+    modelConfig: slotInfo.modelConfig || { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
+    chatContainer: container,
+    currentAssistantBubble: null,
+    thinkingBubble: null,
+    queuedPrompts: [],
+  };
+}
+
+// ── Prompt queue UI ──────────────────────
+
+function renderPromptQueue(tab) {
+  if (!tab || tab.queuedPrompts.length === 0) {
+    promptQueueEl.classList.add('hidden');
+    clearChildren(promptQueueEl);
+    return;
+  }
+  promptQueueEl.classList.remove('hidden');
+  clearChildren(promptQueueEl);
+  tab.queuedPrompts.forEach((prompt, index) => {
+    const item = document.createElement('div');
+    item.className = 'queue-item';
+
+    const indexEl = document.createElement('span');
+    indexEl.className = 'queue-index';
+    indexEl.textContent = String(index + 1);
+    item.appendChild(indexEl);
+
+    const textEl = document.createElement('span');
+    textEl.className = 'queue-text';
+    textEl.textContent = prompt.text;
+    item.appendChild(textEl);
+
+    const actions = document.createElement('span');
+    actions.className = 'queue-actions';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'queue-btn';
+    removeBtn.textContent = '\u2716';
+    removeBtn.title = 'Remove';
+    removeBtn.addEventListener('click', () => window.api.queueRemove(tab.id, prompt.id));
+    actions.appendChild(removeBtn);
+
+    item.appendChild(actions);
+    promptQueueEl.appendChild(item);
+  });
+}
+
+/** Pop the last queued prompt and put its text back in the input field for editing. */
+function recallLastQueuedPrompt() {
+  const tab = getActiveTab();
+  if (!tab || tab.queuedPrompts.length === 0) return;
+  if (inputField.value.trim()) return; // don't overwrite existing input
+
+  const last = tab.queuedPrompts[tab.queuedPrompts.length - 1];
+  window.api.queueRemove(tab.id, last.id);
+  inputField.value = last.text;
+  autoResizeInput();
+  inputField.focus();
+}
+
+// ── Send message ─────────────────────────
+
 function sendMessage() {
   const text = inputField.value.trim();
-  if (!text || isStreaming) return;
+  const tab = getActiveTab();
+  if (!text || !tab) return;
 
-  // Hide prompt suggestions and slash UI when sending
   hideSuggestions();
   hideSlashMenu();
   hideSlashHelp();
 
-  // Add user bubble (with pasted images if any)
-  addUserMessage(
-    text,
-    pastedImages.map((p) => p.dataUrl),
-  );
+  // Only add user bubble if the prompt will be sent directly (not queued).
+  // Queued prompts appear in chat when the agent actually starts processing them
+  // (via the onQueuedPromptStart event).
+  if (!tab.isStreaming) {
+    addUserMessage(
+      tab,
+      text,
+      pastedImages.map((p) => p.dataUrl),
+    );
+    tab.currentAssistantBubble = createAssistantBubble(tab);
+    tab.isStreaming = true;
+    updateInputState();
+    renderTabBar();
+  }
+
   pastedImages = [];
   renderPastePreview();
   inputField.value = '';
   autoResizeInput();
 
-  // Start assistant bubble
-  currentAssistantBubble = createAssistantBubble();
-  isStreaming = true;
-  updateInputState();
-
-  // Send to main process (catch to prevent unhandled rejection — errors are
-  // surfaced via agent:text-delta + agent:end events from the main process)
-  window.api.sendPrompt(text).catch(() => {});
+  window.api.sendPrompt(tab.id, text).catch(() => {});
 }
 
-function addUserMessage(text, images) {
+function addUserMessage(tab, text, images) {
   const msg = document.createElement('div');
   msg.className = 'message user-message';
   if (images && images.length > 0) {
@@ -195,34 +436,34 @@ function addUserMessage(text, images) {
   const textEl = document.createElement('span');
   textEl.textContent = text;
   msg.appendChild(textEl);
-  chatArea.appendChild(msg);
+  tab.chatContainer.appendChild(msg);
   scrollToBottom();
 }
 
-function createAssistantBubble() {
+function createAssistantBubble(tab) {
   const msg = document.createElement('div');
   msg.className = 'message assistant-message';
   const content = document.createElement('div');
   content.className = 'message-content';
   msg.appendChild(content);
-  chatArea.appendChild(msg);
+  tab.chatContainer.appendChild(msg);
   scrollToBottom();
   return msg;
 }
 
-function appendToAssistant(text) {
-  if (!currentAssistantBubble) return;
-  const content = currentAssistantBubble.querySelector('.message-content');
+function appendToAssistant(tab, text) {
+  if (!tab.currentAssistantBubble) return;
+  const content = tab.currentAssistantBubble.querySelector('.message-content');
   content.textContent += text;
   scrollToBottom();
 }
 
 // Tool execution cards
-function addToolCard(toolName, toolCallId) {
-  if (!currentAssistantBubble) currentAssistantBubble = createAssistantBubble();
+function addToolCard(tab, toolName, toolCallId) {
+  if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
   const card = document.createElement('div');
   card.className = 'tool-card';
-  card.id = 'tool-' + toolCallId;
+  card.dataset.toolCallId = toolCallId;
   // Build with DOM methods — no untrusted content set via innerHTML
   const spinner = document.createElement('span');
   spinner.className = 'tool-spinner';
@@ -231,12 +472,13 @@ function addToolCard(toolName, toolCallId) {
   nameEl.textContent = toolName; // textContent: safe
   card.appendChild(spinner);
   card.appendChild(nameEl);
-  currentAssistantBubble.appendChild(card);
+  tab.currentAssistantBubble.appendChild(card);
   scrollToBottom();
 }
 
-function completeToolCard(toolCallId, success) {
-  const card = document.getElementById('tool-' + toolCallId);
+function completeToolCard(tab, toolCallId, success) {
+  // Search within the tab's container to avoid cross-tab collisions
+  const card = tab.chatContainer.querySelector('[data-tool-call-id="' + CSS.escape(toolCallId) + '"]');
   if (!card) return;
   const spinner = card.querySelector('.tool-spinner');
   if (spinner) {
@@ -246,14 +488,15 @@ function completeToolCard(toolCallId, success) {
 }
 
 // Screenshots
-function addScreenshot(base64, { lazy = false } = {}) {
-  if (!currentAssistantBubble) currentAssistantBubble = createAssistantBubble();
+function addScreenshot(tab, base64, opts) {
+  const lazy = opts && opts.lazy;
+  if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
   const img = document.createElement('img');
   img.className = 'screenshot';
   img.src = 'data:image/png;base64,' + base64;
   img.alt = 'Figma screenshot';
   if (lazy) img.loading = 'lazy';
-  currentAssistantBubble.appendChild(img);
+  tab.currentAssistantBubble.appendChild(img);
   scrollToBottom();
 }
 
@@ -287,14 +530,17 @@ function renderMarkdown(text) {
   return html;
 }
 
+const _escapeDiv = document.createElement('div');
 function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  _escapeDiv.textContent = text;
+  return _escapeDiv.innerHTML;
 }
 
 let scrollRafId = null;
 function scrollToBottom() {
+  // Only scroll if the active tab's container is visible
+  const tab = getActiveTab();
+  if (!tab || !tab.chatContainer.parentNode) return;
   if (scrollRafId) return;
   scrollRafId = requestAnimationFrame(() => {
     chatArea.scrollTop = chatArea.scrollHeight;
@@ -303,9 +549,16 @@ function scrollToBottom() {
 }
 
 function updateInputState() {
-  sendBtn.disabled = isStreaming;
-  inputField.disabled = isStreaming;
-  if (!isStreaming) {
+  const tab = getActiveTab();
+  const streaming = tab ? tab.isStreaming : false;
+  sendBtn.disabled = !tab;
+  inputField.disabled = !tab;
+  inputField.placeholder = !tab
+    ? 'No tab open'
+    : streaming
+      ? 'Type to queue\u2026'
+      : 'Type / for image commands, or describe what you want\u2026';
+  if (tab && !streaming) {
     inputField.focus();
   }
 }
@@ -313,12 +566,13 @@ function updateInputState() {
 // ── Session restore / reset ──────────────
 
 /**
- * Clear all chat messages from the UI.
+ * Clear all chat messages from a tab's UI.
  */
-function clearChat() {
-  chatArea.textContent = '';
-  currentAssistantBubble = null;
-  isStreaming = false;
+function clearChat(tab) {
+  if (!tab) return;
+  clearChildren(tab.chatContainer);
+  tab.currentAssistantBubble = null;
+  tab.isStreaming = false;
   hideSuggestions();
   updateInputState();
 }
@@ -328,59 +582,51 @@ function clearChat() {
  * Reuses addUserMessage, addToolCard, completeToolCard, addScreenshot to keep
  * a single source of truth for DOM construction.
  */
-function restoreChat(turns) {
-  clearChat();
+function restoreChat(tab, turns) {
+  clearChat(tab);
   if (!turns || turns.length === 0) return;
 
   for (const turn of turns) {
     if (turn.role === 'user') {
-      addUserMessage(turn.text, turn.images || []);
+      addUserMessage(tab, turn.text, turn.images || []);
     } else if (turn.role === 'assistant') {
-      currentAssistantBubble = createAssistantBubble();
+      tab.currentAssistantBubble = createAssistantBubble(tab);
 
       if (turn.tools) {
         for (const tool of turn.tools) {
-          addToolCard(tool.name, tool.id);
-          completeToolCard(tool.id, tool.success);
+          addToolCard(tab, tool.name, tool.id);
+          completeToolCard(tab, tool.id, tool.success);
         }
       }
 
       if (turn.images) {
         for (const base64 of turn.images) {
-          addScreenshot(base64, { lazy: true });
+          addScreenshot(tab, base64, { lazy: true });
         }
       }
 
       // Render text with markdown — renderMarkdown() calls escapeHtml() first (safe)
       if (turn.text) {
-        const content = currentAssistantBubble.querySelector('.message-content');
+        const content = tab.currentAssistantBubble.querySelector('.message-content');
         const safeHtml = renderMarkdown(turn.text);
         content.insertAdjacentHTML('beforeend', safeHtml);
       }
 
-      currentAssistantBubble = null;
+      tab.currentAssistantBubble = null;
     }
   }
 
   scrollToBottom();
 }
 
-// Listen for session restore from main process (on file reconnect)
-window.api.onSessionRestored((messages) => {
-  restoreChat(messages);
-});
-
-// Notify user when session restore failed and a fresh session was started
-window.api.onSessionRestoreFailed(() => {
-  clearChat();
-});
-
 // Reset button — main process handles abort, so we just call resetSession
 const resetSessionBtn = document.getElementById('reset-session-btn');
 resetSessionBtn.addEventListener('click', async () => {
-  const result = await window.api.resetSession();
+  const tab = getActiveTab();
+  if (!tab) return;
+  const result = await window.api.resetSession(tab.id);
   if (result.success) {
-    clearChat();
+    clearChat(tab);
   }
 });
 
@@ -421,6 +667,16 @@ inputField.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Arrow Up on empty input → recall last queued prompt for editing
+  if (e.key === 'ArrowUp' && !inputField.value.trim()) {
+    const tab = getActiveTab();
+    if (tab && tab.queuedPrompts.length > 0) {
+      e.preventDefault();
+      recallLastQueuedPrompt();
+      return;
+    }
+  }
+
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     sendMessage();
@@ -453,62 +709,54 @@ inputField.addEventListener('input', () => {
 
 // ── Thinking indicator ────────────────────
 
-let thinkingBubble = null;
-
-function showThinkingIndicator() {
-  if (thinkingBubble) return;
-  thinkingBubble = document.createElement('div');
-  thinkingBubble.className = 'thinking-bubble';
+function showThinkingIndicator(tab) {
+  if (tab.thinkingBubble) return;
+  tab.thinkingBubble = document.createElement('div');
+  tab.thinkingBubble.className = 'thinking-bubble';
   for (let i = 0; i < 3; i++) {
     const dot = document.createElement('span');
     dot.className = 'thinking-dot';
-    thinkingBubble.appendChild(dot);
+    tab.thinkingBubble.appendChild(dot);
   }
-  chatArea.appendChild(thinkingBubble);
+  tab.chatContainer.appendChild(tab.thinkingBubble);
   scrollToBottom();
 }
 
-function removeThinkingIndicator() {
-  if (thinkingBubble) {
-    thinkingBubble.remove();
-    thinkingBubble = null;
+function removeThinkingIndicator(tab) {
+  if (tab.thinkingBubble) {
+    tab.thinkingBubble.remove();
+    tab.thinkingBubble = null;
   }
 }
 
-window.api.onTextDelta((text) => {
-  appendToAssistant(text);
-});
+window.api.onTextDelta((slotId, text) => withTab(slotId, (tab) => appendToAssistant(tab, text)));
+window.api.onThinking((slotId, _text) => withTab(slotId, (tab) => showThinkingIndicator(tab)));
+window.api.onToolStart((slotId, toolName, toolCallId) =>
+  withTab(slotId, (tab) => addToolCard(tab, toolName, toolCallId)),
+);
+window.api.onToolEnd((slotId, _toolName, toolCallId, success) =>
+  withTab(slotId, (tab) => completeToolCard(tab, toolCallId, success)),
+);
+window.api.onScreenshot((slotId, base64) => withTab(slotId, (tab) => addScreenshot(tab, base64)));
 
-window.api.onThinking((_text) => {
-  showThinkingIndicator();
-});
-
-window.api.onToolStart((toolName, toolCallId) => {
-  addToolCard(toolName, toolCallId);
-});
-
-window.api.onToolEnd((toolName, toolCallId, success) => {
-  completeToolCard(toolCallId, success);
-});
-
-window.api.onScreenshot((base64) => {
-  addScreenshot(base64);
-});
-
-window.api.onAgentEnd(() => {
-  removeThinkingIndicator();
+window.api.onAgentEnd((slotId) => {
+  const tab = tabs.get(slotId);
+  if (!tab) return;
+  removeThinkingIndicator(tab);
   // Render markdown on the accumulated plain text.
   // renderMarkdown() calls escapeHtml() first, so innerHTML receives
   // only sanitized markup — no untrusted content is injected directly.
-  if (currentAssistantBubble) {
-    const content = currentAssistantBubble.querySelector('.message-content');
+  if (tab.currentAssistantBubble) {
+    const content = tab.currentAssistantBubble.querySelector('.message-content');
     if (content && content.textContent) {
-      content.innerHTML = renderMarkdown(content.textContent); // safe: escapeHtml applied first
+      // safe: escapeHtml applied first inside renderMarkdown()
+      content.innerHTML = renderMarkdown(content.textContent);
     }
   }
-  currentAssistantBubble = null;
-  isStreaming = false;
+  tab.currentAssistantBubble = null;
+  tab.isStreaming = false;
   updateInputState();
+  renderTabBar();
 });
 
 // ── Context usage bar ────────────────────
@@ -520,7 +768,7 @@ let lastInputTokens = 0;
 
 function updateContextBar(inputTokens) {
   lastInputTokens = inputTokens;
-  const modelId = localStorage.getItem('bottega:model') || 'claude-sonnet-4-6';
+  const modelId = getActiveTab()?.modelConfig?.modelId || localStorage.getItem('bottega:model') || 'claude-sonnet-4-6';
   const maxTokens = contextSizes[modelId] || 200000;
   const pct = Math.min(100, (inputTokens / maxTokens) * 100);
   contextFill.style.width = pct.toFixed(1) + '%';
@@ -532,8 +780,9 @@ function updateContextBar(inputTokens) {
   contextLabel.textContent = fmt(inputTokens) + ' / ' + fmt(maxTokens);
 }
 
-window.api.onUsage((usage) => {
-  updateContextBar(usage.input);
+window.api.onUsage((slotId, usage) => {
+  const tab = tabs.get(slotId);
+  if (tab && tab.id === activeTabId) updateContextBar(usage.input);
 });
 
 // Load context sizes and init bar
@@ -542,32 +791,107 @@ window.api.onUsage((usage) => {
   updateContextBar(0);
 })();
 
-// SDK lifecycle: compaction / retry indicators
-window.api.onCompaction((active) => {
-  statusText.textContent = active
-    ? 'Compacting…'
-    : statusDot.classList.contains('connected')
-      ? 'Connected'
-      : 'Disconnected';
+// SDK lifecycle: compaction / retry indicators — shown via statusDot title
+window.api.onCompaction((slotId, active) => {
+  if (slotId === activeTabId)
+    statusDot.title = active
+      ? 'Compacting\u2026'
+      : statusDot.classList.contains('connected')
+        ? 'Connected'
+        : 'Disconnected';
+});
+window.api.onRetry((slotId, active) => {
+  if (slotId === activeTabId)
+    statusDot.title = active
+      ? 'Retrying\u2026'
+      : statusDot.classList.contains('connected')
+        ? 'Connected'
+        : 'Disconnected';
 });
 
-window.api.onRetry((active) => {
-  statusText.textContent = active
-    ? 'Retrying…'
-    : statusDot.classList.contains('connected')
-      ? 'Connected'
-      : 'Disconnected';
-});
-
-window.api.onFigmaConnected((fileKey) => {
+window.api.onFigmaConnected(() => {
   statusDot.className = 'status-dot connected';
-  statusText.textContent = fileKey || 'Connected';
+  statusDot.title = 'Figma connected';
 });
 
 window.api.onFigmaDisconnected(() => {
   statusDot.className = 'status-dot disconnected';
-  statusText.textContent = 'Disconnected';
+  statusDot.title = 'Disconnected';
 });
+
+// ── Tab lifecycle events ─────────────────
+
+window.api.onTabCreated((slotInfo) => {
+  const tab = createTabState(slotInfo);
+  tabs.set(tab.id, tab);
+  switchToTab(tab.id);
+  renderTabBar();
+});
+
+window.api.onTabRemoved((slotId) => {
+  // Switch away BEFORE deleting so switchToTab can detach the old chatContainer
+  if (activeTabId === slotId) {
+    const remaining = [...tabs.keys()].filter((id) => id !== slotId);
+    if (remaining.length > 0) switchToTab(remaining[0]);
+    else activeTabId = null;
+  }
+  const removed = tabs.get(slotId);
+  if (removed && removed.chatContainer.parentNode) {
+    removed.chatContainer.parentNode.removeChild(removed.chatContainer);
+  }
+  tabs.delete(slotId);
+  renderTabBar();
+});
+
+window.api.onTabUpdated((slotInfo) => {
+  const tab = tabs.get(slotInfo.id);
+  if (tab) {
+    tab.isConnected = slotInfo.isConnected;
+    tab.fileName = slotInfo.fileName;
+    renderTabBar();
+  }
+});
+
+// Queue updates
+window.api.onQueueUpdated((slotId, queue) =>
+  withTab(slotId, (tab) => {
+    tab.queuedPrompts = queue;
+    if (slotId === activeTabId) renderPromptQueue(tab);
+  }),
+);
+
+// Queued prompt starts (auto-drain): create new user+assistant bubbles
+window.api.onQueuedPromptStart((slotId, text) =>
+  withTab(slotId, (tab) => {
+    addUserMessage(tab, text, []);
+    tab.currentAssistantBubble = createAssistantBubble(tab);
+  }),
+);
+
+// "+" button
+tabAddBtn.addEventListener('click', () => {
+  window.api.createTab();
+});
+
+// Load existing tabs on startup and restore chat history
+(async () => {
+  const existingTabs = await window.api.listTabs();
+  for (const info of existingTabs) {
+    const tab = createTabState(info);
+    tabs.set(tab.id, tab);
+  }
+  if (existingTabs.length > 0) {
+    switchToTab(existingTabs[0].id);
+    // Restore chat history for all tabs in parallel
+    await Promise.allSettled(
+      [...tabs].map(async ([id, tab]) => {
+        const messages = await window.api.getSessionMessages(id);
+        if (messages?.length > 0) restoreChat(tab, messages);
+      }),
+    );
+  }
+  renderTabBar();
+})();
 
 // ── Settings ─────────────────────────────
 
@@ -602,6 +926,15 @@ settingsOverlay.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !settingsOverlay.classList.contains('hidden')) {
     closeSettings();
+  }
+  // Cmd+1..9 → switch to tab by position
+  if (e.metaKey && !e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9') {
+    const index = parseInt(e.key, 10) - 1;
+    const tabIds = [...tabs.keys()];
+    if (index < tabIds.length) {
+      e.preventDefault();
+      switchToTab(tabIds[index]);
+    }
   }
 });
 
@@ -698,7 +1031,7 @@ async function startLogin(displayGroup) {
 
   // Show waiting state
   loginArea.classList.remove('hidden');
-  setLoginAreaContent(loginArea, 'Opening browser for authentication…', null, true);
+  setLoginAreaContent(loginArea, 'Opening browser for authentication\u2026', null, true);
 
   // Disable other login buttons
   accountsList.querySelectorAll('.account-btn.login').forEach((btn) => (btn.disabled = true));
@@ -718,7 +1051,11 @@ async function startLogin(displayGroup) {
       localStorage.setItem('bottega:model', oauthModel.id);
       populateModelSelect();
       modelSelect.value = oauthModel.sdkProvider + ':' + oauthModel.id;
-      const switchResult = await window.api.switchModel({ provider: oauthModel.sdkProvider, modelId: oauthModel.id });
+      if (!activeTabId) return;
+      const switchResult = await window.api.switchModel(activeTabId, {
+        provider: oauthModel.sdkProvider,
+        modelId: oauthModel.id,
+      });
       if (!switchResult.success) {
         keyStatus.textContent = switchResult.error || 'Failed to switch model';
         keyStatus.className = 'key-status error';
@@ -786,7 +1123,7 @@ function setLoginAreaContent(area, message, promptOpts, showCancel) {
       const val = input.value.trim();
       if (!val && !promptOpts.allowEmpty) return;
       window.api.loginRespond(val);
-      setLoginAreaContent(area, 'Authenticating…', null, true);
+      setLoginAreaContent(area, 'Authenticating\u2026', null, true);
     });
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') submit.click();
@@ -816,7 +1153,7 @@ window.api.onLoginEvent((event) => {
 
   switch (event.type) {
     case 'auth':
-      setLoginAreaContent(loginArea, event.instructions || 'Waiting for browser authentication…', null, true);
+      setLoginAreaContent(loginArea, event.instructions || 'Waiting for browser authentication\u2026', null, true);
       break;
     case 'prompt':
       setLoginAreaContent(
@@ -844,7 +1181,7 @@ toggleApikeyBtn.addEventListener('click', () => {
 
 apikeyProviderSelect.addEventListener('change', () => {
   const provider = apikeyProviderSelect.value;
-  apiKeyInput.placeholder = PROVIDER_META[provider]?.keyPlaceholder || 'API key';
+  apiKeyInput.placeholder = PROVIDER_META[provider] ? PROVIDER_META[provider].keyPlaceholder : 'API key';
   keyStatus.textContent = '';
 });
 
@@ -858,7 +1195,7 @@ saveKeyBtn.addEventListener('click', async () => {
   apiKeyInput.value = '';
   saveKeyBtn.disabled = false;
 
-  keyStatus.textContent = PROVIDER_META[provider]?.label + ' key saved';
+  keyStatus.textContent = (PROVIDER_META[provider] ? PROVIDER_META[provider].label : provider) + ' key saved';
   keyStatus.className = 'key-status success';
 
   await renderAccountCards();
@@ -872,7 +1209,9 @@ saveKeyBtn.addEventListener('click', async () => {
     localStorage.setItem('bottega:model', apiModel.id);
     populateModelSelect();
     modelSelect.value = apiModel.sdkProvider + ':' + apiModel.id;
-    await window.api.switchModel({ provider: apiModel.sdkProvider, modelId: apiModel.id });
+    if (activeTabId) {
+      await window.api.switchModel(activeTabId, { provider: apiModel.sdkProvider, modelId: apiModel.id });
+    }
   }
 });
 
@@ -883,7 +1222,7 @@ function populateModelSelect() {
   for (const [displayGroup, models] of Object.entries(availableModels)) {
     if (models.length === 0) continue;
     const group = document.createElement('optgroup');
-    group.label = PROVIDER_META[displayGroup]?.label || displayGroup;
+    group.label = PROVIDER_META[displayGroup] ? PROVIDER_META[displayGroup].label : displayGroup;
     models.forEach((m) => {
       const opt = document.createElement('option');
       // Value encodes sdkProvider:modelId (sdkProvider is the Pi SDK provider)
@@ -907,7 +1246,8 @@ modelSelect.addEventListener('change', async () => {
   const modelId = modelSelect.value.slice(sepIdx + 1);
   localStorage.setItem('bottega:provider', sdkProvider);
   localStorage.setItem('bottega:model', modelId);
-  const result = await window.api.switchModel({ provider: sdkProvider, modelId });
+  if (!activeTabId) return;
+  const result = await window.api.switchModel(activeTabId, { provider: sdkProvider, modelId });
   if (!result.success) {
     keyStatus.textContent = result.error || 'Failed to switch';
     keyStatus.className = 'key-status error';
@@ -932,8 +1272,8 @@ async function initAuthUI() {
   // Switch session to saved model if it differs from the default
   const savedProvider = localStorage.getItem('bottega:provider') || 'anthropic';
   const savedModel = localStorage.getItem('bottega:model') || 'claude-sonnet-4-6';
-  if (savedProvider !== 'anthropic' || savedModel !== 'claude-sonnet-4-6') {
-    await window.api.switchModel({ provider: savedProvider, modelId: savedModel });
+  if (activeTabId && (savedProvider !== 'anthropic' || savedModel !== 'claude-sonnet-4-6')) {
+    await window.api.switchModel(activeTabId, { provider: savedProvider, modelId: savedModel });
   }
 }
 
@@ -1007,7 +1347,7 @@ initImageGenUI();
 
 function applyTransparency(value) {
   // 0% = fully opaque (opacity 1.0), 100% = max usable transparency (opacity 0.775)
-  const opacity = 1 - (value / 100) * 0.225; // maps 0→1.0, 100→0.775
+  const opacity = 1 - (value / 100) * 0.225; // maps 0->1.0, 100->0.775
   window.api.setOpacity(opacity);
   transparencyValue.textContent = value + '%';
   localStorage.setItem('bottega:transparency', value);
@@ -1111,7 +1451,7 @@ const figmaPluginSteps = document.getElementById('figma-plugin-steps');
 if (setupFigmaBtn) {
   setupFigmaBtn.addEventListener('click', async () => {
     setupFigmaBtn.disabled = true;
-    setupFigmaBtn.textContent = 'Installing…';
+    setupFigmaBtn.textContent = 'Installing\u2026';
     setupFigmaStatus.textContent = '';
     try {
       const result = await window.api.installFigmaPlugin();
@@ -1124,7 +1464,7 @@ if (setupFigmaBtn) {
         figmaPluginSteps.classList.add('hidden');
       }
     } catch {
-      setupFigmaStatus.textContent = 'Setup failed — see logs.';
+      setupFigmaStatus.textContent = 'Setup failed \u2014 see logs.';
       setupFigmaBtn.textContent = 'Install Figma Plugin';
       figmaPluginSteps.classList.add('hidden');
     } finally {
@@ -1158,7 +1498,7 @@ const diagnosticsRestartHint = document.getElementById('diagnostics-restart-hint
 if (exportLogsBtn) {
   exportLogsBtn.addEventListener('click', async () => {
     exportLogsBtn.disabled = true;
-    exportLogsBtn.textContent = 'Exporting…';
+    exportLogsBtn.textContent = 'Exporting\u2026';
     diagnosticsExportStatus.textContent = '';
     try {
       const result = await window.api.exportDiagnostics();
@@ -1247,7 +1587,9 @@ const EFFORT_LEVELS = [
 ];
 
 let currentEffort = localStorage.getItem('bottega:effort') || 'medium';
-barEffortLabel.textContent = EFFORT_LEVELS.find((e) => e.id === currentEffort)?.label || 'Medium';
+barEffortLabel.textContent = EFFORT_LEVELS.find((e) => e.id === currentEffort)
+  ? EFFORT_LEVELS.find((e) => e.id === currentEffort).label
+  : 'Medium';
 
 // Generic dropdown factory
 function createDropdown(anchorBtn, items, onSelect) {
@@ -1323,7 +1665,8 @@ barModelBtn.addEventListener('click', async (e) => {
     localStorage.setItem('bottega:model', item.id);
     // Sync settings panel model selector
     if (modelSelect) modelSelect.value = item.sdkProvider + ':' + item.id;
-    await window.api.switchModel({ provider: item.sdkProvider, modelId: item.id });
+    if (!activeTabId) return;
+    await window.api.switchModel(activeTabId, { provider: item.sdkProvider, modelId: item.id });
     updateContextBar(0);
   });
 });
@@ -1331,12 +1674,12 @@ barModelBtn.addEventListener('click', async (e) => {
 // Effort picker
 barEffortBtn.addEventListener('click', (e) => {
   e.stopPropagation();
-  const items = EFFORT_LEVELS.map((l) => ({ ...l, active: l.id === currentEffort }));
+  const items = EFFORT_LEVELS.map((l) => ({ id: l.id, label: l.label, active: l.id === currentEffort }));
   createDropdown(barEffortBtn, items, (item) => {
     currentEffort = item.id;
     barEffortLabel.textContent = item.label;
     localStorage.setItem('bottega:effort', item.id);
-    window.api.setThinking(item.id);
+    if (activeTabId) window.api.setThinking(activeTabId, item.id);
   });
 });
 
@@ -1349,8 +1692,7 @@ function syncBarModelLabel() {
   if (match) barModelLabel.textContent = match.label.replace(/ \(.*\)/, '');
 }
 
-// Apply saved effort on load
-window.api.setThinking(currentEffort);
+// Saved effort is applied when a tab is first activated (activeTabId is null at load time)
 
 // ── Paste screenshot support ─────────────
 
@@ -1358,7 +1700,7 @@ const pastePreview = document.getElementById('paste-preview');
 let pastedImages = []; // Array of { dataUrl, blob }
 
 inputField.addEventListener('paste', (e) => {
-  const items = e.clipboardData?.items;
+  const items = e.clipboardData ? e.clipboardData.items : null;
   if (!items) return;
   for (const item of items) {
     if (item.type.startsWith('image/')) {
@@ -1435,8 +1777,8 @@ function hideSuggestions() {
   clearChildren(suggestionsContainer);
 }
 
-window.api.onSuggestions((suggestions) => {
-  showSuggestions(suggestions);
+window.api.onSuggestions((slotId, suggestions) => {
+  if (slotId === activeTabId) showSuggestions(suggestions);
 });
 
 // ── Slash commands ────────────────────────
@@ -1554,7 +1896,7 @@ function showSlashMenu(filter) {
     ? SLASH_COMMANDS.filter(
         (c) => c.id.includes(q) || c.label.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q),
       )
-    : [...SLASH_COMMANDS];
+    : SLASH_COMMANDS.slice();
 
   if (slashFiltered.length === 0) {
     hideSlashMenu();

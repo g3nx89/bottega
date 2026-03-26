@@ -24,10 +24,14 @@
             <path d="M6.5 1L6 3L4.5 3.5L3 2L1.5 3.5L3 5L2.5 6.5L0.5 7V9L2.5 9.5L3 11L1.5 12.5L3 14L5 12.5L6.5 13L7 15H9L9.5 13L11 12.5L12.5 14L14 12.5L12.5 11L13 9.5L15 9V7L13 6.5L12.5 5L14 3.5L12.5 2L11 3.5L9.5 3L9 1H7L6.5 1ZM8 5.5C9.38 5.5 10.5 6.62 10.5 8S9.38 10.5 8 10.5S5.5 9.38 5.5 8S6.62 5.5 8 5.5Z" fill="currentColor"/>
           </svg>
         </button>
-        <span id="status-dot" class="status-dot disconnected"></span>
-        <span id="status-text" class="status-text">Disconnected</span>
+        <span id="status-dot" class="status-dot disconnected" title="Disconnected"></span>
       </div>
     </header>
+
+    <div id="tab-bar" class="tab-bar">
+      <div id="tab-list" class="tab-list"></div>
+      <button id="tab-add-btn" class="tab-add" title="New tab">+</button>
+    </div>
 
     <main id="chat-area"></main>
 
@@ -41,6 +45,7 @@
         <div class="context-fill" id="context-fill"></div>
         <span class="context-label" id="context-label">0%</span>
       </div>
+      <div id="prompt-queue" class="prompt-queue hidden"></div>
       <div class="input-wrapper">
         <div id="paste-preview" class="paste-preview hidden"></div>
         <textarea
