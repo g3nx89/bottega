@@ -135,33 +135,53 @@ interface CacheEntry {
   timestamp: number;
 }
 
+const DEFAULT_FILE_KEY = '__global__';
+
 export class DesignSystemCache {
-  private cache: CacheEntry | null = null;
+  private entries = new Map<string, CacheEntry>();
   private readonly getTtlMs: () => number;
 
   constructor(ttlMs: number | (() => number) = 60_000) {
     this.getTtlMs = typeof ttlMs === 'function' ? ttlMs : () => ttlMs;
   }
 
-  get(compact: true): CompactDesignSystem | null;
-  get(compact: false): unknown | null;
-  get(compact: boolean): CompactDesignSystem | unknown | null;
-  get(compact: boolean): CompactDesignSystem | unknown | null {
-    if (!this.isValid()) return null;
-    return compact ? this.cache!.compact : this.cache!.raw;
+  get(compact: true, fileKey?: string): CompactDesignSystem | null;
+  get(compact: false, fileKey?: string): unknown | null;
+  get(compact: boolean, fileKey?: string): CompactDesignSystem | unknown | null;
+  get(compact: boolean, fileKey?: string): CompactDesignSystem | unknown | null {
+    const key = fileKey || DEFAULT_FILE_KEY;
+    const entry = this.entries.get(key);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp >= this.getTtlMs()) {
+      this.entries.delete(key);
+      return null;
+    }
+    return compact ? entry.compact : entry.raw;
   }
 
-  set(raw: any): { compact: CompactDesignSystem; raw: any } {
+  set(raw: any, fileKey?: string): { compact: CompactDesignSystem; raw: any } {
     const compact = compactDesignSystem(raw);
-    this.cache = { compact, raw, timestamp: Date.now() };
+    this.entries.set(fileKey || DEFAULT_FILE_KEY, { compact, raw, timestamp: Date.now() });
     return { compact, raw };
   }
 
-  invalidate(): void {
-    this.cache = null;
+  /** Invalidate a specific file's cache, or all caches if no fileKey. */
+  invalidate(fileKey?: string): void {
+    if (fileKey) {
+      this.entries.delete(fileKey);
+    } else {
+      this.entries.clear();
+    }
   }
 
-  isValid(): boolean {
-    return this.cache !== null && Date.now() - this.cache.timestamp < this.getTtlMs();
+  isValid(fileKey?: string): boolean {
+    const key = fileKey || DEFAULT_FILE_KEY;
+    const entry = this.entries.get(key);
+    if (!entry) return false;
+    if (Date.now() - entry.timestamp >= this.getTtlMs()) {
+      this.entries.delete(key);
+      return false;
+    }
+    return true;
   }
 }

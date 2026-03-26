@@ -10,13 +10,16 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import os from 'os';
 import path from 'path';
+import type { FigmaAPI } from '../figma/figma-api.js';
+import type { FigmaWebSocketServer } from '../figma/websocket-server.js';
 import type { CompressionConfigManager } from './compression/compression-config.js';
 import type { DesignSystemCache } from './compression/design-system-cache.js';
 import { createCompressionExtensionFactory } from './compression/extension-factory.js';
 import type { CompressionMetricsCollector } from './compression/metrics.js';
 import type { FigmaCore } from './figma-core.js';
 import type { ImageGenerator } from './image-gen/image-generator.js';
-import { OperationQueue } from './operation-queue.js';
+import type { OperationQueueManager } from './operation-queue-manager.js';
+import { ScopedConnector } from './scoped-connector.js';
 import { buildSystemPrompt } from './system-prompt.js';
 import { createFigmaTools } from './tools/index.js';
 
@@ -26,6 +29,20 @@ export interface ModelConfig {
 }
 
 export const DEFAULT_MODEL: ModelConfig = { provider: 'anthropic', modelId: 'claude-sonnet-4-6' };
+
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export const DEFAULT_THINKING_LEVEL: ThinkingLevel = 'medium';
+export const VALID_THINKING_LEVELS: ReadonlySet<ThinkingLevel> = new Set<ThinkingLevel>([
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+]);
+export function isThinkingLevel(s: string): s is ThinkingLevel {
+  return VALID_THINKING_LEVELS.has(s as ThinkingLevel);
+}
 
 /**
  * Maps UI display group names to Pi SDK OAuth provider IDs.
@@ -85,18 +102,21 @@ export const AVAILABLE_MODELS: Record<string, { id: string; label: string; sdkPr
 };
 
 /**
- * Shared agent infrastructure: tools, auth, resource loader, compression.
- * Created once, reused across session recreations.
+ * Shared agent infrastructure: auth, compression, and Figma core references.
+ * Created once, reused across session recreations and slot creation.
  */
 export interface AgentInfra {
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
   sessionManager: SessionManager;
-  figmaTools: ToolDefinition[];
   configManager: CompressionConfigManager;
   designSystemCache: DesignSystemCache;
   metricsCollector: CompressionMetricsCollector;
   compressionExtensionFactory: (pi: any) => void;
+  wsServer: FigmaWebSocketServer;
+  figmaAPI: FigmaAPI;
+  queueManager: OperationQueueManager;
+  getImageGenerator?: () => ImageGenerator | null;
 }
 
 /**
@@ -117,8 +137,6 @@ export async function createAgentInfra(
 ): Promise<AgentInfra> {
   // Backwards-compatible: accept string (sessionsDir) or options object
   const opts: AgentInfraOptions = typeof options === 'string' ? { sessionsDir: options } : options || {};
-  const operationQueue = new OperationQueue();
-
   // Compression infrastructure (dynamic imports: biome auto-converts static value imports to type-only)
   const { CompressionConfigManager } = await import('./compression/compression-config.js');
   const { DesignSystemCache } = await import('./compression/design-system-cache.js');
@@ -129,47 +147,39 @@ export async function createAgentInfra(
   const metricsCollector = new CompressionMetricsCollector('app-session', 'pending', 1_000_000);
   const compressionExtensionFactory = createCompressionExtensionFactory(configManager, metricsCollector);
 
-  const figmaTools = createFigmaTools({
-    connector: figmaCore.connector,
-    figmaAPI: figmaCore.figmaAPI,
-    operationQueue,
-    wsServer: figmaCore.wsServer,
-    getImageGenerator: opts.getImageGenerator,
-    designSystemCache,
-    configManager,
-  });
-
   const authStorage = AuthStorage.create();
   const modelRegistry = new ModelRegistry(authStorage);
   const sessionManager = SessionManager.create(os.tmpdir(), opts.sessionsDir || DEFAULT_SESSIONS_DIR);
+  const { OperationQueueManager: OQM } = await import('./operation-queue-manager.js');
+  const queueManager = new OQM();
 
   return {
     authStorage,
     modelRegistry,
     sessionManager,
-    figmaTools,
     configManager,
     designSystemCache,
     metricsCollector,
     compressionExtensionFactory,
+    wsServer: figmaCore.wsServer,
+    figmaAPI: figmaCore.figmaAPI,
+    queueManager,
+    getImageGenerator: opts.getImageGenerator,
   };
 }
 
-export async function createFigmaAgent(
+/** Shared helper: builds resource loader + creates agent session. */
+async function buildAgentSession(
   infra: AgentInfra,
-  modelConfig: ModelConfig = DEFAULT_MODEL,
+  tools: ToolDefinition[],
+  modelConfig: ModelConfig,
 ): Promise<CreateAgentSessionResult> {
-  // getModel() expects typed literals; cast for dynamic provider/model selection.
-  // modelConfig.provider is the Pi SDK provider ID (e.g. 'openai-codex', 'google-gemini-cli').
   const model = getModel(modelConfig.provider as any, modelConfig.modelId as any);
 
-  // Find human-readable label for the system prompt (search all groups)
   const allModels = Object.values(AVAILABLE_MODELS).flat();
   const entry = allModels.find((m) => m.sdkProvider === modelConfig.provider && m.id === modelConfig.modelId);
   const modelLabel = entry?.label || modelConfig.modelId;
 
-  // Build resource loader per session with model-specific system prompt.
-  // Use os.tmpdir() as cwd so DefaultResourceLoader doesn't load project CLAUDE.md files.
   const resourceLoader = new DefaultResourceLoader({
     cwd: os.tmpdir(),
     systemPrompt: buildSystemPrompt(modelLabel),
@@ -181,17 +191,53 @@ export async function createFigmaAgent(
   });
   await resourceLoader.reload();
 
-  const result = await createAgentSession({
+  return createAgentSession({
     cwd: os.tmpdir(),
     model,
-    thinkingLevel: 'medium',
+    thinkingLevel: DEFAULT_THINKING_LEVEL,
     tools: [],
-    customTools: infra.figmaTools,
+    customTools: tools,
     resourceLoader,
     sessionManager: infra.sessionManager,
     authStorage: infra.authStorage,
     modelRegistry: infra.modelRegistry,
   });
+}
 
-  return result;
+/**
+ * Create file-scoped tools for a specific Figma file.
+ * Each call produces a ScopedConnector pinned to `fileKey` and a per-file OperationQueue,
+ * so tools automatically target the right file without the caller passing fileKey around.
+ */
+export function createScopedTools(
+  infra: AgentInfra,
+  fileKey: string,
+): { tools: ToolDefinition[]; connector: ScopedConnector } {
+  const connector = new ScopedConnector(infra.wsServer, fileKey);
+  const operationQueue = infra.queueManager.getQueue(fileKey);
+
+  const tools = createFigmaTools({
+    connector,
+    figmaAPI: infra.figmaAPI,
+    operationQueue,
+    wsServer: infra.wsServer,
+    getImageGenerator: infra.getImageGenerator,
+    designSystemCache: infra.designSystemCache,
+    configManager: infra.configManager,
+    fileKey,
+  });
+
+  return { tools, connector };
+}
+
+/**
+ * Create an agent session for a specific slot (file-scoped tools already created).
+ * Used by SlotManager when creating or recreating sessions per-tab.
+ */
+export async function createFigmaAgentForSlot(
+  infra: AgentInfra,
+  scopedTools: ToolDefinition[],
+  modelConfig: ModelConfig = DEFAULT_MODEL,
+): Promise<CreateAgentSessionResult> {
+  return buildAgentSession(infra, scopedTools, modelConfig);
 }

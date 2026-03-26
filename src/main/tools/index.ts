@@ -1,6 +1,6 @@
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import type { FigmaAPI } from '../../figma/figma-api.js';
-import type { WebSocketConnector } from '../../figma/websocket-connector.js';
+import type { IFigmaConnector } from '../../figma/figma-connector.js';
 import type { FigmaWebSocketServer } from '../../figma/websocket-server.js';
 import type { CompressionConfigManager } from '../compression/compression-config.js';
 import type { DesignSystemCache } from '../compression/design-system-cache.js';
@@ -15,13 +15,15 @@ import { createManipulationTools } from './manipulation.js';
 import { createTokenTools } from './tokens.js';
 
 export interface ToolDeps {
-  connector: WebSocketConnector;
+  connector: IFigmaConnector;
   figmaAPI: FigmaAPI;
   operationQueue: OperationQueue;
   wsServer: FigmaWebSocketServer;
   getImageGenerator?: () => ImageGenerator | null;
   designSystemCache: DesignSystemCache;
   configManager: CompressionConfigManager;
+  /** File key for cache scoping in multi-tab. Undefined for legacy global connector. */
+  fileKey?: string;
 }
 
 /** Standard text result wrapper — avoids repeating the same shape in every tool. */

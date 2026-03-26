@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createChildLogger } from '../figma/logger.js';
+import { atomicWriteJsonSync } from './fs-utils.js';
 
 const log = createChildLogger({ component: 'session-store' });
 
@@ -53,12 +54,7 @@ export class SessionStore {
   private save(): void {
     if (!this.cache) return;
     try {
-      // mkdirSync with recursive is a no-op if directory already exists
-      mkdirSync(path.dirname(this.storePath), { recursive: true });
-
-      const tmpPath = `${this.storePath}.tmp`;
-      writeFileSync(tmpPath, JSON.stringify(this.cache, null, 2), 'utf-8');
-      renameSync(tmpPath, this.storePath);
+      atomicWriteJsonSync(this.storePath, this.cache);
     } catch (err) {
       log.warn({ err, path: this.storePath }, 'Failed to write session store');
     }

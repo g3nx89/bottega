@@ -36,7 +36,7 @@ function buildGetFileDataCode(nodeId?: string, depth?: number): string {
 }
 
 export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
-  const { connector, figmaAPI, designSystemCache, configManager } = deps;
+  const { connector, figmaAPI, designSystemCache, configManager, fileKey } = deps;
 
   return [
     {
@@ -138,7 +138,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
 
         // Check cache (unless forceRefresh requested)
         if (!params.forceRefresh) {
-          const cached = designSystemCache.get(shouldCompact);
+          const cached = designSystemCache.get(shouldCompact, fileKey);
           if (cached) return textResult(cached);
         }
 
@@ -147,7 +147,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
         const raw = { variables, components };
 
         // Store in cache and return appropriate form
-        const { compact } = designSystemCache.set(raw);
+        const { compact } = designSystemCache.set(raw, fileKey);
         return textResult(shouldCompact ? compact : raw);
       },
     },

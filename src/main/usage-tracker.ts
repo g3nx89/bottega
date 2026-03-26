@@ -236,4 +236,34 @@ export class UsageTracker {
   trackRendererCrash(reason: string, exitCode: number): void {
     this.emit('usage:renderer_crash', { reason, exitCode }, true);
   }
+
+  // ── Multi-tab events ──────────────────
+
+  trackSlotCreated(fileKey: string, automatic: boolean): void {
+    this.emit('usage:slot_created', { fileKeyHash: hashFileKey(fileKey), automatic });
+  }
+
+  trackSlotRemoved(fileKey: string): void {
+    this.emit('usage:slot_removed', { fileKeyHash: hashFileKey(fileKey) });
+  }
+
+  trackPromptEnqueued(queueLength: number): void {
+    this.emit('usage:prompt_enqueued', { queueLength });
+  }
+
+  trackPromptDequeued(queueLength: number): void {
+    this.emit('usage:prompt_dequeued', { queueLength });
+  }
+
+  trackPromptQueueEdited(): void {
+    this.emit('usage:prompt_queue_edited', {});
+  }
+
+  trackPromptQueueCancelled(): void {
+    this.emit('usage:prompt_queue_cancelled', {});
+  }
+
+  trackAppStateRestored(slotsCount: number, totalQueuedPrompts: number): void {
+    this.emit('usage:app_state_restored', { slotsCount, totalQueuedPrompts });
+  }
 }
