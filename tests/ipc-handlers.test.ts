@@ -84,6 +84,13 @@ vi.mock('../src/main/prompt-suggester.js', () => ({
   },
 }));
 
+vi.mock('../src/main/auto-updater.js', () => ({
+  checkForUpdates: vi.fn(),
+  downloadUpdate: vi.fn(),
+  getAppVersion: vi.fn().mockReturnValue('1.0.0'),
+  quitAndInstall: vi.fn(),
+}));
+
 // safe-send: use the real implementation so we can test destroyed-window behavior
 // (it's a pure function that just checks isDestroyed and calls send)
 
@@ -91,11 +98,11 @@ vi.mock('../src/main/prompt-suggester.js', () => ({
 
 import { cpSync, existsSync } from 'node:fs';
 import { app, dialog, ipcMain, shell } from 'electron';
-import { createFigmaAgent } from '../src/main/agent.js';
 import { exportDiagnosticsZip, formatSystemInfoForClipboard } from '../src/main/diagnostics.js';
 import { setupIpcHandlers } from '../src/main/ipc-handlers.js';
 import { loadDiagnosticsConfig, saveDiagnosticsConfig } from '../src/main/remote-logger.js';
 import { createMockSession } from './helpers/mock-session.js';
+import { createMockSlotManager } from './helpers/mock-slot-manager.js';
 import { createMockWindow } from './helpers/mock-window.js';
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -106,6 +113,9 @@ type MockWindow = ReturnType<typeof createMockWindow>;
 let mockSession: MockSession;
 let mockWindow: MockWindow;
 let mockInfra: any;
+let slotId: string;
+let slot: any;
+let slotManager: any;
 
 /** Retrieve the handler registered for a given IPC channel. */
 function getHandler(channel: string) {
@@ -150,7 +160,16 @@ describe('setupIpcHandlers', () => {
       designSystemCache: { invalidate: vi.fn() },
       metricsCollector: { finalize: vi.fn() },
     };
-    setupIpcHandlers({ initialSession: mockSession as any, mainWindow: mockWindow as any, infra: mockInfra });
+    const mock = createMockSlotManager(mockSession);
+    slotId = mock.slotId;
+    slot = mock.slot;
+    slotManager = mock.slotManager;
+    const ipcController = setupIpcHandlers({
+      slotManager: slotManager as any,
+      mainWindow: mockWindow as any,
+      infra: mockInfra,
+    });
+    ipcController.subscribeSlot(slot as any);
   });
 
   // ── safeSend (cross-cutting, R6) ──────────────────────────────
@@ -162,7 +181,7 @@ describe('setupIpcHandlers', () => {
         assistantMessageEvent: { type: 'text_delta', delta: 'hello' },
       });
 
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:text-delta', 'hello');
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:text-delta', slotId, 'hello');
     });
 
     it('should not crash when webContents is destroyed', () => {
@@ -183,7 +202,7 @@ describe('setupIpcHandlers', () => {
       mockSession._promptFn.mockRejectedValueOnce(new Error('Network error'));
       mockWindow.destroy();
 
-      await invokeHandler('agent:prompt', 'test');
+      await invokeHandler('agent:prompt', slotId, 'test');
 
       // safeSend should no-op on destroyed window — send must not be called
       expect(mockWindow.webContents.send).not.toHaveBeenCalled();
@@ -194,7 +213,7 @@ describe('setupIpcHandlers', () => {
 
   describe('streaming lifecycle', () => {
     it('should call session.prompt with text', async () => {
-      await invokeHandler('agent:prompt', 'design a button');
+      await invokeHandler('agent:prompt', slotId, 'design a button');
 
       expect(mockSession._promptFn).toHaveBeenCalledWith('design a button');
     });
@@ -202,43 +221,47 @@ describe('setupIpcHandlers', () => {
     it('should send error text-delta and agent:end on prompt failure', async () => {
       mockSession._promptFn.mockRejectedValueOnce(new Error('API timeout'));
 
-      await invokeHandler('agent:prompt', 'test');
+      await invokeHandler('agent:prompt', slotId, 'test');
 
       expect(mockWindow.webContents.send).toHaveBeenCalledWith(
         'agent:text-delta',
+        slotId,
         expect.stringContaining('API timeout'),
       );
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end');
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
     });
 
     it('should send agent:end when agent_end event fires', () => {
+      slot.isStreaming = true; // agent_end only fires while streaming
       mockSession.emitEvent({ type: 'agent_end' });
 
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end');
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
     });
 
-    it('should use followUp streamingBehavior for prompts during streaming', async () => {
+    it('should enqueue prompts while streaming', async () => {
       // First prompt starts streaming
-      await invokeHandler('agent:prompt', 'first');
-      // Simulate agent not yet finished (isStreaming stays true until agent_end)
-      // Second prompt should use followUp
-      await invokeHandler('agent:prompt', 'follow up');
-
-      expect(mockSession._promptFn).toHaveBeenCalledWith('follow up', {
-        streamingBehavior: 'followUp',
-      });
+      await invokeHandler('agent:prompt', slotId, 'first');
+      expect(mockSession._promptFn).toHaveBeenCalledWith('first');
+      // Second prompt while streaming should be enqueued, not sent directly
+      await invokeHandler('agent:prompt', slotId, 'second');
+      expect(mockSession._promptFn).toHaveBeenCalledTimes(1); // only 'first' was sent
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith(
+        'queue:updated',
+        slotId,
+        expect.arrayContaining([expect.objectContaining({ text: 'second' })]),
+      );
     });
 
     it('should call session.abort and reset streaming state', async () => {
       // Start streaming
-      await invokeHandler('agent:prompt', 'start');
+      await invokeHandler('agent:prompt', slotId, 'start');
       // Abort
-      await invokeHandler('agent:abort');
+      await invokeHandler('agent:abort', slotId);
 
       expect(mockSession._abortFn).toHaveBeenCalled();
 
-      // After abort, next prompt should NOT use followUp (streaming was reset)
-      await invokeHandler('agent:prompt', 'fresh start');
+      // After abort, next prompt should NOT be enqueued (streaming was reset)
+      await invokeHandler('agent:prompt', slotId, 'fresh start');
       expect(mockSession._promptFn).toHaveBeenLastCalledWith('fresh start');
     });
   });
@@ -252,7 +275,7 @@ describe('setupIpcHandlers', () => {
         assistantMessageEvent: { type: 'text_delta', delta: 'some text' },
       });
 
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:text-delta', 'some text');
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:text-delta', slotId, 'some text');
     });
 
     it('should forward thinking_delta to renderer', () => {
@@ -261,7 +284,7 @@ describe('setupIpcHandlers', () => {
         assistantMessageEvent: { type: 'thinking_delta', delta: 'thinking...' },
       });
 
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:thinking', 'thinking...');
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:thinking', slotId, 'thinking...');
     });
 
     it('should forward tool_execution_start with tool name and callId', () => {
@@ -272,7 +295,7 @@ describe('setupIpcHandlers', () => {
         toolParams: { code: 'test' },
       });
 
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:tool-start', 'figma_execute', 'call-123');
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:tool-start', slotId, 'figma_execute', 'call-123');
     });
 
     it('should forward tool_execution_end with result', () => {
@@ -286,6 +309,7 @@ describe('setupIpcHandlers', () => {
 
       expect(mockWindow.webContents.send).toHaveBeenCalledWith(
         'agent:tool-end',
+        slotId,
         'figma_set_text',
         'call-456',
         true, // success = !isError
@@ -311,12 +335,13 @@ describe('setupIpcHandlers', () => {
       // Should send both the tool-end AND the screenshot
       expect(mockWindow.webContents.send).toHaveBeenCalledWith(
         'agent:tool-end',
+        slotId,
         'figma_screenshot',
         'call-789',
         true,
         expect.any(Object),
       );
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:screenshot', imageData);
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:screenshot', slotId, imageData);
     });
 
     it('should forward usage stats on message_end', () => {
@@ -328,7 +353,7 @@ describe('setupIpcHandlers', () => {
         },
       });
 
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:usage', {
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:usage', slotId, {
         input: 1000,
         output: 500,
         total: 1500,
@@ -365,14 +390,15 @@ describe('setupIpcHandlers', () => {
     it('should send error and not call session when no API key is configured', async () => {
       mockInfra.authStorage.getApiKey.mockResolvedValueOnce(null);
 
-      await invokeHandler('agent:prompt', 'test');
+      await invokeHandler('agent:prompt', slotId, 'test');
 
       expect(mockSession._promptFn).not.toHaveBeenCalled();
       expect(mockWindow.webContents.send).toHaveBeenCalledWith(
         'agent:text-delta',
+        slotId,
         expect.stringContaining('No credentials configured'),
       );
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end');
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
     });
 
     it('should return GOOGLE_CLOUD_PROJECT_REQUIRED code for Workspace accounts', async () => {
@@ -391,12 +417,12 @@ describe('setupIpcHandlers', () => {
 
     it('should reset streaming state on abort', async () => {
       // Start streaming
-      await invokeHandler('agent:prompt', 'hello');
+      await invokeHandler('agent:prompt', slotId, 'hello');
       // Abort resets isStreaming
-      await invokeHandler('agent:abort');
+      await invokeHandler('agent:abort', slotId);
 
-      // Next prompt should be a fresh start (no followUp)
-      await invokeHandler('agent:prompt', 'new prompt');
+      // Next prompt should be a fresh start (no enqueue)
+      await invokeHandler('agent:prompt', slotId, 'new prompt');
       const lastCall = mockSession._promptFn.mock.calls[mockSession._promptFn.mock.calls.length - 1];
       expect(lastCall).toEqual(['new prompt']);
     });
@@ -405,40 +431,23 @@ describe('setupIpcHandlers', () => {
   // ── Model switch ──────────────────────────────────────────────
 
   describe('auth:switch-model', () => {
-    it('should create a new session on model switch', async () => {
-      const newMockSession = createMockSession();
-      (createFigmaAgent as any).mockResolvedValueOnce({ session: newMockSession });
-
+    it('should recreate session on model switch', async () => {
       const newConfig = { provider: 'openai', modelId: 'gpt-5.4' };
-      const result = await invokeHandler('auth:switch-model', newConfig);
+      const result = await invokeHandler('auth:switch-model', slotId, newConfig);
 
       expect(result).toEqual({ success: true });
-      expect(createFigmaAgent).toHaveBeenCalledWith(mockInfra, newConfig);
-
-      // New session should receive events
-      newMockSession.emitEvent({
-        type: 'message_update',
-        assistantMessageEvent: { type: 'text_delta', delta: 'from new model' },
-      });
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:text-delta', 'from new model');
+      expect(slotManager.recreateSession).toHaveBeenCalledWith(slotId, newConfig);
     });
 
-    it('should return error and preserve old session on switch failure', async () => {
-      (createFigmaAgent as any).mockRejectedValueOnce(new Error('Invalid credentials'));
+    it('should return error on switch failure', async () => {
+      slotManager.recreateSession.mockRejectedValueOnce(new Error('Invalid credentials'));
 
-      const result = await invokeHandler('auth:switch-model', {
+      const result = await invokeHandler('auth:switch-model', slotId, {
         provider: 'openai',
         modelId: 'gpt-5.4',
       });
 
       expect(result).toEqual({ success: false, error: 'Invalid credentials' });
-
-      // Old session should still work
-      mockSession.emitEvent({
-        type: 'message_update',
-        assistantMessageEvent: { type: 'text_delta', delta: 'still working' },
-      });
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:text-delta', 'still working');
     });
   });
 
@@ -449,25 +458,25 @@ describe('setupIpcHandlers', () => {
       // Edge case: compaction events not covered by existing tests
       mockSession.emitEvent({ type: 'auto_compaction_start' });
 
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:compaction', true);
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:compaction', slotId, true);
     });
 
     it('should forward auto_compaction_end to renderer', () => {
       mockSession.emitEvent({ type: 'auto_compaction_end' });
 
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:compaction', false);
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:compaction', slotId, false);
     });
 
     it('should forward auto_retry_start to renderer', () => {
       mockSession.emitEvent({ type: 'auto_retry_start' });
 
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:retry', true);
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:retry', slotId, true);
     });
 
     it('should forward auto_retry_end to renderer', () => {
       mockSession.emitEvent({ type: 'auto_retry_end' });
 
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:retry', false);
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:retry', slotId, false);
     });
 
     it('should not crash on screenshot tool result without image content', () => {
@@ -485,6 +494,7 @@ describe('setupIpcHandlers', () => {
       // Should send tool-end but NOT agent:screenshot
       expect(mockWindow.webContents.send).toHaveBeenCalledWith(
         'agent:tool-end',
+        slotId,
         'figma_screenshot',
         'call-no-img',
         true,
@@ -525,8 +535,8 @@ describe('setupIpcHandlers', () => {
       // Characterization: mock always resolves — real Pi SDK may throw
       // if abort() is called on a non-streaming session. This test verifies
       // the handler does not guard against double-abort itself.
-      await invokeHandler('agent:abort');
-      await invokeHandler('agent:abort');
+      await invokeHandler('agent:abort', slotId);
+      await invokeHandler('agent:abort', slotId);
 
       expect(mockSession._abortFn).toHaveBeenCalledTimes(2);
     });
@@ -717,6 +727,131 @@ describe('setupIpcHandlers', () => {
 
       expect(saveDiagnosticsConfig).toHaveBeenCalledWith(expect.objectContaining({ sendDiagnostics: true }));
       expect(result).toEqual({ success: true, requiresRestart: true });
+    });
+  });
+
+  // ── Queue management ──────────────────────────────────────────
+
+  describe('queue management', () => {
+    it('queue:remove removes a prompt and emits queue:updated', async () => {
+      const queued = slot.promptQueue.enqueue('test prompt');
+
+      const result = await invokeHandler('queue:remove', slotId, queued.id);
+
+      expect(result).toBe(true);
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('queue:updated', slotId, expect.any(Array));
+      expect(slotManager.persistState).toHaveBeenCalled();
+    });
+
+    it('queue:remove returns false for unknown promptId', async () => {
+      const result = await invokeHandler('queue:remove', slotId, 'non-existent-id');
+
+      expect(result).toBe(false);
+    });
+
+    it('queue:edit edits a prompt and emits queue:updated', async () => {
+      const queued = slot.promptQueue.enqueue('original text');
+
+      const result = await invokeHandler('queue:edit', slotId, queued.id, 'new text');
+
+      expect(result).toBe(true);
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('queue:updated', slotId, expect.any(Array));
+      expect(slotManager.persistState).toHaveBeenCalled();
+    });
+
+    it('queue:clear clears all prompts and emits queue:updated with empty array', async () => {
+      slot.promptQueue.enqueue('first prompt');
+      slot.promptQueue.enqueue('second prompt');
+
+      const result = await invokeHandler('queue:clear', slotId);
+
+      expect(result).toBe(2);
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('queue:updated', slotId, []);
+    });
+
+    it('queue:list returns queued prompts', async () => {
+      slot.promptQueue.enqueue('prompt one');
+      slot.promptQueue.enqueue('prompt two');
+
+      const result = await invokeHandler('queue:list', slotId);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].text).toBe('prompt one');
+      expect(result[1].text).toBe('prompt two');
+    });
+
+    it('tab:create creates a tab and returns slot info', async () => {
+      slotManager.getSlotInfo = vi.fn().mockReturnValue({
+        id: slotId,
+        fileKey: 'file-key',
+        fileName: 'File.fig',
+        isStreaming: false,
+        isConnected: true,
+        modelConfig: slot.modelConfig,
+        queueLength: 0,
+      });
+
+      const result = await invokeHandler('tab:create', 'file-key', 'File.fig');
+
+      expect(result.success).toBe(true);
+      expect(result.slot).toBeDefined();
+    });
+  });
+
+  // ── Agent_end queue drain ─────────────────────────────────────
+
+  describe('agent_end queue drain', () => {
+    /** Gets the subscriber callback registered by subscribeSlot() */
+    function getSubscriberCb(): (event: any) => void {
+      const subscribers = (slot.session as any).subscribers as Array<(event: any) => void>;
+      return subscribers[subscribers.length - 1];
+    }
+
+    it('agent_end with empty queue sends agent:end to renderer', () => {
+      slot.isStreaming = true; // agent_end only fires while streaming
+      const subscriberCb = getSubscriberCb();
+
+      subscriberCb({ type: 'agent_end' });
+
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
+      expect(slot.isStreaming).toBe(false);
+    });
+
+    it('agent_end with queued prompt auto-sends next prompt', async () => {
+      slot.promptQueue.enqueue('next prompt');
+      slot.isStreaming = true;
+      const subscriberCb = getSubscriberCb();
+
+      subscriberCb({ type: 'agent_end' });
+
+      // Flush the microtask queue so the .catch handler in handleAgentEnd settles
+      await Promise.resolve();
+
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:queued-prompt-start', slotId, 'next prompt');
+      expect(mockSession._promptFn).toHaveBeenCalledWith('next prompt');
+      const endCalls = (mockWindow.webContents.send as any).mock.calls.filter((c: any[]) => c[0] === 'agent:end');
+      expect(endCalls).toHaveLength(0);
+    });
+
+    it('agent_end drain sends queue:updated event', async () => {
+      slot.promptQueue.enqueue('next prompt');
+      slot.isStreaming = true;
+      const subscriberCb = getSubscriberCb();
+
+      subscriberCb({ type: 'agent_end' });
+
+      await Promise.resolve();
+
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('queue:updated', slotId, expect.any(Array));
+    });
+
+    it('agent:prompt while streaming enqueues prompt', async () => {
+      slot.isStreaming = true;
+
+      await invokeHandler('agent:prompt', slotId, 'queued text');
+
+      expect(slot.promptQueue.length).toBe(1);
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('queue:updated', slotId, expect.any(Array));
     });
   });
 });

@@ -72,9 +72,10 @@ vi.mock('../src/main/auto-updater.js', () => ({
 // ── Imports (after mocks) ─────────────────────────────────────────
 
 import { app, ipcMain } from 'electron';
-import { type IpcController, setupIpcHandlers } from '../src/main/ipc-handlers.js';
+import { setupIpcHandlers } from '../src/main/ipc-handlers.js';
 import { SessionStore } from '../src/main/session-store.js';
 import { createMockSession } from './helpers/mock-session.js';
+import { createMockSlotManager } from './helpers/mock-slot-manager.js';
 import { createMockWindow } from './helpers/mock-window.js';
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -105,7 +106,9 @@ describe('Session persistence IPC', () => {
   let mockWindow: MockWindow;
   let mockInfra: any;
   let sessionStore: SessionStore;
-  let controller: IpcController;
+  let slotId: string;
+  let slot: any;
+  let slotManager: any;
   let tmpDir: string;
 
   beforeEach(() => {
@@ -137,144 +140,70 @@ describe('Session persistence IPC', () => {
     };
 
     sessionStore = new SessionStore(join(tmpDir, 'file-sessions.json'), 100);
-    controller = setupIpcHandlers({
-      initialSession: mockSession as any,
+    const mock = createMockSlotManager(mockSession, { fileKey: 'file-abc', fileName: 'MyDesign.fig' });
+    slotId = mock.slotId;
+    slot = mock.slot;
+    slotManager = mock.slotManager;
+
+    const ipcController = setupIpcHandlers({
+      slotManager: slotManager as any,
       mainWindow: mockWindow as any,
       infra: mockInfra,
       sessionStore,
     });
+    ipcController.subscribeSlot(slot as any);
   });
 
   afterEach(() => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  // ── switchToFile ──────────────────────────────────────
-
-  describe('switchToFile', () => {
-    it('should create a new session for an unknown file', async () => {
-      mockSession._sessionFile = '/sessions/new-session.jsonl';
-
-      await controller.switchToFile('file-abc', 'MyDesign.fig');
-
-      expect(mockSession._newSessionFn).toHaveBeenCalled();
-      // Should persist the mapping
-      const entry = sessionStore.get('file-abc');
-      expect(entry).not.toBeNull();
-      expect(entry!.sessionPath).toBe('/sessions/new-session.jsonl');
-      expect(entry!.fileName).toBe('MyDesign.fig');
-    });
-
-    it('should send session:restored with [] for a new file', async () => {
-      mockSession._sessionFile = '/sessions/s.jsonl';
-
-      await controller.switchToFile('file-new', 'New.fig');
-
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('session:restored', []);
-    });
-
-    it('should restore an existing session when mapping exists and file is on disk', async () => {
-      // Create a real session file so existsSync returns true
-      const sessionPath = join(tmpDir, 'existing-session.jsonl');
-      writeFileSync(sessionPath, '{"type":"session"}\n', 'utf-8');
-      sessionStore.set('file-abc', sessionPath, 'MyDesign.fig');
-
-      // Setup mock messages for the restored session
-      mockSession._messages = [
-        { role: 'user', content: [{ type: 'text', text: 'Hello' }] },
-        { role: 'assistant', content: [{ type: 'text', text: 'Hi there!' }] },
-      ];
-
-      await controller.switchToFile('file-abc', 'MyDesign.fig');
-
-      expect(mockSession._switchSessionFn).toHaveBeenCalledWith(sessionPath);
-      // Should send restored messages to renderer
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('session:restored', [
-        { role: 'user', text: 'Hello' },
-        { role: 'assistant', text: 'Hi there!' },
-      ]);
-    });
-
-    it('should fall back to new session when switchSession throws', async () => {
-      const sessionPath = join(tmpDir, 'corrupt-session.jsonl');
-      writeFileSync(sessionPath, 'corrupt', 'utf-8');
-      sessionStore.set('file-abc', sessionPath, 'MyDesign.fig');
-
-      mockSession._switchSessionFn.mockRejectedValueOnce(new Error('corrupt session'));
-      mockSession._sessionFile = '/sessions/fresh.jsonl';
-
-      await controller.switchToFile('file-abc', 'MyDesign.fig');
-
-      // Should send restore-failed then create new session
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('session:restore-failed', {
-        fileKey: 'file-abc',
-        fileName: 'MyDesign.fig',
-      });
-      expect(mockSession._newSessionFn).toHaveBeenCalled();
-    });
-
-    it('should create new session when mapped file no longer exists', async () => {
-      sessionStore.set('file-abc', '/nonexistent/session.jsonl', 'MyDesign.fig');
-      mockSession._sessionFile = '/sessions/new.jsonl';
-
-      await controller.switchToFile('file-abc', 'MyDesign.fig');
-
-      // Should not attempt switchSession, go straight to newSession
-      expect(mockSession._switchSessionFn).not.toHaveBeenCalled();
-      expect(mockSession._newSessionFn).toHaveBeenCalled();
-    });
-
-    it('should serialize concurrent switchToFile calls', async () => {
-      const order: string[] = [];
-      mockSession._sessionFile = '/sessions/s.jsonl';
-
-      mockSession._newSessionFn.mockImplementation(async () => {
-        order.push('start');
-        await new Promise((r) => setTimeout(r, 20));
-        order.push('end');
-        return true;
-      });
-
-      // Fire two concurrent switches
-      const p1 = controller.switchToFile('file-a', 'A.fig');
-      const p2 = controller.switchToFile('file-b', 'B.fig');
-      await Promise.all([p1, p2]);
-
-      // Should execute sequentially: start-end-start-end, not start-start-end-end
-      expect(order).toEqual(['start', 'end', 'start', 'end']);
-    });
-  });
-
   // ── session:reset ─────────────────────────────────────
 
   describe('session:reset', () => {
-    it('should create a new session and update mapping', async () => {
+    it('should create a new session and return success', async () => {
       mockSession._sessionFile = '/sessions/reset.jsonl';
 
-      // First connect to a file so currentFileKey is set
-      await controller.switchToFile('file-abc', 'MyDesign.fig');
-      mockSession._newSessionFn.mockClear();
-      mockSession._sessionFile = '/sessions/after-reset.jsonl';
-
-      const result = await invokeHandler('session:reset');
+      const result = await invokeHandler('session:reset', slotId);
 
       expect(result.success).toBe(true);
       expect(mockSession._newSessionFn).toHaveBeenCalled();
-      // Mapping should point to new session
-      const entry = sessionStore.get('file-abc');
-      expect(entry).not.toBeNull();
-      expect(entry!.sessionPath).toBe('/sessions/after-reset.jsonl');
     });
 
     it('should abort streaming before reset', async () => {
       mockSession._sessionFile = '/sessions/s.jsonl';
-      await controller.switchToFile('file-abc', 'A.fig');
+      // Simulate streaming state
+      slot.isStreaming = true;
 
-      // Simulate streaming state by triggering a prompt
-      // The prompt handler sets isStreaming = true internally
-      // We'll just verify abort is called when appropriate
-      const result = await invokeHandler('session:reset');
+      const result = await invokeHandler('session:reset', slotId);
+
       expect(result.success).toBe(true);
+      expect(mockSession._abortFn).toHaveBeenCalled();
+      expect(mockSession._newSessionFn).toHaveBeenCalled();
+    });
+
+    it('should not abort when not streaming', async () => {
+      mockSession._sessionFile = '/sessions/s.jsonl';
+      slot.isStreaming = false;
+
+      const result = await invokeHandler('session:reset', slotId);
+
+      expect(result.success).toBe(true);
+      expect(mockSession._abortFn).not.toHaveBeenCalled();
+      expect(mockSession._newSessionFn).toHaveBeenCalled();
+    });
+
+    it('should return error when session.newSession throws', async () => {
+      mockSession._newSessionFn.mockRejectedValueOnce(new Error('disk full'));
+
+      const result = await invokeHandler('session:reset', slotId);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('disk full');
+    });
+
+    it('should return error when slot not found', async () => {
+      await expect(invokeHandler('session:reset', 'nonexistent-slot-id')).rejects.toThrow('Slot not found');
     });
   });
 
@@ -287,7 +216,7 @@ describe('Session persistence IPC', () => {
         { role: 'assistant', content: [{ type: 'text', text: 'Done!' }] },
       ];
 
-      const turns = await invokeHandler('session:get-messages');
+      const turns = await invokeHandler('session:get-messages', slotId);
 
       expect(turns).toHaveLength(2);
       expect(turns[0]).toEqual({ role: 'user', text: 'Draw a circle' });
@@ -296,25 +225,98 @@ describe('Session persistence IPC', () => {
 
     it('should return empty array when no messages', async () => {
       mockSession._messages = [];
-      const turns = await invokeHandler('session:get-messages');
+      const turns = await invokeHandler('session:get-messages', slotId);
       expect(turns).toEqual([]);
+    });
+
+    it('should return error when slot not found', async () => {
+      await expect(invokeHandler('session:get-messages', 'nonexistent-slot-id')).rejects.toThrow('Slot not found');
     });
   });
 
   // ── persistSessionMapping via agent:prompt ────────────
 
   describe('mapping persistence after prompt', () => {
-    it('should persist mapping after prompt completes', async () => {
+    it('should call session.prompt with text', async () => {
       mockSession._sessionFile = '/sessions/prompt-session.jsonl';
-      await controller.switchToFile('file-abc', 'MyDesign.fig');
 
-      // Change session file to simulate Pi SDK creating a new file on first prompt
-      mockSession._sessionFile = '/sessions/new-after-prompt.jsonl';
+      await invokeHandler('agent:prompt', slotId, 'Hello');
 
-      await invokeHandler('agent:prompt', 'Hello');
+      expect(mockSession._promptFn).toHaveBeenCalledWith('Hello');
+    });
 
+    it('should persist session mapping via sessionStore after prompt completes', async () => {
+      mockSession._sessionFile = '/sessions/prompt-session.jsonl';
+
+      await invokeHandler('agent:prompt', slotId, 'Hello');
+
+      // sessionStore.set is called via persistSlotSession inside ipc-handlers
+      // The slot has fileKey='file-abc', fileName='MyDesign.fig'
       const entry = sessionStore.get('file-abc');
-      expect(entry!.sessionPath).toBe('/sessions/new-after-prompt.jsonl');
+      expect(entry).not.toBeNull();
+      expect(entry!.sessionPath).toBe('/sessions/prompt-session.jsonl');
+      expect(entry!.fileName).toBe('MyDesign.fig');
+    });
+  });
+
+  // ── SessionStore integration ───────────────────────────
+
+  describe('SessionStore integration', () => {
+    it('should store and retrieve session entries', () => {
+      const sessionPath = join(tmpDir, 'test-session.jsonl');
+      writeFileSync(sessionPath, '{"type":"session"}\n', 'utf-8');
+
+      sessionStore.set('file-xyz', sessionPath, 'Design.fig');
+      const entry = sessionStore.get('file-xyz');
+
+      expect(entry).not.toBeNull();
+      expect(entry!.sessionPath).toBe(sessionPath);
+      expect(entry!.fileName).toBe('Design.fig');
+    });
+
+    it('should return null for unknown file keys', () => {
+      const entry = sessionStore.get('nonexistent-key');
+      expect(entry).toBeNull();
+    });
+
+    it('should persist state via slotManager on session reset', async () => {
+      const result = await invokeHandler('session:reset', slotId);
+
+      expect(result.success).toBe(true);
+      expect(slotManager.persistState).toHaveBeenCalled();
+    });
+  });
+
+  // ── Tab management ─────────────────────────────────────
+
+  describe('tab handlers', () => {
+    it('tab:list should return slot list from slotManager', async () => {
+      const result = await invokeHandler('tab:list');
+
+      expect(slotManager.listSlots).toHaveBeenCalled();
+      expect(result).toEqual([expect.objectContaining({ id: slotId, fileKey: 'file-abc', fileName: 'MyDesign.fig' })]);
+    });
+
+    it('tab:activate should set active slot', async () => {
+      const result = await invokeHandler('tab:activate', slotId);
+
+      expect(result).toEqual({ success: true });
+      expect(slotManager.setActiveSlot).toHaveBeenCalledWith(slotId);
+    });
+
+    it('tab:close should remove slot', async () => {
+      const result = await invokeHandler('tab:close', slotId);
+
+      expect(result).toEqual({ success: true });
+      expect(slotManager.removeSlot).toHaveBeenCalledWith(slotId);
+    });
+
+    it('tab:close should return error when remove fails', async () => {
+      slotManager.removeSlot.mockRejectedValueOnce(new Error('slot busy'));
+
+      const result = await invokeHandler('tab:close', slotId);
+
+      expect(result).toEqual({ success: false, error: 'slot busy' });
     });
   });
 });

@@ -216,10 +216,13 @@ describe('discovery tools', () => {
 
       expect(deps.connector.getVariables).toHaveBeenCalled();
       expect(deps.connector.getLocalComponents).toHaveBeenCalled();
-      expect(deps.designSystemCache.set).toHaveBeenCalledWith({
-        variables: { colors: ['red'] },
-        components: [{ name: 'Btn' }],
-      });
+      expect(deps.designSystemCache.set).toHaveBeenCalledWith(
+        {
+          variables: { colors: ['red'] },
+          components: [{ name: 'Btn' }],
+        },
+        undefined,
+      );
     });
 
     it('fetches from connector when forceRefresh is true even with cache', async () => {
@@ -245,8 +248,8 @@ describe('discovery tools', () => {
       const tool = findTool('figma_design_system');
       const result = await tool.execute('c1', {}, undefined, undefined, undefined);
 
-      // Should have called get with shouldCompact=true
-      expect(deps.designSystemCache.get).toHaveBeenCalledWith(true);
+      // Should have called get with shouldCompact=true and fileKey=undefined
+      expect(deps.designSystemCache.get).toHaveBeenCalledWith(true, undefined);
       const parsed = JSON.parse(result.content[0].text);
       expect(parsed).toEqual({ summary: 'compacted' });
     });
@@ -259,10 +262,13 @@ describe('discovery tools', () => {
       const tool = findTool('figma_design_system');
       await tool.execute('c1', {}, undefined, undefined, undefined);
 
-      expect(deps.designSystemCache.set).toHaveBeenCalledWith({
-        variables: { tokens: [] },
-        components: [{ name: 'Card' }],
-      });
+      expect(deps.designSystemCache.set).toHaveBeenCalledWith(
+        {
+          variables: { tokens: [] },
+          components: [{ name: 'Card' }],
+        },
+        undefined,
+      );
     });
   });
 });

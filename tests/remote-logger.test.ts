@@ -313,3 +313,96 @@ describe('UsageTracker', () => {
     });
   });
 });
+
+describe('UsageTracker multi-tab events', () => {
+  let tracker: UsageTracker;
+  let mockLogger: any;
+
+  beforeEach(() => {
+    mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), fatal: vi.fn() };
+    const config: DiagnosticsConfig = { sendDiagnostics: true, anonymousId: 'test-id' };
+    tracker = new UsageTracker(mockLogger, config, {
+      getModelConfig: () => ({ provider: 'anthropic', modelId: 'claude-sonnet-4-6' }),
+      getCompressionProfile: () => 'balanced',
+      getDiagnosticsEnabled: () => true,
+      getImageGenInfo: () => ({ hasKey: true, model: 'gemini' }),
+    });
+  });
+
+  it('trackSlotCreated emits event with fileKeyHash and automatic flag', () => {
+    tracker.trackSlotCreated('myfilekey123', true);
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:slot_created',
+        fileKeyHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+        automatic: true,
+      }),
+    );
+  });
+
+  it('trackSlotRemoved emits event with fileKeyHash', () => {
+    tracker.trackSlotRemoved('myfilekey123');
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:slot_removed',
+        fileKeyHash: expect.stringMatching(/^[0-9a-f]{16}$/),
+      }),
+    );
+  });
+
+  it('trackPromptEnqueued emits event with queueLength', () => {
+    tracker.trackPromptEnqueued(3);
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:prompt_enqueued',
+        queueLength: 3,
+      }),
+    );
+  });
+
+  it('trackPromptDequeued emits event with queueLength', () => {
+    tracker.trackPromptDequeued(2);
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:prompt_dequeued',
+        queueLength: 2,
+      }),
+    );
+  });
+
+  it('trackPromptQueueEdited emits event', () => {
+    tracker.trackPromptQueueEdited();
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:prompt_queue_edited',
+      }),
+    );
+  });
+
+  it('trackPromptQueueCancelled emits event', () => {
+    tracker.trackPromptQueueCancelled();
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:prompt_queue_cancelled',
+      }),
+    );
+  });
+
+  it('trackAppStateRestored emits event with slotsCount and totalQueuedPrompts', () => {
+    tracker.trackAppStateRestored(4, 7);
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:app_state_restored',
+        slotsCount: 4,
+        totalQueuedPrompts: 7,
+      }),
+    );
+  });
+});

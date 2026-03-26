@@ -47,8 +47,17 @@ vi.mock('../src/main/prompt-suggester.js', () => ({
   },
 }));
 
+// Mock auto-updater
+vi.mock('../src/main/auto-updater.js', () => ({
+  checkForUpdates: vi.fn(),
+  downloadUpdate: vi.fn(),
+  getAppVersion: vi.fn().mockReturnValue('1.0.0'),
+  quitAndInstall: vi.fn(),
+}));
+
 import { ipcMain } from 'electron';
 import { setupIpcHandlers } from '../src/main/ipc-handlers.js';
+import { createMockSlotManager } from './helpers/mock-slot-manager.js';
 import { createMockWindow } from './helpers/mock-window.js';
 import {
   agentEndEvent,
@@ -76,6 +85,7 @@ describe('Agent pipeline with ScriptedSession', () => {
   let mockWindow: ReturnType<typeof createMockWindow>;
   let session: ScriptedSession;
   let mockInfra: any;
+  let slotId: string;
 
   function setup(script: any[]) {
     vi.clearAllMocks();
@@ -99,18 +109,25 @@ describe('Agent pipeline with ScriptedSession', () => {
       designSystemCache: { invalidate: vi.fn() },
       metricsCollector: { finalize: vi.fn() },
     };
-    setupIpcHandlers({ initialSession: session as any, mainWindow: mockWindow as any, infra: mockInfra });
+    const { slotManager, slot, slotId: id } = createMockSlotManager(session);
+    slotId = id;
+    const ipcController = setupIpcHandlers({
+      slotManager: slotManager as any,
+      mainWindow: mockWindow as any,
+      infra: mockInfra,
+    });
+    ipcController.subscribeSlot(slot as any);
   }
 
   // ── Text streaming ──────────────────────────
 
   it('streams text deltas to renderer', async () => {
     setup(fullTurnScript({ text: 'Hello from the agent!' }));
-    await invokeHandler('agent:prompt', 'test');
+    await invokeHandler('agent:prompt', slotId, 'test');
 
     const textCalls = mockWindow.webContents.send.mock.calls.filter((c: any[]) => c[0] === 'agent:text-delta');
     expect(textCalls.length).toBeGreaterThan(0);
-    const fullText = textCalls.map((c: any[]) => c[1]).join('');
+    const fullText = textCalls.map((c: any[]) => c[2]).join('');
     expect(fullText).toBe('Hello from the agent!');
   });
 
@@ -119,86 +136,86 @@ describe('Agent pipeline with ScriptedSession', () => {
       { type: 'message_update', data: { assistantMessageEvent: { type: 'thinking_delta', delta: 'Thinking...' } } },
       ...agentEndEvent(),
     ]);
-    await invokeHandler('agent:prompt', 'test');
+    await invokeHandler('agent:prompt', slotId, 'test');
 
     const thinkingCalls = mockWindow.webContents.send.mock.calls.filter((c: any[]) => c[0] === 'agent:thinking');
     expect(thinkingCalls).toHaveLength(1);
-    expect(thinkingCalls[0][1]).toBe('Thinking...');
+    expect(thinkingCalls[0][2]).toBe('Thinking...');
   });
 
   // ── Tool card lifecycle ─────────────────────
 
   it('forwards tool start and end events', async () => {
     setup([...toolCallEvents('figma_resize', 'tc-1', { success: true }), ...agentEndEvent()]);
-    await invokeHandler('agent:prompt', 'resize it');
+    await invokeHandler('agent:prompt', slotId, 'resize it');
 
     const starts = mockWindow.webContents.send.mock.calls.filter((c: any[]) => c[0] === 'agent:tool-start');
     const ends = mockWindow.webContents.send.mock.calls.filter((c: any[]) => c[0] === 'agent:tool-end');
     expect(starts).toHaveLength(1);
-    expect(starts[0][1]).toBe('figma_resize');
-    expect(starts[0][2]).toBe('tc-1');
+    expect(starts[0][2]).toBe('figma_resize');
+    expect(starts[0][3]).toBe('tc-1');
     expect(ends).toHaveLength(1);
-    expect(ends[0][1]).toBe('figma_resize');
-    expect(ends[0][3]).toBe(true); // success
+    expect(ends[0][2]).toBe('figma_resize');
+    expect(ends[0][4]).toBe(true); // success
   });
 
   it('forwards failed tool with success=false', async () => {
     setup([...toolCallEvents('figma_delete', 'tc-2', { success: false }), ...agentEndEvent()]);
-    await invokeHandler('agent:prompt', 'delete it');
+    await invokeHandler('agent:prompt', slotId, 'delete it');
 
     const ends = mockWindow.webContents.send.mock.calls.filter((c: any[]) => c[0] === 'agent:tool-end');
-    expect(ends[0][3]).toBe(false); // isError → !isError = false wait, isError is true so success is false
+    expect(ends[0][4]).toBe(false); // isError → !isError = false wait, isError is true so success is false
   });
 
   // ── Screenshot forwarding ──────────────────
 
   it('forwards screenshot from figma_screenshot tool', async () => {
     setup([...screenshotToolEvents('sc-1', 'SCREENSHOT_BASE64'), ...agentEndEvent()]);
-    await invokeHandler('agent:prompt', 'take screenshot');
+    await invokeHandler('agent:prompt', slotId, 'take screenshot');
 
     const screenshotCalls = mockWindow.webContents.send.mock.calls.filter((c: any[]) => c[0] === 'agent:screenshot');
     expect(screenshotCalls).toHaveLength(1);
-    expect(screenshotCalls[0][1]).toBe('SCREENSHOT_BASE64');
+    expect(screenshotCalls[0][2]).toBe('SCREENSHOT_BASE64');
   });
 
   // ── Usage stats ─────────────────────────────
 
   it('forwards usage stats from message_end', async () => {
     setup([...usageEvent(1000, 500), ...agentEndEvent()]);
-    await invokeHandler('agent:prompt', 'test');
+    await invokeHandler('agent:prompt', slotId, 'test');
 
     const usageCalls = mockWindow.webContents.send.mock.calls.filter((c: any[]) => c[0] === 'agent:usage');
     expect(usageCalls).toHaveLength(1);
-    expect(usageCalls[0][1]).toEqual({ input: 1000, output: 500, total: 1500 });
+    expect(usageCalls[0][2]).toEqual({ input: 1000, output: 500, total: 1500 });
   });
 
   // ── Compaction and retry indicators ─────────
 
   it('forwards compaction start/end', async () => {
     setup([...compactionEvents(), ...agentEndEvent()]);
-    await invokeHandler('agent:prompt', 'test');
+    await invokeHandler('agent:prompt', slotId, 'test');
 
     const compactionCalls = mockWindow.webContents.send.mock.calls.filter((c: any[]) => c[0] === 'agent:compaction');
     expect(compactionCalls).toHaveLength(2);
-    expect(compactionCalls[0][1]).toBe(true);
-    expect(compactionCalls[1][1]).toBe(false);
+    expect(compactionCalls[0][2]).toBe(true);
+    expect(compactionCalls[1][2]).toBe(false);
   });
 
   it('forwards retry start/end', async () => {
     setup([...retryEvents(), ...agentEndEvent()]);
-    await invokeHandler('agent:prompt', 'test');
+    await invokeHandler('agent:prompt', slotId, 'test');
 
     const retryCalls = mockWindow.webContents.send.mock.calls.filter((c: any[]) => c[0] === 'agent:retry');
     expect(retryCalls).toHaveLength(2);
-    expect(retryCalls[0][1]).toBe(true);
-    expect(retryCalls[1][1]).toBe(false);
+    expect(retryCalls[0][2]).toBe(true);
+    expect(retryCalls[1][2]).toBe(false);
   });
 
   // ── Agent end ───────────────────────────────
 
   it('sends agent:end on agent_end event', async () => {
     setup(fullTurnScript({ text: 'Done' }));
-    await invokeHandler('agent:prompt', 'test');
+    await invokeHandler('agent:prompt', slotId, 'test');
 
     const endCalls = mockWindow.webContents.send.mock.calls.filter((c: any[]) => c[0] === 'agent:end');
     expect(endCalls.length).toBeGreaterThanOrEqual(1);
@@ -216,7 +233,7 @@ describe('Agent pipeline with ScriptedSession', () => {
         usage: { input: 2000, output: 800 },
       }),
     );
-    await invokeHandler('agent:prompt', 'create a rectangle');
+    await invokeHandler('agent:prompt', slotId, 'create a rectangle');
 
     const channels = mockWindow.webContents.send.mock.calls.map((c: any[]) => c[0]);
     expect(channels).toContain('agent:thinking');
@@ -235,10 +252,10 @@ describe('Agent pipeline with ScriptedSession', () => {
     const script = [...textDeltaEvents('Start'), { type: 'agent_end', delayMs: 200 }];
     setup(script);
 
-    const promptPromise = invokeHandler('agent:prompt', 'test');
+    const promptPromise = invokeHandler('agent:prompt', slotId, 'test');
     // Give first event time to emit
     await new Promise((r) => setTimeout(r, 10));
-    await invokeHandler('agent:abort');
+    await invokeHandler('agent:abort', slotId);
     await promptPromise;
 
     expect(session.abortCount).toBe(1);
@@ -251,7 +268,7 @@ describe('Agent pipeline with ScriptedSession', () => {
     mockWindow.destroy(); // destroy webContents before streaming
 
     // Should not throw
-    await invokeHandler('agent:prompt', 'test');
+    await invokeHandler('agent:prompt', slotId, 'test');
 
     // safeSend should have silently skipped all sends
     expect(mockWindow.webContents.send).not.toHaveBeenCalled();
@@ -265,7 +282,7 @@ describe('Agent pipeline with ScriptedSession', () => {
     setup(script);
 
     // First prompt
-    await invokeHandler('agent:prompt', 'first');
+    await invokeHandler('agent:prompt', slotId, 'first');
     // Session records the prompt
     expect(session.promptHistory).toContain('first');
   });

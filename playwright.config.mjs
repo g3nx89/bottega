@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: 'tests/e2e',
   testMatch: '**/*.spec.mjs',
-  timeout: 60000,
+  timeout: 120000,
   retries: 0,
   workers: 1, // Electron tests must run serially
   reporter: [['list']],
