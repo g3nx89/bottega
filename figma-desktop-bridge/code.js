@@ -1,8 +1,7 @@
-// Figma Desktop Bridge - MCP Plugin
-// Bridges Figma API to MCP clients via plugin UI window
+// Figma Desktop Bridge - Bottega Plugin
+// Bridges Figma plugin API to Bottega via WebSocket relay in the plugin UI window
 // Supports: Variables, Components, Styles, and more
-// Uses postMessage to communicate with UI, bypassing worker sandbox limitations
-// Puppeteer can access UI iframe's window context to retrieve data
+// Uses postMessage to communicate with UI, which relays commands over WebSocket
 
 console.log('🌉 [Desktop Bridge] Plugin loaded and ready');
 
@@ -2233,7 +2232,7 @@ figma.ui.onmessage = async (msg) => {
   }
 
   // ============================================================================
-  // RESIZE_UI - Dynamically resize the plugin window (e.g., Cloud Mode toggle)
+  // RESIZE_UI - Dynamically resize the plugin window
   // ============================================================================
   else if (msg.type === 'RESIZE_UI') {
     figma.ui.resize(msg.width || 120, msg.height || 36);

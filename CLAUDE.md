@@ -39,7 +39,7 @@ Figma Core (src/figma/)           — Embedded from figma-console-mcp (MIT), clo
 ├── figma-connector.ts            — IFigmaConnector interface
 ├── figma-api.ts                  — Figma REST API client
 ├── types.ts                      — Shared types + TreeNode
-├── config.ts, logger.ts, port-discovery.ts
+├── logger.ts, port-discovery.ts
 
 Desktop Bridge Plugin (figma-desktop-bridge/)   — Fork of figma-console-mcp plugin
 ├── code.js               — Plugin main thread (upstream + CREATE_FROM_JSX/ICON/BIND_VARIABLE)

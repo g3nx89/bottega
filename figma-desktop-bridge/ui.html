@@ -113,7 +113,7 @@
 
   <script>
     // ============================================================================
-    // GLOBAL STATE - Data storage for Puppeteer/MCP access
+    // GLOBAL STATE - Data storage accessible by the WebSocket bridge
     // ============================================================================
     window.__figmaVariablesData = null;
     window.__figmaVariablesReady = false;
@@ -790,7 +790,6 @@
       }
 
       /**
-       * Broadcast a message to ALL active WebSocket connections.
        * Forward a message to the active Bottega server connection.
        */
       function broadcastToAll(message) {
