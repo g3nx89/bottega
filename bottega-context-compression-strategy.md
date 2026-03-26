@@ -478,7 +478,7 @@ Phase 3 (~6h)   ████████          Session continuity
 │    ├── EXECUTE_CODE, SCREENSHOT, GET_SELECTION, ...                  │
 │    └── CREATE_FROM_JSX, CREATE_ICON, BIND_VARIABLE                  │
 └────────┬────────────────────────────────────────────────────────────┘
-         │ WebSocket ws://localhost:9223
+         │ WebSocket ws://localhost:9280
 ┌────────▼────────────────────────────────────────────────────────────┐
 │                    ELECTRON MAIN PROCESS                             │
 │                                                                      │
