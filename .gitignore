@@ -15,3 +15,9 @@ dist/
 
 # Test artifacts
 tests/*.png
+test-results/
+
+# Local/generated files
+firebase-debug.log
+skills-lock.json
+*.cer
