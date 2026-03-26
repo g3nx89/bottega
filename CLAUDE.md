@@ -14,14 +14,29 @@ Electron Main Process (src/main/)
 ├── agent.ts              — Pi SDK AgentSession with custom system prompt, no coding tools
 ├── figma-core.ts         — Wires FigmaWebSocketServer + WebSocketConnector + FigmaAPI
 ├── operation-queue.ts    — Promise-based mutex for serializing Figma mutations
+├── operation-queue-manager.ts — Multi-queue manager (per-file queue isolation)
 ├── ipc-handlers.ts       — Bridges agent events → renderer via IPC
 ├── preload.ts            — contextBridge exposing window.api (MUST be built as CJS)
 ├── system-prompt.ts      — LLM system prompt with tool reference and design patterns
 ├── jsx-parser.ts         — JSX string → TreeNode via esbuild transform + vm sandbox
 ├── icon-loader.ts        — Iconify API fetch with in-memory cache
 ├── prompt-suggester.ts   — AI-powered follow-up prompt suggestions (IPC → clickable chips)
+├── prompt-queue.ts       — Queues user prompts when agent is busy
 ├── safe-send.ts          — IPC crash guard (no-op if renderer destroyed)
-├── compression/          — Context compression: profiles, metrics, design-system cache, mutation compressor
+├── scoped-connector.ts   — Per-session scoped Figma connector
+├── session-store.ts      — Multi-session persistence store
+├── slot-manager.ts       — Agent slot allocation and lifecycle
+├── app-state-persistence.ts — Save/restore app state across restarts
+├── auto-updater.ts       — Electron auto-update via electron-updater
+├── startup-guards.ts     — Single-instance lock, port availability checks
+├── diagnostics.ts        — Runtime diagnostic reporting
+├── usage-tracker.ts      — Token/API usage tracking
+├── remote-logger.ts      — Axiom remote log transport
+├── vitals.ts             — App health metrics
+├── messages.ts           — Agent message type definitions
+├── renderable-messages.ts — Message → renderer format conversion
+├── fs-utils.ts           — File system helpers
+├── compression/          — Context compression (config, extension-factory, design-system-cache, mutation-compressor, metrics, color-utils, execute-enricher, project-tree)
 ├── image-gen/            — Gemini-based image generation (config, generator, prompt builders)
 └── tools/                — 34 ToolDefinition[] for Pi SDK (TypeBox schemas)
     ├── index.ts          — Aggregator, ToolDeps interface, textResult helper, abort-check wrapper
@@ -60,9 +75,13 @@ npm run build                   # esbuild: main (ESM) + preload (CJS) → dist/
 npm start                       # build + run the app
 npx electron dist/main.js       # run without rebuilding
 npm test                        # vitest run
+npm run test:e2e                # Playwright e2e tests (builds first)
+npm run test:coverage           # vitest with coverage report
 npm run lint                    # biome check src/ tests/
+npm run lint:fix                # biome auto-fix
+npm run check                   # typecheck + lint + test (all-in-one gate)
 npx tsc --noEmit                # type check only
-npx electron-builder --mac      # package .dmg
+npm run package                 # build + electron-builder .dmg
 ```
 
 **Debug mode** (attach Playwright or DevTools):
@@ -83,8 +102,18 @@ node tests/electron-smoke.mjs
 - `esbuild` — Build tool AND runtime dep (JSX transform in jsx-parser.ts)
 - `@iconify/utils` / `@iconify/core` — Icon SVG generation for figma_create_icon / figma_render_jsx
 - `@google/genai` — Gemini API for AI image generation tools
-- `pino` — Structured logging
-- `vitest` — Test runner; `@biomejs/biome` — Linter/formatter
+- `@axiomhq/pino` — Remote logging transport to Axiom
+- `archiver` — ZIP archiving (diagnostics export)
+- `electron-updater` — Auto-update support
+- `pino` / `pino-pretty` — Structured logging
+- `vitest` — Test runner; `@biomejs/biome` — Linter/formatter; `@playwright/test` — E2E
+
+## Environment Setup
+
+- **Figma Desktop Bridge**: The plugin in `figma-desktop-bridge/` must be loaded in Figma Desktop (Plugins → Development → Import plugin from manifest). Without it, the WS connection won't establish.
+- **Gemini API key**: Required for image generation tools. Configured in the app's Settings UI.
+- **Axiom token**: Optional — enables remote logging via `@axiomhq/pino`. Without it, logs are local-only.
+- **GitHub releases**: Published to `g3nx89/bottega`. Code signing requires Apple Developer certs + notarization.
 
 ## Important Patterns
 
