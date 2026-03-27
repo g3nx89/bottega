@@ -1,0 +1,81 @@
+---
+# Codacy configuration for Bottega (Electron + TypeScript + Vanilla JS)
+# Docs: https://docs.codacy.com/repositories-configure/codacy-configuration-file/
+
+engines:
+
+  # --- Linting ---
+
+  # ESLint 9 (flat config) — reads eslint.config.js with type-aware rules
+  eslint-9:
+    enabled: true
+
+  # ESLint 8 (legacy) — DISABLED: uses default patterns, generates false positives
+  eslint:
+    enabled: false
+
+  # Stylelint — CSS linting (project uses plain CSS, not SCSS)
+  stylelint:
+    enabled: true
+
+  # ShellCheck — shell script linting
+  shellcheck:
+    enabled: true
+
+  # markdownlint — markdown docs
+  markdownlint:
+    enabled: true
+
+  # --- Complexity ---
+
+  # Lizard — cyclomatic complexity and function length
+  lizard:
+    enabled: true
+
+  # --- Security ---
+
+  # Trivy — vulnerability scanning (dependencies + IaC)
+  trivy:
+    enabled: true
+
+  # Opengrep (Semgrep) — SAST patterns
+  opengrep:
+    enabled: true
+
+  # Checkov — IaC security (CI YAML, Dockerfile)
+  checkov:
+    enabled: true
+
+  # --- Disabled: not relevant for this stack ---
+
+  # PMD — Java only
+  pmd:
+    enabled: false
+
+  # Jackson Linter — Java JSON serialization
+  jackson:
+    enabled: false
+
+  # Deprecated tools
+  jshint:
+    enabled: false
+  csslint:
+    enabled: false
+  tslint:
+    enabled: false
+  eslint-deprecated:
+    enabled: false
+
+exclude_paths:
+  # Build output
+  - "dist/**"
+  # Forked Figma plugin — upstream code, not our responsibility
+  - "figma-desktop-bridge/**"
+  # Generated/utility scripts
+  - "scripts/**"
+  # Test artifacts
+  - "test-results/**"
+  # Package lock (noise in duplication/complexity)
+  - "package-lock.json"
+  # Node modules (should already be excluded)
+  - "node_modules/**"
