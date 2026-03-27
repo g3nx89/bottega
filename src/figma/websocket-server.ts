@@ -20,6 +20,12 @@ import type { ConsoleLogEntry } from './types.js';
 
 const logger = createChildLogger({ component: 'websocket-server' });
 
+/** Minimum plugin version this server accepts. Bump together with PLUGIN_VERSION in figma-desktop-bridge/ui.html. */
+const REQUIRED_PLUGIN_VERSION = 1;
+
+/** WebSocket close code for version-incompatible plugins (RFC 6455 private-use range 4000-4999). */
+const WS_CLOSE_VERSION_MISMATCH = 4001;
+
 export interface WebSocketServerOptions {
   port: number;
   host?: string;
@@ -39,6 +45,7 @@ export interface ConnectedFileInfo {
   fileKey: string | null;
   currentPage?: string;
   currentPageId?: string;
+  pluginVersion: number;
   connectedAt: number;
 }
 
@@ -316,6 +323,48 @@ export class FigmaWebSocketServer extends EventEmitter {
       return;
     }
 
+    // Version check — reject before mutating any state
+    const pluginVersion: number | undefined = data.pluginVersion;
+    if (!pluginVersion || pluginVersion < REQUIRED_PLUGIN_VERSION) {
+      const effectiveVersion = pluginVersion ?? 0;
+      const reason = !pluginVersion
+        ? 'Plugin version missing (legacy plugin)'
+        : `Plugin version ${pluginVersion} < required ${REQUIRED_PLUGIN_VERSION}`;
+      logger.warn({ fileKey, pluginVersion: effectiveVersion, required: REQUIRED_PLUGIN_VERSION }, reason);
+
+      // Notify plugin before closing
+      try {
+        ws.send(
+          JSON.stringify({
+            type: 'VERSION_MISMATCH',
+            data: {
+              pluginVersion: effectiveVersion,
+              requiredVersion: REQUIRED_PLUGIN_VERSION,
+              message: 'Plugin outdated. Re-import the Bottega Bridge plugin in Figma Desktop.',
+            },
+          }),
+        );
+      } catch {
+        /* ws may already be closing */
+      }
+
+      // Clean up pending state
+      const pt = this._pendingClients.get(ws);
+      if (pt) {
+        clearTimeout(pt);
+        this._pendingClients.delete(ws);
+      }
+
+      this.emit('versionMismatch', {
+        fileKey,
+        pluginVersion: effectiveVersion,
+        requiredVersion: REQUIRED_PLUGIN_VERSION,
+      });
+
+      ws.close(WS_CLOSE_VERSION_MISMATCH, 'Plugin version incompatible');
+      return;
+    }
+
     // Remove from pending clients (cancel identification timeout)
     const pendingTimeout = this._pendingClients.get(ws);
     if (pendingTimeout) {
@@ -354,6 +403,7 @@ export class FigmaWebSocketServer extends EventEmitter {
         fileKey,
         currentPage: data.currentPage,
         currentPageId: data.currentPageId || null,
+        pluginVersion,
         connectedAt: Date.now(),
       },
       selection: existing?.selection || null,
@@ -396,6 +446,10 @@ export class FigmaWebSocketServer extends EventEmitter {
     // Find which named client this belongs to
     const found = this.findClientByWs(ws);
     if (!found) {
+      if (code === WS_CLOSE_VERSION_MISMATCH) {
+        // Version-rejected client — versionMismatch event already emitted, suppress disconnected
+        return;
+      }
       logger.debug('Unknown WebSocket client disconnected');
       this.emit('disconnected');
       return;

@@ -103,6 +103,9 @@ contextBridge.exposeInMainWorld('api', {
   onFigmaDisconnected: (cb: () => void) => {
     ipcRenderer.on('figma:disconnected', () => cb());
   },
+  onFigmaVersionMismatch: (cb: (info: { pluginVersion: number; requiredVersion: number }) => void) => {
+    ipcRenderer.on('figma:version-mismatch', (_event, info) => cb(info));
+  },
 
   // ── Session persistence (per-slot) ────────
   resetSession: (slotId: string) =>

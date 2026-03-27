@@ -408,6 +408,18 @@ if (!gotTheLock) {
             .finally(() => pendingCreations.delete(info.fileKey));
         }
       });
+      figmaCore.wsServer.on(
+        'versionMismatch',
+        (info: { fileKey: string; pluginVersion: number; requiredVersion: number }) => {
+          log.warn(info, 'Figma plugin version mismatch');
+          if (mainWindow) {
+            safeSend(mainWindow.webContents, 'figma:version-mismatch', {
+              pluginVersion: info.pluginVersion,
+              requiredVersion: info.requiredVersion,
+            });
+          }
+        },
+      );
       figmaCore.wsServer.on('fileDisconnected', (info: { fileKey: string; fileName: string }) => {
         log.info({ fileKey: info.fileKey }, 'Figma file disconnected');
         // Notify renderer that this specific tab lost connection

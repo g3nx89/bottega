@@ -584,4 +584,87 @@ describe('FigmaWebSocketServer', () => {
       }
     });
   });
+
+  // ==========================================================================
+  // Plugin version check
+  // ==========================================================================
+
+  describe('plugin version check', () => {
+    /** Connect a raw WebSocket and send FILE_INFO with custom data (bypassing WsTestClient defaults). */
+    async function connectRaw(fileInfoData: Record<string, unknown>) {
+      const { WebSocket: WS } = await import('ws');
+      const ws = new WS(`ws://localhost:${port}`);
+      const messages: any[] = [];
+      await new Promise<void>((resolve, reject) => {
+        ws.on('open', () => resolve());
+        ws.on('error', reject);
+      });
+      ws.on('message', (data) => messages.push(JSON.parse(data.toString())));
+      const closed = new Promise<number>((resolve) => ws.on('close', (code) => resolve(code)));
+      ws.send(JSON.stringify({ type: 'FILE_INFO', data: fileInfoData }));
+      return { ws, messages, closed };
+    }
+
+    it('accepts client with matching pluginVersion', async () => {
+      await client.connect(port, 'abc123', 'Test File', 1);
+      expect(server.isClientConnected()).toBe(true);
+      const info = server.getConnectedFileInfo();
+      expect(info!.pluginVersion).toBe(1);
+    });
+
+    it('accepts client with newer pluginVersion', async () => {
+      await client.connect(port, 'abc123', 'Test File', 99);
+      expect(server.isClientConnected()).toBe(true);
+    });
+
+    it('rejects client without pluginVersion (legacy plugin)', async () => {
+      const { closed } = await connectRaw({ fileKey: 'abc123', fileName: 'Test' });
+      expect(await closed).toBe(4001);
+      expect(server.isClientConnected()).toBe(false);
+    });
+
+    it('rejects client with old pluginVersion', async () => {
+      const { closed } = await connectRaw({ fileKey: 'abc123', fileName: 'Test', pluginVersion: 0 });
+      expect(await closed).toBe(4001);
+      expect(server.isClientConnected()).toBe(false);
+    });
+
+    it('sends VERSION_MISMATCH message before closing', async () => {
+      const { messages, closed } = await connectRaw({ fileKey: 'abc123', fileName: 'Test' });
+      await closed;
+
+      const mismatch = messages.find((m) => m.type === 'VERSION_MISMATCH');
+      expect(mismatch).toBeDefined();
+      expect(mismatch.data.requiredVersion).toBeGreaterThan(0);
+      expect(mismatch.data.message).toContain('Re-import');
+    });
+
+    it('emits versionMismatch event on rejection', async () => {
+      const spy = vi.fn();
+      server.on('versionMismatch', spy);
+
+      const { closed } = await connectRaw({ fileKey: 'abc123', fileName: 'Test' });
+      await closed;
+
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fileKey: 'abc123',
+          pluginVersion: 0,
+          requiredVersion: expect.any(Number),
+        }),
+      );
+    });
+
+    it('does not emit disconnected event on version rejection', async () => {
+      const disconnectedSpy = vi.fn();
+      server.on('disconnected', disconnectedSpy);
+
+      const { closed } = await connectRaw({ fileKey: 'abc123', fileName: 'Test' });
+      await closed;
+      // Give any async event emission a tick to settle
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(disconnectedSpy).not.toHaveBeenCalled();
+    });
+  });
 });

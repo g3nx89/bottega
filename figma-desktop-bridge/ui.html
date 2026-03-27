@@ -512,6 +512,8 @@
     (function() {
       // Fixed port for Bottega Bridge (distinct from figma-console-mcp 9223-9232)
       var WS_PORT = 9280;
+      // Must be >= REQUIRED_PLUGIN_VERSION in src/figma/websocket-server.ts
+      var PLUGIN_VERSION = 1;
 
       // Single-connection state: Bottega is a single-instance app on a fixed port.
       var activeConnections = []; // Array of { port, ws } (max 1 for Bottega)
@@ -635,7 +637,8 @@
         window.sendPluginCommand('GET_FILE_INFO', {})
           .then(function(info) {
             if (connWs.readyState === 1 && info && info.success !== false) {
-              connWs.send(JSON.stringify({ type: 'FILE_INFO', data: info.fileInfo || info }));
+              var payload = Object.assign({}, info.fileInfo || info, { pluginVersion: PLUGIN_VERSION });
+              connWs.send(JSON.stringify({ type: 'FILE_INFO', data: payload }));
             }
           })
           .catch(function() { /* non-critical */ });
@@ -766,6 +769,15 @@
               return;
             }
 
+            // Handle version mismatch notification from server
+            if (message.type === 'VERSION_MISMATCH' && message.data) {
+              console.warn('[Bottega Bridge] Version mismatch: plugin v' + message.data.pluginVersion +
+                ', server requires v' + message.data.requiredVersion +
+                '. ' + message.data.message);
+              updateStatus('error', false, false);
+              return;
+            }
+
             if (!message.id || !message.method) {
               console.log('[Bottega Bridge] WS:' + port + ': Ignoring malformed message');
               return;
@@ -805,6 +817,13 @@
           ));
           if (wasReplaced) {
             console.log('[Bottega Bridge] WebSocket:' + port + ': replaced by newer connection, stopping reconnect');
+            return;
+          }
+
+          // Version incompatible (WS_CLOSE_VERSION_MISMATCH) — do NOT reconnect
+          if (event.code === 4001) {
+            console.warn('[Bottega Bridge] Plugin incompatible with server. Update plugin to reconnect.');
+            updateStatus('error', false, false);
             return;
           }
 

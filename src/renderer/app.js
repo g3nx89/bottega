@@ -810,9 +810,30 @@ window.api.onRetry((slotId, active) => {
 window.api.onFigmaConnected(() => {
   statusDot.className = 'status-dot connected';
   statusDot.title = 'Figma connected';
+  document.getElementById('version-banner').style.display = 'none';
 });
 
 window.api.onFigmaDisconnected(() => {
+  statusDot.className = 'status-dot disconnected';
+  statusDot.title = 'Disconnected';
+});
+
+window.api.onFigmaVersionMismatch((info) => {
+  const banner = document.getElementById('version-banner');
+  const text = document.getElementById('version-banner-text');
+  text.textContent =
+    'Figma plugin outdated (v' +
+    info.pluginVersion +
+    ', required v' +
+    info.requiredVersion +
+    '). Re-import the plugin from Plugins \u2192 Development \u2192 Import plugin from manifest.';
+  banner.style.display = 'flex';
+  statusDot.className = 'status-dot version-mismatch';
+  statusDot.title = 'Plugin version mismatch';
+});
+
+document.getElementById('version-banner-dismiss')?.addEventListener('click', () => {
+  document.getElementById('version-banner').style.display = 'none';
   statusDot.className = 'status-dot disconnected';
   statusDot.title = 'Disconnected';
 });

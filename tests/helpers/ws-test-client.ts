@@ -9,7 +9,7 @@ export class WsTestClient {
   private received: any[] = [];
   private commandHandlers = new Map<string, (params: any) => any>();
 
-  async connect(port: number, fileKey: string, fileName: string): Promise<void> {
+  async connect(port: number, fileKey: string, fileName: string, pluginVersion = 1): Promise<void> {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(`ws://localhost:${port}`);
       this.ws.on('open', () => {
@@ -17,7 +17,7 @@ export class WsTestClient {
         this.ws!.send(
           JSON.stringify({
             type: 'FILE_INFO',
-            data: { fileKey, fileName, currentPage: 'Page 1' },
+            data: { fileKey, fileName, currentPage: 'Page 1', pluginVersion },
           }),
         );
         // Give the server a tick to process FILE_INFO
