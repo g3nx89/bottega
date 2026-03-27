@@ -303,7 +303,7 @@ if (!gotTheLock) {
         },
       });
 
-      mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+      void mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
       // 5. Usage tracker (remote diagnostics — opt-in, created before IPC to pass it)
       // Mutable ref for model config — updated by IPC handler after model switch
