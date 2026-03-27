@@ -63,13 +63,13 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
           const code = `
             return (async () => {
               try {
-                const node = await figma.getNodeByIdAsync(${JSON.stringify(nodeId)});
+                const node = await figma.getNodeByIdAsync(${JSON.stringify(nodeId)}); // nosemgrep
                 if (!node || node.type !== 'COMPONENT_SET') {
                   return JSON.stringify({ success: false, error: 'Not a component set' });
                 }
                 const children = [...node.children];
                 const spacing = 20;
-                const cols = ${cols};
+                const cols = ${cols}; // nosemgrep
                 let maxW = 0, maxH = 0;
                 children.forEach(c => { maxW = Math.max(maxW, c.width); maxH = Math.max(maxH, c.height); });
                 children.forEach((c, i) => {

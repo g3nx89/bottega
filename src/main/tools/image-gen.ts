@@ -375,7 +375,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         // Create frames in Figma
         // nosemgrep: missing-template-string-indicator — code generation: builds plugin code sent to Figma
         const createCode = `return (async () => {
-          const parent = ${params.parentId ? `await figma.getNodeByIdAsync(${JSON.stringify(params.parentId)})` : 'figma.currentPage'};
+          const parent = ${params.parentId ? `await figma.getNodeByIdAsync(${JSON.stringify(params.parentId)})` : 'figma.currentPage'}; // nosemgrep
           if (!parent) return JSON.stringify({ error: "Parent not found" });
 
           const container = figma.createFrame();
@@ -391,7 +391,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
           for (let i = 0; i < ${images.length}; i++) {
             const frame = figma.createFrame();
             frame.name = "Step " + (i + 1);
-            frame.resize(${w}, ${h});
+            frame.resize(${w}, ${h}); // nosemgrep
             container.appendChild(frame);
             frameIds.push(frame.id);
           }

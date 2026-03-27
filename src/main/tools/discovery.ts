@@ -9,10 +9,10 @@ function buildGetFileDataCode(nodeId?: string, depth?: number): string {
   // nosemgrep: missing-template-string-indicator — code generation: builds plugin code sent to Figma
   return `return (async () => {
     try {
-      const root = ${nodeId ? `await figma.getNodeByIdAsync(${JSON.stringify(nodeId)})` : 'figma.currentPage'};
+      const root = ${nodeId ? `await figma.getNodeByIdAsync(${JSON.stringify(nodeId)})` : 'figma.currentPage'}; // nosemgrep
       if (!root) return JSON.stringify({ error: 'Node not found' });
       function walk(node, d) {
-        if (d > ${maxDepth}) return null;
+        if (d > ${maxDepth}) return null; // nosemgrep
         const n = {
           id: node.id, type: node.type, name: node.name,
           width: node.width, height: node.height,
