@@ -361,6 +361,44 @@ async function createNodeFromTree(treeNode, parent) {
   return node;
 }
 
+// Convert Figma 0-1 RGB color to #RRGGBB hex string
+function figmaRGBToHex(c) {
+  return '#' + Math.round(c.r * 255).toString(16).padStart(2, '0')
+             + Math.round(c.g * 255).toString(16).padStart(2, '0')
+             + Math.round(c.b * 255).toString(16).padStart(2, '0');
+}
+
+// Build a variable name lookup map from all local variables and collections.
+// Used by DEEP_GET_COMPONENT and ANALYZE_COMPONENT_SET.
+async function buildVarNameMap() {
+  var map = {};
+  try {
+    var results = await Promise.all([
+      figma.variables.getLocalVariablesAsync(),
+      figma.variables.getLocalVariableCollectionsAsync()
+    ]);
+    var allVars = results[0];
+    var allCollections = results[1];
+    var collectionMap = {};
+    for (var ci = 0; ci < allCollections.length; ci++) {
+      collectionMap[allCollections[ci].id] = allCollections[ci].name;
+    }
+    for (var vi = 0; vi < allVars.length; vi++) {
+      var v = allVars[vi];
+      map[v.id] = {
+        name: v.name,
+        resolvedType: v.resolvedType,
+        collection: collectionMap[v.variableCollectionId] || null,
+        scopes: v.scopes || [],
+        codeSyntax: v.codeSyntax || {}
+      };
+    }
+  } catch (e) {
+    console.log('🌉 [Desktop Bridge] Could not build variable map: ' + (e.message || e));
+  }
+  return map;
+}
+
 // Listen for requests from UI (e.g., component data requests, write operations)
 figma.ui.onmessage = async (msg) => {
 
@@ -2880,6 +2918,835 @@ figma.ui.onmessage = async (msg) => {
       console.error('🌉 [Desktop Bridge] Lint design error:', errorMsg);
       figma.ui.postMessage({
         type: 'LINT_DESIGN_RESULT',
+        requestId: msg.requestId,
+        success: false,
+        error: errorMsg
+      });
+    }
+  }
+
+  // ============================================================================
+  // DEEP_GET_COMPONENT - Full recursive component extraction for code generation
+  // ============================================================================
+  else if (msg.type === 'DEEP_GET_COMPONENT') {
+    try {
+      var MAX_DEPTH_CAP = 20;
+      var COMPONENT_PROPERTIES_CAP_BYTES = 10240;
+      var MAX_TOKEN_ENTRIES = 500;
+      var PAYLOAD_WARNING_KB = 512;
+
+      var maxDepth = msg.depth || 10;
+      if (maxDepth > MAX_DEPTH_CAP) maxDepth = MAX_DEPTH_CAP;
+      console.log('🌉 [Desktop Bridge] Deep component fetch: ' + msg.nodeId + ' (depth: ' + maxDepth + ')');
+
+      var rootNode = await figma.getNodeByIdAsync(msg.nodeId);
+      if (!rootNode) {
+        throw new Error('Node not found: ' + msg.nodeId);
+      }
+
+      // Build a variable name lookup map for resolving boundVariables
+      var varNameMap = await buildVarNameMap();
+
+      // Resolve boundVariables to token names
+      function resolveBoundVars(bv) {
+        if (!bv) return null;
+        var resolved = {};
+        var keys = Object.keys(bv);
+        for (var k = 0; k < keys.length; k++) {
+          var prop = keys[k];
+          var binding = bv[prop];
+          if (Array.isArray(binding)) {
+            resolved[prop] = [];
+            for (var bi = 0; bi < binding.length; bi++) {
+              var b = binding[bi];
+              if (b && b.id) {
+                var info = varNameMap[b.id];
+                resolved[prop].push(info ? { id: b.id, name: info.name, collection: info.collection, resolvedType: info.resolvedType, codeSyntax: info.codeSyntax } : { id: b.id });
+              }
+            }
+          } else if (binding && binding.id) {
+            var info = varNameMap[binding.id];
+            resolved[prop] = info ? { id: binding.id, name: info.name, collection: info.collection, resolvedType: info.resolvedType, codeSyntax: info.codeSyntax } : { id: binding.id };
+          }
+        }
+        return Object.keys(resolved).length > 0 ? resolved : null;
+      }
+
+      // P3b: Hardcoded value detection accumulators
+      var varsUsed = [];
+      var hardcodedValues = [];
+
+      // Geometry-eligible node types (P3a: fillGeometry restriction)
+      var geometryTypes = { VECTOR: 1, BOOLEAN_OPERATION: 1, LINE: 1, REGULAR_POLYGON: 1, STAR: 1, ELLIPSE: 1 };
+
+      // Check if paint array (fills/strokes) properties are tokenized or hardcoded
+      function checkPaintTokenization(paints, paintBv, propertyName, nodePath) {
+        for (var pi = 0; pi < paints.length; pi++) {
+          if (paints[pi].type === 'SOLID' && paints[pi].visible !== false) {
+            if (paintBv && (Array.isArray(paintBv) ? paintBv[pi] : paintBv)) {
+              var varRef = Array.isArray(paintBv) ? paintBv[pi] : paintBv;
+              if (varRef && varRef.id) {
+                var vi = varNameMap[varRef.id];
+                varsUsed.push({ variableId: varRef.id, variableName: vi ? vi.name : varRef.id, property: propertyName, nodePath: nodePath });
+              }
+            } else {
+              var color = paints[pi].color;
+              if (color) {
+                hardcodedValues.push({ property: propertyName, value: figmaRGBToHex(color), nodePath: nodePath });
+              }
+            }
+          }
+        }
+      }
+
+      // Extract visual properties from a node
+      function extractNodeProps(n, nodePath) {
+        var props = {};
+
+        if (n.layoutMode) props.layoutMode = n.layoutMode;
+        if (n.primaryAxisSizingMode) props.primaryAxisSizingMode = n.primaryAxisSizingMode;
+        if (n.counterAxisSizingMode) props.counterAxisSizingMode = n.counterAxisSizingMode;
+        if (n.layoutSizingHorizontal) props.layoutSizingHorizontal = n.layoutSizingHorizontal;
+        if (n.layoutSizingVertical) props.layoutSizingVertical = n.layoutSizingVertical;
+        if (n.primaryAxisAlignItems) props.primaryAxisAlignItems = n.primaryAxisAlignItems;
+        if (n.counterAxisAlignItems) props.counterAxisAlignItems = n.counterAxisAlignItems;
+        if (n.paddingLeft !== undefined && n.paddingLeft !== 0) props.paddingLeft = n.paddingLeft;
+        if (n.paddingRight !== undefined && n.paddingRight !== 0) props.paddingRight = n.paddingRight;
+        if (n.paddingTop !== undefined && n.paddingTop !== 0) props.paddingTop = n.paddingTop;
+        if (n.paddingBottom !== undefined && n.paddingBottom !== 0) props.paddingBottom = n.paddingBottom;
+        if (n.itemSpacing !== undefined && n.itemSpacing !== 0) props.itemSpacing = n.itemSpacing;
+        if (n.counterAxisSpacing !== undefined && n.counterAxisSpacing !== 0) props.counterAxisSpacing = n.counterAxisSpacing;
+        if (n.layoutWrap && n.layoutWrap !== 'NO_WRAP') props.layoutWrap = n.layoutWrap;
+        if (n.minWidth !== undefined) props.minWidth = n.minWidth;
+        if (n.maxWidth !== undefined) props.maxWidth = n.maxWidth;
+        if (n.minHeight !== undefined) props.minHeight = n.minHeight;
+        if (n.maxHeight !== undefined) props.maxHeight = n.maxHeight;
+        if (n.clipsContent) props.clipsContent = true;
+
+        // Visual
+        var bv = null;
+        try { bv = n.boundVariables || null; } catch (e) {}
+
+        try {
+          if (n.fills && n.fills !== figma.mixed && n.fills.length > 0) {
+            props.fills = n.fills;
+            checkPaintTokenization(n.fills, bv && bv.fills, 'fill', nodePath);
+          }
+        } catch (e) { /* mixed fills */ }
+        try {
+          if (n.strokes && n.strokes !== figma.mixed && n.strokes.length > 0) {
+            props.strokes = n.strokes;
+            checkPaintTokenization(n.strokes, bv && bv.strokes, 'stroke', nodePath);
+          }
+        } catch (e) {}
+        if (n.strokeWeight !== undefined && n.strokeWeight !== 0 && n.strokeWeight !== figma.mixed) props.strokeWeight = n.strokeWeight;
+        if (n.cornerRadius !== undefined && n.cornerRadius !== 0 && n.cornerRadius !== figma.mixed) props.cornerRadius = n.cornerRadius;
+        try {
+          if (n.effects && n.effects.length > 0) props.effects = n.effects;
+        } catch (e) {}
+        if (n.opacity !== undefined && n.opacity < 1) props.opacity = n.opacity;
+
+        // P3a: fillGeometry/strokeGeometry only for vector-like nodes
+        if (geometryTypes[n.type]) {
+          try { if (n.fillGeometry && n.fillGeometry.length > 0) props.fillGeometry = n.fillGeometry; } catch (e) {}
+          try { if (n.strokeGeometry && n.strokeGeometry.length > 0) props.strokeGeometry = n.strokeGeometry; } catch (e) {}
+        }
+
+        // P3b: spacing/sizing token check
+        var spacingProps = ['itemSpacing', 'paddingLeft', 'paddingRight', 'paddingTop', 'paddingBottom', 'cornerRadius'];
+        for (var sp = 0; sp < spacingProps.length; sp++) {
+          var spProp = spacingProps[sp];
+          if (n[spProp] !== undefined && n[spProp] !== 0 && n[spProp] !== figma.mixed) {
+            if (bv && bv[spProp] && bv[spProp].id) {
+              var spInfo = varNameMap[bv[spProp].id];
+              varsUsed.push({ variableId: bv[spProp].id, variableName: spInfo ? spInfo.name : bv[spProp].id, property: spProp, nodePath: nodePath });
+            } else if (!bv || !bv[spProp]) {
+              hardcodedValues.push({ property: spProp, value: n[spProp], nodePath: nodePath });
+            }
+          }
+        }
+
+        // Typography
+        if (n.type === 'TEXT') {
+          try { props.characters = n.characters; } catch (e) {}
+          try { if (n.fontSize !== figma.mixed) props.fontSize = n.fontSize; } catch (e) {}
+          try { if (n.fontName !== figma.mixed) { props.fontFamily = n.fontName.family; props.fontStyle = n.fontName.style; } } catch (e) {}
+          try { if (n.fontWeight !== figma.mixed) props.fontWeight = n.fontWeight; } catch (e) {}
+          try { if (n.lineHeight !== figma.mixed) props.lineHeight = n.lineHeight; } catch (e) {}
+          try { if (n.letterSpacing !== figma.mixed) props.letterSpacing = n.letterSpacing; } catch (e) {}
+          try { if (n.textAlignHorizontal) props.textAlignHorizontal = n.textAlignHorizontal; } catch (e) {}
+          try { if (n.textAlignVertical) props.textAlignVertical = n.textAlignVertical; } catch (e) {}
+          try { if (n.textAutoResize && n.textAutoResize !== 'NONE') props.textAutoResize = n.textAutoResize; } catch (e) {}
+          try { if (n.textTruncation && n.textTruncation !== 'DISABLED') props.textTruncation = n.textTruncation; } catch (e) {}
+          try { if (n.textCase && n.textCase !== 'ORIGINAL') props.textCase = n.textCase; } catch (e) {}
+          try { if (n.textDecoration && n.textDecoration !== 'NONE') props.textDecoration = n.textDecoration; } catch (e) {}
+        }
+
+        // Design tokens (resolved to names)
+        try {
+          var resolved = resolveBoundVars(bv);
+          if (resolved) props.boundVariables = resolved;
+        } catch (e) {}
+
+        // Prototype interactions
+        try {
+          if (n.reactions && n.reactions.length > 0) {
+            props.reactions = n.reactions.map(function(r) {
+              var reaction = { trigger: r.trigger };
+              if (r.action) {
+                reaction.action = { type: r.action.type };
+                if (r.action.navigation) reaction.action.navigation = r.action.navigation;
+                if (r.action.transition) reaction.action.transition = r.action.transition;
+                if (r.action.destinationId) reaction.action.destinationId = r.action.destinationId;
+              }
+              return reaction;
+            });
+          }
+        } catch (e) {}
+
+        // Annotations
+        try {
+          if (n.annotations && n.annotations.length > 0) {
+            props.annotations = n.annotations.map(function(a) {
+              var ann = {};
+              if (a.labelMarkdown) ann.labelMarkdown = a.labelMarkdown;
+              else if (a.label) ann.label = a.label;
+              if (a.properties) ann.properties = a.properties;
+              if (a.categoryId) ann.categoryId = a.categoryId;
+              return ann;
+            });
+          }
+        } catch (e) {}
+
+        // Component instance reference
+        if (n.type === 'INSTANCE') {
+          try {
+            if (n.mainComponent) {
+              props.mainComponent = {
+                id: n.mainComponent.id,
+                name: n.mainComponent.name,
+                key: n.mainComponent.key || null,
+                isVariant: n.mainComponent.parent && n.mainComponent.parent.type === 'COMPONENT_SET'
+              };
+              if (props.mainComponent.isVariant && n.mainComponent.parent) {
+                props.mainComponent.componentSetName = n.mainComponent.parent.name;
+                props.mainComponent.componentSetId = n.mainComponent.parent.id;
+              }
+            }
+          } catch (e) {}
+          // P3a: componentProperties cap at 10KB
+          try {
+            if (n.componentProperties) {
+              var cpStr = JSON.stringify(n.componentProperties);
+              if (cpStr.length > COMPONENT_PROPERTIES_CAP_BYTES) {
+                var truncated = {};
+                var cpKeys = Object.keys(n.componentProperties);
+                for (var cpk = 0; cpk < cpKeys.length; cpk++) {
+                  var cpVal = n.componentProperties[cpKeys[cpk]];
+                  truncated[cpKeys[cpk]] = { type: cpVal.type, value: String(cpVal.value).substring(0, 50) };
+                }
+                props.componentProperties = truncated;
+                props._componentPropertiesTruncated = true;
+              } else {
+                props.componentProperties = n.componentProperties;
+              }
+            }
+          } catch (e) {}
+        }
+
+        // Component definitions (for COMPONENT and COMPONENT_SET)
+        if (n.type === 'COMPONENT_SET' || n.type === 'COMPONENT') {
+          try {
+            if (n.componentPropertyDefinitions) props.componentPropertyDefinitions = n.componentPropertyDefinitions;
+          } catch (e) {}
+          if (n.type === 'COMPONENT' && n.variantProperties) {
+            props.variantProperties = n.variantProperties;
+          }
+        }
+
+        // Dimensions
+        try {
+          props.width = Math.round(n.width);
+          props.height = Math.round(n.height);
+        } catch (e) {}
+
+        return props;
+      }
+
+      // Recursive tree walker
+      function walkNode(n, currentDepth, parentPath) {
+        var nodePath = parentPath ? parentPath + ' > ' + (n.name || n.id) : (n.name || n.id);
+        var nodeData = {
+          id: n.id,
+          name: n.name,
+          type: n.type,
+          visible: n.visible
+        };
+
+        // Skip invisible nodes (unless they're component set variants)
+        if (!n.visible && n.type !== 'COMPONENT') {
+          nodeData._hidden = true;
+          return nodeData;
+        }
+
+        // Extract all properties
+        var props = extractNodeProps(n, nodePath);
+        var propKeys = Object.keys(props);
+        for (var pk = 0; pk < propKeys.length; pk++) {
+          nodeData[propKeys[pk]] = props[propKeys[pk]];
+        }
+
+        // Recurse into children
+        if (n.children && currentDepth < maxDepth) {
+          nodeData.children = [];
+          for (var i = 0; i < n.children.length; i++) {
+            try {
+              nodeData.children.push(walkNode(n.children[i], currentDepth + 1, nodePath));
+            } catch (e) {
+              // Skip inaccessible slot sublayers
+            }
+          }
+        } else if (n.children) {
+          // At max depth, include lightweight child summary
+          nodeData.childCount = n.children.length;
+          nodeData._depthLimitReached = true;
+        }
+
+        return nodeData;
+      }
+
+      var result = walkNode(rootNode, 0, '');
+      result._variableMapSize = Object.keys(varNameMap).length;
+      result._maxDepthUsed = maxDepth;
+
+      // P3b: attach token coverage metrics
+      var totalProps = varsUsed.length + hardcodedValues.length;
+      // Cap token coverage arrays to prevent oversized payloads
+      var maxTokenEntries = MAX_TOKEN_ENTRIES;
+      if (varsUsed.length > maxTokenEntries) {
+        result.variables_used = varsUsed.slice(0, maxTokenEntries);
+        result._variablesUsedTruncated = true;
+      } else {
+        result.variables_used = varsUsed;
+      }
+      if (hardcodedValues.length > maxTokenEntries) {
+        result.hardcoded_values = hardcodedValues.slice(0, maxTokenEntries);
+        result._hardcodedValuesTruncated = true;
+      } else {
+        result.hardcoded_values = hardcodedValues;
+      }
+      result.token_coverage = totalProps > 0 ? Math.round((varsUsed.length / totalProps) * 100) : 100;
+
+      var resultJson = JSON.stringify(result);
+      var resultSizeKB = Math.round(resultJson.length / 1024);
+      console.log('🌉 [Desktop Bridge] Deep component data: ' + resultSizeKB + 'KB, vars resolved: ' + Object.keys(varNameMap).length + ', token coverage: ' + result.token_coverage + '%');
+
+      // Warn if payload is very large (>512KB)
+      if (resultSizeKB > PAYLOAD_WARNING_KB) {
+        result._payloadWarning = 'Response is ' + resultSizeKB + 'KB. Consider using a smaller depth or targeting a sub-node.';
+      }
+
+      figma.ui.postMessage({
+        type: 'DEEP_GET_COMPONENT_RESULT',
+        requestId: msg.requestId,
+        success: true,
+        data: result
+      });
+
+    } catch (error) {
+      var errorMsg = error && error.message ? error.message : String(error);
+      console.error('🌉 [Desktop Bridge] Deep component error:', errorMsg);
+      figma.ui.postMessage({
+        type: 'DEEP_GET_COMPONENT_RESULT',
+        requestId: msg.requestId,
+        success: false,
+        error: errorMsg
+      });
+    }
+  }
+
+  // ============================================================================
+  // ANALYZE_COMPONENT_SET - Variant state machine + cross-variant diff
+  // ============================================================================
+  else if (msg.type === 'ANALYZE_COMPONENT_SET') {
+    try {
+      console.log('🌉 [Desktop Bridge] Analyzing component set: ' + msg.nodeId);
+
+      var node = await figma.getNodeByIdAsync(msg.nodeId);
+      if (!node) throw new Error('Node not found: ' + msg.nodeId);
+      if (node.type !== 'COMPONENT_SET') throw new Error('Node is not a COMPONENT_SET. Type: ' + node.type);
+
+      // Build variable name lookup
+      var varNameMap = await buildVarNameMap();
+
+      function resolveVarId(id) {
+        return varNameMap[id] ? varNameMap[id].name : id;
+      }
+
+      function resolveBoundColor(bv) {
+        if (!bv) return null;
+        if (Array.isArray(bv)) {
+          return bv.length > 0 && bv[0].id ? resolveVarId(bv[0].id) : null;
+        }
+        if (bv.id) return resolveVarId(bv.id);
+        if (bv.color && bv.color.id) return resolveVarId(bv.color.id);
+        return null;
+      }
+
+      // Extract visual signature from a variant for diffing
+      function extractSignature(variant) {
+        var sig = {};
+        var mainChild = null;
+        if (variant.children) {
+          for (var i = 0; i < variant.children.length; i++) {
+            var child = variant.children[i];
+            try {
+              if (child.visible !== false && child.type !== 'TEXT' && child.strokes && child.strokes.length > 0) {
+                mainChild = child;
+                break;
+              }
+            } catch(e) {}
+          }
+          if (!mainChild) {
+            for (var i2 = 0; i2 < variant.children.length; i2++) {
+              var c2 = variant.children[i2];
+              try {
+                if (c2.visible !== false && c2.type === 'FRAME') {
+                  mainChild = c2;
+                  break;
+                }
+              } catch(e) {}
+            }
+          }
+        }
+
+        if (mainChild) {
+          var child = mainChild;
+          try {
+            var bv = child.boundVariables || {};
+            sig.fillToken = resolveBoundColor(bv.fills);
+            sig.strokeToken = resolveBoundColor(bv.strokes);
+            sig.strokeWeight = child.strokeWeight;
+            if (!sig.fillToken && child.fills && child.fills.length > 0 && child.fills[0].color) {
+              var fc = child.fills[0].color;
+              sig.fillHex = figmaRGBToHex(fc);
+            }
+            if (!sig.strokeToken && child.strokes && child.strokes.length > 0 && child.strokes[0].color) {
+              var sc = child.strokes[0].color;
+              sig.strokeHex = figmaRGBToHex(sc);
+            }
+            sig.effects = child.effects && child.effects.length > 0 ? child.effects : null;
+            sig.opacity = child.opacity < 1 ? child.opacity : null;
+          } catch(e) {}
+
+          if (child.children) {
+            for (var t = 0; t < child.children.length; t++) {
+              var textChild = child.children[t];
+              if (textChild.type === 'TEXT') {
+                try {
+                  var tbv = textChild.boundVariables || {};
+                  sig.textToken = resolveBoundColor(tbv.fills);
+                  if (!sig.textToken && textChild.fills && textChild.fills.length > 0 && textChild.fills[0].color) {
+                    var tc = textChild.fills[0].color;
+                    sig.textHex = figmaRGBToHex(tc);
+                  }
+                } catch(e) {}
+                break;
+              }
+            }
+          }
+        }
+
+        sig.visibilityChanges = {};
+        if (variant.children) {
+          for (var j = 0; j < variant.children.length; j++) {
+            var ch = variant.children[j];
+            try {
+              if (!ch.visible) sig.visibilityChanges[ch.name] = false;
+            } catch(e) {}
+          }
+        }
+
+        return sig;
+      }
+
+      // Parse variant property definitions
+      var propDefs = node.componentPropertyDefinitions || {};
+      var variantAxes = {};
+      var componentProps = {};
+      var propKeys = Object.keys(propDefs);
+      for (var pk = 0; pk < propKeys.length; pk++) {
+        var propKey = propKeys[pk];
+        var propDef = propDefs[propKey];
+        if (propDef.type === 'VARIANT') {
+          variantAxes[propKey] = propDef.variantOptions || [];
+        } else {
+          componentProps[propKey] = { type: propDef.type, defaultValue: propDef.defaultValue };
+        }
+      }
+
+      // CSS pseudo-class mapping for state variants
+      var stateMapping = {
+        'default': null,
+        'hover': ':hover',
+        'focus': ':focus-visible',
+        'focus-visible': ':focus-visible',
+        'focused': ':focus-visible',
+        'active': ':active',
+        'pressed': ':active',
+        'disabled': ':disabled, [aria-disabled="true"]',
+        'error': '[aria-invalid="true"]',
+        'invalid': '[aria-invalid="true"]',
+        'filled': '.has-value',
+        'selected': '[aria-selected="true"]',
+        'checked': ':checked',
+        'loading': '[aria-busy="true"]',
+        'readonly': '[readonly]',
+        'open': '[aria-expanded="true"]',
+        'closed': '[aria-expanded="false"]'
+      };
+
+      var variants = node.children || [];
+      var defaultVariant = null;
+      var stateAxis = null;
+      var sizeAxis = null;
+
+      var axisKeys = Object.keys(variantAxes);
+      for (var ak = 0; ak < axisKeys.length; ak++) {
+        var axisName = axisKeys[ak].toLowerCase();
+        if (axisName === 'state' || axisName === 'status' || axisName === 'interaction') {
+          stateAxis = axisKeys[ak];
+        } else if (axisName === 'size' || axisName === 'scale') {
+          sizeAxis = axisKeys[ak];
+        }
+      }
+
+      var stateMachine = { states: {}, defaultState: null, cssMapping: {} };
+      var defaultSig = null;
+
+      for (var di = 0; di < variants.length; di++) {
+        var vName = variants[di].name;
+        var lowerName = vName.toLowerCase();
+        if (lowerName.indexOf('state=default') !== -1 && (sizeAxis ? vName.indexOf(sizeAxis + '=') !== -1 : true)) {
+          if (!defaultVariant || lowerName.indexOf('large') !== -1) {
+            defaultVariant = variants[di];
+          }
+        }
+      }
+      if (defaultVariant) {
+        defaultSig = extractSignature(defaultVariant);
+      }
+
+      var variantDiffs = [];
+      for (var vdi = 0; vdi < variants.length; vdi++) {
+        var variant = variants[vdi];
+        var sig = extractSignature(variant);
+
+        var axisParts = variant.name.split(', ');
+        var axisValues = {};
+        for (var ap = 0; ap < axisParts.length; ap++) {
+          var parts = axisParts[ap].split('=');
+          if (parts.length === 2) axisValues[parts[0].trim()] = parts[1].trim();
+        }
+
+        var stateValue = stateAxis ? (axisValues[stateAxis] || 'default') : 'default';
+        var cssSelector = stateMapping[stateValue.toLowerCase()] || null;
+
+        var diff = {};
+        if (defaultSig && variant.id !== (defaultVariant ? defaultVariant.id : null)) {
+          if (sig.fillToken !== defaultSig.fillToken) diff.fillToken = sig.fillToken || sig.fillHex;
+          if (sig.strokeToken !== defaultSig.strokeToken) diff.strokeToken = sig.strokeToken || sig.strokeHex;
+          if (sig.strokeWeight !== defaultSig.strokeWeight) diff.strokeWeight = sig.strokeWeight;
+          if (sig.textToken !== defaultSig.textToken) diff.textToken = sig.textToken || sig.textHex;
+          if (sig.opacity !== defaultSig.opacity) diff.opacity = sig.opacity;
+          if (JSON.stringify(sig.effects) !== JSON.stringify(defaultSig.effects)) diff.effects = sig.effects;
+          var svKeys = Object.keys(sig.visibilityChanges);
+          for (var sk = 0; sk < svKeys.length; sk++) {
+            if (!defaultSig.visibilityChanges[svKeys[sk]]) {
+              if (!diff.visibilityChanges) diff.visibilityChanges = {};
+              diff.visibilityChanges[svKeys[sk]] = sig.visibilityChanges[svKeys[sk]];
+            }
+          }
+        }
+
+        variantDiffs.push({
+          name: variant.name,
+          id: variant.id,
+          axes: axisValues,
+          state: stateValue,
+          cssSelector: cssSelector,
+          diffFromDefault: Object.keys(diff).length > 0 ? diff : null,
+          signature: sig
+        });
+
+        if (cssSelector) {
+          stateMachine.cssMapping[stateValue] = cssSelector;
+        }
+        if (!stateMachine.states[stateValue]) {
+          stateMachine.states[stateValue] = [];
+        }
+        stateMachine.states[stateValue].push(variant.id);
+      }
+
+      if (defaultVariant) {
+        stateMachine.defaultState = 'default';
+        stateMachine.defaultSignature = defaultSig;
+      }
+
+      var result = {
+        nodeId: node.id,
+        nodeName: node.name,
+        variantCount: variants.length,
+        variantAxes: variantAxes,
+        componentProps: componentProps,
+        stateMachine: stateMachine,
+        variants: variantDiffs,
+        ai_instruction: 'Use cssMapping to implement interaction states. diffFromDefault shows only what changes per state — apply these as CSS pseudo-class or attribute overrides. componentProps maps to React/Vue component props (BOOLEAN → boolean prop, TEXT → string prop, INSTANCE_SWAP → ReactNode/slot prop).'
+      };
+
+      console.log('🌉 [Desktop Bridge] Component set analysis complete. ' + variants.length + ' variants, ' + Object.keys(stateMachine.cssMapping).length + ' CSS mappings');
+
+      figma.ui.postMessage({
+        type: 'ANALYZE_COMPONENT_SET_RESULT',
+        requestId: msg.requestId,
+        success: true,
+        data: result
+      });
+
+    } catch (error) {
+      var errorMsg = error && error.message ? error.message : String(error);
+      console.error('🌉 [Desktop Bridge] Analyze component set error:', errorMsg);
+      figma.ui.postMessage({
+        type: 'ANALYZE_COMPONENT_SET_RESULT',
+        requestId: msg.requestId,
+        success: false,
+        error: errorMsg
+      });
+    }
+  }
+
+  // ============================================================================
+  // GET_ANNOTATIONS - Read annotations from a node (and optionally children)
+  // ============================================================================
+  else if (msg.type === 'GET_ANNOTATIONS') {
+    try {
+      console.log('🌉 [Desktop Bridge] Getting annotations for node:', msg.nodeId);
+
+      var node = await figma.getNodeByIdAsync(msg.nodeId);
+      if (!node) {
+        throw new Error('Node not found: ' + msg.nodeId);
+      }
+
+      var categories = [];
+      try {
+        categories = await figma.annotations.getAnnotationCategoriesAsync();
+      } catch (e) {
+        console.log('🌉 [Desktop Bridge] Could not fetch annotation categories:', e.message);
+      }
+
+      var categoryMap = {};
+      for (var ci = 0; ci < categories.length; ci++) {
+        categoryMap[categories[ci].id] = categories[ci].name;
+      }
+
+      function extractAnnotations(n) {
+        var anns = n.annotations || [];
+        var result = [];
+        for (var ai = 0; ai < anns.length; ai++) {
+          var ann = anns[ai];
+          var props = [];
+          if (ann.properties) {
+            for (var pi = 0; pi < ann.properties.length; pi++) {
+              props.push({ type: ann.properties[pi].type });
+            }
+          }
+          result.push({
+            label: ann.label || null,
+            labelMarkdown: ann.labelMarkdown || null,
+            properties: props.length > 0 ? props : null,
+            categoryId: ann.categoryId || null,
+            categoryName: ann.categoryId && categoryMap[ann.categoryId] ? categoryMap[ann.categoryId] : null
+          });
+        }
+        return result;
+      }
+
+      var nodeAnnotations = extractAnnotations(node);
+      var childAnnotations = [];
+
+      var includeChildren = msg.includeChildren || false;
+      var maxDepth = msg.depth || 1;
+      if (maxDepth > 10) maxDepth = 10;
+
+      if (includeChildren && 'children' in node && node.children) {
+        function walkChildren(parent, currentDepth) {
+          if (currentDepth > maxDepth) return;
+          for (var i = 0; i < parent.children.length; i++) {
+            var child = parent.children[i];
+            try {
+              var anns = extractAnnotations(child);
+              if (anns.length > 0) {
+                childAnnotations.push({
+                  nodeId: child.id,
+                  nodeName: child.name,
+                  nodeType: child.type,
+                  annotations: anns
+                });
+              }
+              if ('children' in child && child.children) {
+                walkChildren(child, currentDepth + 1);
+              }
+            } catch (e) {}
+          }
+        }
+        walkChildren(node, 1);
+      }
+
+      var result = {
+        nodeId: node.id,
+        nodeName: node.name,
+        nodeType: node.type,
+        annotations: nodeAnnotations,
+        annotationCount: nodeAnnotations.length,
+        children: includeChildren ? childAnnotations : undefined,
+        childAnnotationCount: includeChildren ? childAnnotations.reduce(function(sum, c) { return sum + c.annotations.length; }, 0) : undefined,
+        availableCategories: categories.map(function(c) { return { id: c.id, name: c.name }; })
+      };
+
+      console.log('🌉 [Desktop Bridge] Annotations retrieved. Node: ' + nodeAnnotations.length + ', Children: ' + (childAnnotations.length || 0));
+
+      figma.ui.postMessage({
+        type: 'GET_ANNOTATIONS_RESULT',
+        requestId: msg.requestId,
+        success: true,
+        data: result
+      });
+
+    } catch (error) {
+      var errorMsg = error && error.message ? error.message : String(error);
+      console.error('🌉 [Desktop Bridge] Get annotations error:', errorMsg);
+      figma.ui.postMessage({
+        type: 'GET_ANNOTATIONS_RESULT',
+        requestId: msg.requestId,
+        success: false,
+        error: errorMsg
+      });
+    }
+  }
+
+  // ============================================================================
+  // SET_ANNOTATIONS - Write annotations to a node
+  // ============================================================================
+  else if (msg.type === 'SET_ANNOTATIONS') {
+    try {
+      console.log('🌉 [Desktop Bridge] Setting annotations on node:', msg.nodeId);
+
+      var node = await figma.getNodeByIdAsync(msg.nodeId);
+      if (!node) {
+        throw new Error('Node not found: ' + msg.nodeId);
+      }
+
+      if (!('annotations' in node)) {
+        throw new Error('Node type ' + node.type + ' does not support annotations');
+      }
+
+      var newAnnotations = [];
+      var inputAnnotations = msg.annotations || [];
+
+      for (var i = 0; i < inputAnnotations.length; i++) {
+        var input = inputAnnotations[i];
+        var ann = {};
+
+        if (input.label) {
+          ann.label = input.label;
+        }
+        if (input.labelMarkdown) {
+          ann.labelMarkdown = input.labelMarkdown;
+        }
+        if (input.properties && input.properties.length > 0) {
+          ann.properties = [];
+          for (var p = 0; p < input.properties.length; p++) {
+            ann.properties.push({ type: input.properties[p].type });
+          }
+        }
+        if (input.categoryId) {
+          ann.categoryId = input.categoryId;
+        }
+
+        newAnnotations.push(ann);
+      }
+
+      var annotationMode = msg.mode || 'replace';
+      if (annotationMode === 'append') {
+        var existing = node.annotations || [];
+        var merged = [];
+        for (var e = 0; e < existing.length; e++) {
+          var ex = existing[e];
+          var copy = {};
+          if (ex.label) copy.label = ex.label;
+          if (ex.labelMarkdown) copy.labelMarkdown = ex.labelMarkdown;
+          if (ex.properties) copy.properties = ex.properties;
+          if (ex.categoryId) copy.categoryId = ex.categoryId;
+          merged.push(copy);
+        }
+        for (var n = 0; n < newAnnotations.length; n++) {
+          merged.push(newAnnotations[n]);
+        }
+        newAnnotations = merged;
+      }
+
+      node.annotations = newAnnotations;
+
+      console.log('🌉 [Desktop Bridge] Annotations set successfully. Count: ' + newAnnotations.length);
+
+      figma.ui.postMessage({
+        type: 'SET_ANNOTATIONS_RESULT',
+        requestId: msg.requestId,
+        success: true,
+        data: {
+          nodeId: node.id,
+          nodeName: node.name,
+          annotationCount: newAnnotations.length,
+          mode: annotationMode
+        }
+      });
+
+    } catch (error) {
+      var errorMsg = error && error.message ? error.message : String(error);
+      console.error('🌉 [Desktop Bridge] Set annotations error:', errorMsg);
+      figma.ui.postMessage({
+        type: 'SET_ANNOTATIONS_RESULT',
+        requestId: msg.requestId,
+        success: false,
+        error: errorMsg
+      });
+    }
+  }
+
+  // ============================================================================
+  // GET_ANNOTATION_CATEGORIES - List available annotation categories
+  // ============================================================================
+  else if (msg.type === 'GET_ANNOTATION_CATEGORIES') {
+    try {
+      console.log('🌉 [Desktop Bridge] Fetching annotation categories');
+
+      var categories = await figma.annotations.getAnnotationCategoriesAsync();
+      var result = categories.map(function(c) { return { id: c.id, name: c.name }; });
+
+      console.log('🌉 [Desktop Bridge] Found ' + result.length + ' annotation categories');
+
+      figma.ui.postMessage({
+        type: 'GET_ANNOTATION_CATEGORIES_RESULT',
+        requestId: msg.requestId,
+        success: true,
+        data: { categories: result }
+      });
+
+    } catch (error) {
+      var errorMsg = error && error.message ? error.message : String(error);
+      console.error('🌉 [Desktop Bridge] Get annotation categories error:', errorMsg);
+      figma.ui.postMessage({
+        type: 'GET_ANNOTATION_CATEGORIES_RESULT',
         requestId: msg.requestId,
         success: false,
         error: errorMsg

@@ -6,6 +6,7 @@ import type { CompressionConfigManager } from '../compression/compression-config
 import type { DesignSystemCache } from '../compression/design-system-cache.js';
 import type { ImageGenerator } from '../image-gen/image-generator.js';
 import type { OperationQueue } from '../operation-queue.js';
+import { createAnnotationTools } from './annotations.js';
 import { createComponentTools } from './components.js';
 import { createCoreTools } from './core.js';
 import { createDiscoveryTools } from './discovery.js';
@@ -59,6 +60,7 @@ export function createFigmaTools(deps: ToolDeps): ToolDefinition[] {
     ...createManipulationTools(deps),
     ...createTokenTools(deps),
     ...createJsxRenderTools(deps),
+    ...createAnnotationTools(deps),
     ...(deps.getImageGenerator ? createImageGenTools(deps) : []),
   ];
   return tools.map(withAbortCheck);

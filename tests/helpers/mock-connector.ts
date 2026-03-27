@@ -49,6 +49,11 @@ export function createMockConnector() {
     'createFromJsx',
     'createIcon',
     'bindVariable',
+    'deepGetComponent',
+    'analyzeComponentSet',
+    'getAnnotations',
+    'setAnnotations',
+    'getAnnotationCategories',
   ] as const;
 
   const mock: Record<string, any> = {};

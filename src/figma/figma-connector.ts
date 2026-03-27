@@ -86,4 +86,15 @@ export interface IFigmaConnector {
     opts?: { x?: number; y?: number; parentId?: string },
   ): Promise<{ nodeId: string }>;
   bindVariable(nodeId: string, variableName: string, property: 'fill' | 'stroke'): Promise<void>;
+
+  // Deep component extraction (plugin-side recursive walk with token resolution)
+  deepGetComponent(nodeId: string, depth?: number): Promise<any>;
+
+  // Component set variant analysis
+  analyzeComponentSet(nodeId: string): Promise<any>;
+
+  // Annotations
+  getAnnotations(nodeId: string, includeChildren?: boolean, depth?: number): Promise<any>;
+  setAnnotations(nodeId: string, annotations: any[], mode?: 'replace' | 'append'): Promise<any>;
+  getAnnotationCategories(): Promise<any>;
 }

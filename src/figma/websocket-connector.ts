@@ -314,4 +314,32 @@ export class WebSocketConnector implements IFigmaConnector {
   async bindVariable(nodeId: string, variableName: string, property: 'fill' | 'stroke'): Promise<void> {
     return this.wsServer.sendCommand('BIND_VARIABLE', { nodeId, variableName, property }, 10000);
   }
+
+  // ============================================================================
+  // Deep component extraction & analysis
+  // ============================================================================
+
+  async deepGetComponent(nodeId: string, depth?: number): Promise<any> {
+    return this.wsServer.sendCommand('DEEP_GET_COMPONENT', { nodeId, depth }, 30000);
+  }
+
+  async analyzeComponentSet(nodeId: string): Promise<any> {
+    return this.wsServer.sendCommand('ANALYZE_COMPONENT_SET', { nodeId }, 30000);
+  }
+
+  // ============================================================================
+  // Annotations
+  // ============================================================================
+
+  async getAnnotations(nodeId: string, includeChildren?: boolean, depth?: number): Promise<any> {
+    return this.wsServer.sendCommand('GET_ANNOTATIONS', { nodeId, includeChildren, depth }, 10000);
+  }
+
+  async setAnnotations(nodeId: string, annotations: any[], mode?: 'replace' | 'append'): Promise<any> {
+    return this.wsServer.sendCommand('SET_ANNOTATIONS', { nodeId, annotations, mode }, 10000);
+  }
+
+  async getAnnotationCategories(): Promise<any> {
+    return this.wsServer.sendCommand('GET_ANNOTATION_CATEGORIES', {}, 5000);
+  }
 }

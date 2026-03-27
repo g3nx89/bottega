@@ -121,6 +121,37 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       },
     },
     {
+      name: 'figma_get_component_deep',
+      label: 'Deep Component Extraction',
+      description:
+        'Get a deeply nested component tree with full visual properties, resolved design tokens, prototype interactions, and annotations. Runs entirely in the plugin — no REST API needed. Also reports token_coverage (% of properties using design tokens vs hardcoded values).',
+      promptSnippet:
+        'figma_get_component_deep: extract full component tree with tokens, interactions, annotations, and token coverage',
+      parameters: Type.Object({
+        nodeId: Type.String({ description: 'Component node ID (e.g., "695:313")' }),
+        depth: Type.Optional(Type.Number({ description: 'Max tree depth (default: 10, max: 20)', default: 10 })),
+      }),
+      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+        const depth = Math.min(Math.max(params.depth || 10, 1), 20);
+        const result = await connector.deepGetComponent(params.nodeId, depth);
+        return textResult(result);
+      },
+    },
+    {
+      name: 'figma_analyze_component_set',
+      label: 'Analyze Component Set',
+      description:
+        'Analyze a COMPONENT_SET to extract variant state machine, CSS pseudo-class mappings, and cross-variant visual diffs. Essential for understanding how component variants map to interactive states in code.',
+      promptSnippet: 'figma_analyze_component_set: extract variant states, CSS pseudo-class mappings, and visual diffs',
+      parameters: Type.Object({
+        nodeId: Type.String({ description: 'COMPONENT_SET node ID (e.g., "214:274")' }),
+      }),
+      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+        const result = await connector.analyzeComponentSet(params.nodeId);
+        return textResult(result);
+      },
+    },
+    {
       name: 'figma_design_system',
       label: 'Design System Overview',
       description:
