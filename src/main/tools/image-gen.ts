@@ -373,6 +373,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         const containerName = `${type.charAt(0).toUpperCase() + type.slice(1)}: ${shortPrompt}`;
 
         // Create frames in Figma
+        // nosemgrep: missing-template-string-indicator — code generation: builds plugin code sent to Figma
         const createCode = `return (async () => {
           const parent = ${params.parentId ? `await figma.getNodeByIdAsync(${JSON.stringify(params.parentId)})` : 'figma.currentPage'};
           if (!parent) return JSON.stringify({ error: "Parent not found" });

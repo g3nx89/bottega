@@ -59,6 +59,7 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
         return operationQueue.execute(async () => {
           const nodeId = String(params.nodeId).replace(/[^0-9:]/g, '');
           const cols = Math.max(1, Math.floor(Number(params.columns) || 4));
+          // nosemgrep: missing-template-string-indicator — code generation: builds plugin code sent to Figma
           const code = `
             return (async () => {
               try {

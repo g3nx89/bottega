@@ -67,6 +67,8 @@ engines:
     enabled: false
 
 exclude_paths:
+  # Custom semgrep rules (Opengrep flags false duplicate-id)
+  - ".semgrep/**"
   # Build output
   - "dist/**"
   # Forked Figma plugin — upstream code, not our responsibility

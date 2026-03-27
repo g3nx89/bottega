@@ -135,7 +135,7 @@ interface CacheEntry {
   timestamp: number;
 }
 
-const DEFAULT_FILE_KEY = '__global__';
+const DEFAULT_FILE_KEY = '__global__'; // nosemgrep: hard-coded-password — sentinel value, not a password
 
 export class DesignSystemCache {
   private entries = new Map<string, CacheEntry>();

@@ -46,6 +46,7 @@ export class WebSocketConnector implements IFigmaConnector {
   }
 
   async getVariables(fileKey?: string): Promise<any> {
+    // nosemgrep: missing-template-string-indicator — code generation: builds plugin code sent to Figma
     const code = `
       (async () => {
         try {

@@ -21,7 +21,7 @@ import type { UsageTracker } from './usage-tracker.js';
 const log = createChildLogger({ component: 'slot-manager' });
 
 export const MAX_SLOTS = 4;
-export const UNBOUND_FILE_KEY = '__unbound__';
+export const UNBOUND_FILE_KEY = '__unbound__'; // nosemgrep: hard-coded-password — sentinel value, not a password
 
 export interface SessionSlot {
   id: string;

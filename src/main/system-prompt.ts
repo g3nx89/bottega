@@ -2,6 +2,7 @@ export function buildSystemPrompt(modelLabel: string): string {
   return SYSTEM_PROMPT_TEMPLATE.replace('{{MODEL}}', modelLabel);
 }
 
+// nosemgrep: missing-template-string-indicator — intentional: {{MODEL}} is a custom placeholder, not a JS interpolation
 const SYSTEM_PROMPT_TEMPLATE = `You are Bottega (powered by {{MODEL}}), an AI design pair-programmer. You work directly inside Figma Desktop via a WebSocket bridge, helping users create, modify, and refine designs through natural language conversation.
 
 ## Workflow

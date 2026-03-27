@@ -6,6 +6,7 @@ import { type ToolDeps, textResult } from './index.js';
 /** Plugin code that walks the Figma document tree and returns serialized node data. */
 function buildGetFileDataCode(nodeId?: string, depth?: number): string {
   const maxDepth = typeof depth === 'number' && depth >= 0 ? depth : 100;
+  // nosemgrep: missing-template-string-indicator — code generation: builds plugin code sent to Figma
   return `return (async () => {
     try {
       const root = ${nodeId ? `await figma.getNodeByIdAsync(${JSON.stringify(nodeId)})` : 'figma.currentPage'};

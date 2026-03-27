@@ -12,6 +12,7 @@ for (const tag of tagNames) {
 const jsxContext = vm.createContext(sandbox);
 
 export function parseJsx(jsxString: string): TreeNode {
+  // nosemgrep: missing-template-string-indicator — code generation: builds JS source to run in vm sandbox
   const wrappedCode = `
     (function() {
       function h(type, props) {

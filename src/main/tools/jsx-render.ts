@@ -12,6 +12,7 @@ export function createJsxRenderTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_render_jsx',
       label: 'Render JSX',
+      // nosemgrep: missing-template-string-indicator — multiline description with backtick syntax, no interpolation
       description: `Render a JSX tree into Figma nodes. Uses Tailwind-like shorthand props:
 - bg="#hex" → fill color
 - p/px/py/pt/pr/pb/pl={n} → padding
