@@ -144,7 +144,7 @@ export function exportDiagnosticsZip(destPath: string): Promise<void> {
     const info = collectSystemInfo();
     archive.append(JSON.stringify(info, null, 2), { name: 'system-info.json' });
 
-    archive.finalize();
+    void archive.finalize();
   });
 }
 

@@ -92,7 +92,7 @@ export class SessionStore {
     const keys = Object.keys(map);
     if (keys.length <= maxEntries) return;
 
-    keys.sort((a, b) => (map[a].lastAccessed || '').localeCompare(map[b].lastAccessed || ''));
+    keys.sort((a, b) => (map[a]!.lastAccessed || '').localeCompare(map[b]!.lastAccessed || ''));
 
     const toRemove = keys.slice(0, keys.length - maxEntries);
     for (const key of toRemove) {

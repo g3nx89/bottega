@@ -17,7 +17,7 @@ export function extractFileKey(url: string): string | null {
   try {
     const urlObj = new URL(url);
     const match = urlObj.pathname.match(/\/(design|file)\/([a-zA-Z0-9]+)/);
-    return match ? match[2] : null;
+    return match ? match[2]! : null;
   } catch (error) {
     logger.error({ error, url }, 'Failed to extract file key from URL');
     return null;
@@ -42,8 +42,8 @@ export function extractFigmaUrlInfo(url: string): FigmaUrlInfo | null {
 
     const branchPathMatch = urlObj.pathname.match(/\/(design|file)\/([a-zA-Z0-9]+)\/branch\/([a-zA-Z0-9]+)/);
     if (branchPathMatch) {
-      const fileKey = branchPathMatch[2];
-      const branchId = branchPathMatch[3];
+      const fileKey = branchPathMatch[2]!;
+      const branchId = branchPathMatch[3]!;
       const nodeIdParam = urlObj.searchParams.get('node-id');
       const nodeId = nodeIdParam ? nodeIdParam.replace(/-/g, ':') : undefined;
       return { fileKey, branchId, nodeId };
@@ -52,7 +52,7 @@ export function extractFigmaUrlInfo(url: string): FigmaUrlInfo | null {
     const standardMatch = urlObj.pathname.match(/\/(design|file)\/([a-zA-Z0-9]+)/);
     if (!standardMatch) return null;
 
-    const fileKey = standardMatch[2];
+    const fileKey = standardMatch[2]!;
     const branchId = urlObj.searchParams.get('branch-id') || undefined;
     const nodeIdParam = urlObj.searchParams.get('node-id');
     const nodeId = nodeIdParam ? nodeIdParam.replace(/-/g, ':') : undefined;
@@ -72,7 +72,7 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
     const timeoutId = setTimeout(() => {
       reject(new Error(`${label} timed out after ${ms}ms`));
     }, ms);
-    promise.finally(() => clearTimeout(timeoutId));
+    void promise.finally(() => clearTimeout(timeoutId));
   });
   return Promise.race([promise, timeoutPromise]);
 }
@@ -112,7 +112,7 @@ export class FigmaAPI {
     };
 
     if (isOAuthToken) {
-      headers['Authorization'] = `Bearer ${this.accessToken}`;
+      headers.Authorization = `Bearer ${this.accessToken}`;
     } else {
       headers['X-Figma-Token'] = this.accessToken;
     }

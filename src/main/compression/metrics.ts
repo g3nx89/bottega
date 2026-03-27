@@ -5,9 +5,9 @@
  * Data is used to calibrate Phase 2-3 thresholds and monitor compression health.
  */
 
-import fs from 'fs/promises';
-import os from 'os';
-import path from 'path';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { createChildLogger } from '../../figma/logger.js';
 
 const log = createChildLogger({ component: 'compression-metrics' });
@@ -128,7 +128,10 @@ export class CompressionMetricsCollector {
     const cat = event.category;
     this.sessionMetrics.toolCallsByCategory[cat] = (this.sessionMetrics.toolCallsByCategory[cat] || 0) + 1;
 
-    const cc = (this.sessionMetrics.compressionByCategory[cat] ||= { totalBefore: 0, totalAfter: 0 });
+    if (!this.sessionMetrics.compressionByCategory[cat]) {
+      this.sessionMetrics.compressionByCategory[cat] = { totalBefore: 0, totalAfter: 0 };
+    }
+    const cc = this.sessionMetrics.compressionByCategory[cat];
     cc.totalBefore += event.estimatedTokensBefore;
     cc.totalAfter += event.estimatedTokensAfter;
 

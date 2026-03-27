@@ -281,7 +281,7 @@ function switchToTab(slotId) {
 
   // Detach current chat
   const currentTab = getActiveTab();
-  if (currentTab && currentTab.chatContainer.parentNode) {
+  if (currentTab?.chatContainer.parentNode) {
     chatArea.removeChild(currentTab.chatContainer);
   }
 
@@ -489,7 +489,7 @@ function completeToolCard(tab, toolCallId, success) {
 
 // Screenshots
 function addScreenshot(tab, base64, opts) {
-  const lazy = opts && opts.lazy;
+  const lazy = opts?.lazy;
   if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
   const img = document.createElement('img');
   img.className = 'screenshot';
@@ -748,7 +748,7 @@ window.api.onAgentEnd((slotId) => {
   // only sanitized markup — no untrusted content is injected directly.
   if (tab.currentAssistantBubble) {
     const content = tab.currentAssistantBubble.querySelector('.message-content');
-    if (content && content.textContent) {
+    if (content?.textContent) {
       // safe: escapeHtml applied first inside renderMarkdown()
       content.innerHTML = renderMarkdown(content.textContent);
     }
@@ -764,10 +764,8 @@ window.api.onAgentEnd((slotId) => {
 const contextFill = document.getElementById('context-fill');
 const contextLabel = document.getElementById('context-label');
 let contextSizes = {};
-let lastInputTokens = 0;
 
 function updateContextBar(inputTokens) {
-  lastInputTokens = inputTokens;
   const modelId = getActiveTab()?.modelConfig?.modelId || localStorage.getItem('bottega:model') || 'claude-sonnet-4-6';
   const maxTokens = contextSizes[modelId] || 200000;
   const pct = Math.min(100, (inputTokens / maxTokens) * 100);
@@ -836,7 +834,7 @@ window.api.onTabRemoved((slotId) => {
     else activeTabId = null;
   }
   const removed = tabs.get(slotId);
-  if (removed && removed.chatContainer.parentNode) {
+  if (removed?.chatContainer.parentNode) {
     removed.chatContainer.parentNode.removeChild(removed.chatContainer);
   }
   tabs.delete(slotId);
@@ -1423,6 +1421,7 @@ if (compressionSelect) {
     try {
       await window.api.compressionSetProfile(profile);
     } catch (err) {
+      // biome-ignore lint/suspicious/noConsole: renderer has no structured logger
       console.warn('Failed to set compression profile:', err);
     }
   });
@@ -1437,6 +1436,7 @@ if (compressionRefreshBtn) {
         compressionRefreshBtn.textContent = 'Refresh caches';
       }, 1500);
     } catch (err) {
+      // biome-ignore lint/suspicious/noConsole: renderer has no structured logger
       console.warn('Failed to invalidate caches:', err);
     }
   });

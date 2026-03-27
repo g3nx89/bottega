@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { type AppState, AppStatePersistence, type PersistedSlot } from '../src/main/app-state-persistence.js';
+import { AppStatePersistence, type PersistedSlot } from '../src/main/app-state-persistence.js';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `bottega-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);

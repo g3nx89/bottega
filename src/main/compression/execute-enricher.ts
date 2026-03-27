@@ -13,7 +13,7 @@ export function enrichExecuteResult(content: any[]): { content: any[]; extracted
 
   const ids = new Set<string>();
   for (const match of text.matchAll(NODE_ID_RE)) {
-    ids.add(match[1]);
+    ids.add(match[1]!);
   }
 
   if (ids.size === 0) {

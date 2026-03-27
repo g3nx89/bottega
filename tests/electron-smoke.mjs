@@ -29,8 +29,8 @@ async function main() {
   const statusClass = await statusDot?.getAttribute('class');
   console.log('Status dot class:', statusClass);
 
-  const statusText = await window.textContent('#status-text');
-  console.log('Status text:', statusText);
+  const statusTitle = await statusDot?.getAttribute('title');
+  console.log('Status title:', statusTitle);
 
   const inputField = await window.$('#input-field');
   console.log('Input field present:', !!inputField);
@@ -46,8 +46,8 @@ async function main() {
     const currentClass = await (await window.$('#status-dot'))?.getAttribute('class');
     if (currentClass?.includes('connected') && !currentClass?.includes('disconnected')) {
       connected = true;
-      const connStatusText = await window.textContent('#status-text');
-      console.log('Connected! Status text:', connStatusText);
+      const connTitle = await (await window.$('#status-dot'))?.getAttribute('title');
+      console.log('Connected! Status title:', connTitle);
       break;
     }
   }

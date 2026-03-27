@@ -84,7 +84,7 @@ export async function resolveIcons(tree: TreeNode): Promise<void> {
   const results = await Promise.allSettled(entries.map((g) => loadIconSvg(g.name, g.size)));
   entries.forEach((group, i) => {
     const result = results[i];
-    if (result.status !== 'fulfilled') return; // Leave nodes unchanged — doesn't break the tree
+    if (result?.status !== 'fulfilled') return; // Leave nodes unchanged — doesn't break the tree
     for (const node of group.nodes) {
       node.type = 'svg';
       node.props = { ...node.props, svg: result.value, w: group.size, h: group.size };

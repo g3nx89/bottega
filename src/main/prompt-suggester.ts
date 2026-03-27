@@ -6,7 +6,7 @@
  * suggestions are forwarded via IPC and rendered as clickable chips.
  */
 import { completeSimple, getModel } from '@mariozechner/pi-ai';
-import type { AuthStorage, ModelRegistry } from '@mariozechner/pi-coding-agent';
+import type { AuthStorage } from '@mariozechner/pi-coding-agent';
 import { createChildLogger } from '../figma/logger.js';
 import type { ModelConfig } from './agent.js';
 
@@ -63,10 +63,7 @@ export class PromptSuggester {
   private lastAssistantText = '';
   private generating = false;
 
-  constructor(
-    private authStorage: AuthStorage,
-    private modelRegistry: ModelRegistry,
-  ) {}
+  constructor(private authStorage: AuthStorage) {}
 
   /** Track a user prompt for context */
   trackUserPrompt(text: string): void {

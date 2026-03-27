@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { rgbaToHex } from '../../src/main/compression/color-utils.js';
 import { compactDesignSystem, DesignSystemCache } from '../../src/main/compression/design-system-cache.js';
 
@@ -104,9 +104,9 @@ describe('compactDesignSystem', () => {
     const brand = result.variables[0];
 
     expect(brand.vars['color/primary'].type).toBe('COLOR');
-    expect(brand.vars['color/primary'].values['Light']).toBe('#3366FF');
-    expect(brand.vars['color/primary'].values['Dark']).toBe('#1A33CC');
-    expect(brand.vars['color/secondary'].values['Light']).toBe('#FF0000');
+    expect(brand.vars['color/primary'].values.Light).toBe('#3366FF');
+    expect(brand.vars['color/primary'].values.Dark).toBe('#1A33CC');
+    expect(brand.vars['color/secondary'].values.Light).toBe('#FF0000');
   });
 
   it('preserves FLOAT and STRING and BOOLEAN values as-is', () => {
@@ -114,13 +114,13 @@ describe('compactDesignSystem', () => {
     const spacing = result.variables[1];
 
     expect(spacing.vars['spacing/sm'].type).toBe('FLOAT');
-    expect(spacing.vars['spacing/sm'].values['Default']).toBe(8);
+    expect(spacing.vars['spacing/sm'].values.Default).toBe(8);
 
     expect(spacing.vars['label/cta'].type).toBe('STRING');
-    expect(spacing.vars['label/cta'].values['Default']).toBe('Click me');
+    expect(spacing.vars['label/cta'].values.Default).toBe('Click me');
 
-    expect(spacing.vars['visible'].type).toBe('BOOLEAN');
-    expect(spacing.vars['visible'].values['Default']).toBe(true);
+    expect(spacing.vars.visible.type).toBe('BOOLEAN');
+    expect(spacing.vars.visible.values.Default).toBe(true);
   });
 
   it('extracts component props from componentProperties', () => {

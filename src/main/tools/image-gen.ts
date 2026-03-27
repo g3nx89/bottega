@@ -34,10 +34,12 @@ async function editNodeImage(deps: ToolDeps, params: { prompt: string; nodeId: s
   const sourceBase64 = await exportNodeBase64(deps, params.nodeId);
 
   const result = await gen.edit(params.prompt, sourceBase64);
-  if (!result.success) return textResult({ success: false, error: result.error });
+  if (!result.success || result.images.length === 0) {
+    return textResult({ success: false, error: result.error ?? 'No images generated' });
+  }
 
   await operationQueue.execute(async () => {
-    await connector.setImageFill([params.nodeId], result.images[0], 'FILL');
+    await connector.setImageFill([params.nodeId], result.images[0]!, 'FILL');
   });
 
   return textResult({ success: true, hint });
@@ -107,7 +109,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
 
         if (params.nodeIds?.length && result.images.length > 0) {
           await operationQueue.execute(async () => {
-            await connector.setImageFill(params.nodeIds, result.images[0], params.scaleMode ?? 'FILL');
+            await connector.setImageFill(params.nodeIds, result.images[0]!, params.scaleMode ?? 'FILL');
           });
         }
 
@@ -213,11 +215,13 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         });
 
         const result = await gen.generate(prompt);
-        if (!result.success) return textResult({ success: false, error: result.error });
+        if (!result.success || result.images.length === 0) {
+          return textResult({ success: false, error: result.error ?? 'No images generated' });
+        }
 
         if (params.nodeId) {
           await operationQueue.execute(async () => {
-            await connector.setImageFill([params.nodeId], result.images[0], 'FILL');
+            await connector.setImageFill([params.nodeId], result.images[0]!, 'FILL');
           });
         }
 
@@ -284,12 +288,14 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         });
 
         const result = await gen.generate(prompt);
-        if (!result.success) return textResult({ success: false, error: result.error });
+        if (!result.success || result.images.length === 0) {
+          return textResult({ success: false, error: result.error ?? 'No images generated' });
+        }
 
         if (params.nodeIds?.length) {
           const mode = params.scaleMode ?? (params.type === 'seamless' ? 'TILE' : 'FILL');
           await operationQueue.execute(async () => {
-            await connector.setImageFill(params.nodeIds, result.images[0], mode);
+            await connector.setImageFill(params.nodeIds, result.images[0]!, mode);
           });
         }
 
@@ -354,7 +360,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
           const stepPrompt = buildStoryStepPrompt(params.prompt, i, numSteps, { type, style, transition });
           const result = await gen.generate(stepPrompt);
           if (result.success && result.images.length > 0) {
-            images.push(result.images[0]);
+            images.push(result.images[0]!);
           }
         }
 
@@ -409,7 +415,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         if (parsed?.frameIds) {
           await operationQueue.execute(async () => {
             for (let i = 0; i < Math.min(images.length, parsed.frameIds.length); i++) {
-              await connector.setImageFill([parsed.frameIds[i]], images[i], 'FILL');
+              await connector.setImageFill([parsed.frameIds[i]!], images[i]!, 'FILL');
             }
           });
         }
@@ -479,11 +485,13 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         });
 
         const result = await gen.generate(prompt);
-        if (!result.success) return textResult({ success: false, error: result.error });
+        if (!result.success || result.images.length === 0) {
+          return textResult({ success: false, error: result.error ?? 'No images generated' });
+        }
 
         if (params.nodeId) {
           await operationQueue.execute(async () => {
-            await connector.setImageFill([params.nodeId], result.images[0], 'FILL');
+            await connector.setImageFill([params.nodeId], result.images[0]!, 'FILL');
           });
         }
 

@@ -119,7 +119,7 @@ export class ImageGenerator {
     // Base64 never contains spaces — reject text/error responses early
     if (data.includes(' ')) return false;
     // Check prefix and suffix only — avoid full-string regex scan on multi-MB base64
-    return /^[A-Za-z0-9+/]/.test(data[0]) && /[A-Za-z0-9+/]={0,2}$/.test(data.slice(-4));
+    return /^[A-Za-z0-9+/]/.test(data[0]!) && /[A-Za-z0-9+/]={0,2}$/.test(data.slice(-4));
   }
 
   private handleError(error: unknown): string {

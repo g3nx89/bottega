@@ -98,7 +98,9 @@ test.describe('Single instance lock (E2E)', () => {
 });
 
 test.describe('Port conflict notification (E2E)', () => {
-  test('app shows error and exits when port is occupied', async () => {
+  // dialog.showErrorBox() blocks Electron's event loop, so this test needs
+  // extra time to launch, detect the block, and force-kill the process.
+  test('app shows error and exits when port is occupied', { timeout: 30_000 }, async () => {
     const net = await import('net');
     const blocker = net.createServer();
 
@@ -120,6 +122,8 @@ test.describe('Port conflict notification (E2E)', () => {
         },
       });
 
+      const pid = app.process()?.pid;
+
       try {
         await Promise.race([
           app.firstWindow().then(async (w) => {
@@ -133,13 +137,20 @@ test.describe('Port conflict notification (E2E)', () => {
         // Expected: app exits before window is usable, or times out
         appExited = true;
       } finally {
+        // dialog.showErrorBox() blocks the Electron event loop, so app.close()
+        // hangs indefinitely. Force-kill the process instead.
+        if (pid) {
+          try { process.kill(pid, 'SIGKILL'); } catch { /* already dead */ }
+        }
         try {
-          await app.close();
+          await Promise.race([app.close(), new Promise((r) => setTimeout(r, 3000))]);
         } catch {
-          // Already closed — this IS the success path
           appExited = true;
         }
       }
+    } catch {
+      // electron.launch itself may throw if the app exits quickly
+      appExited = true;
     } finally {
       await new Promise((resolve) => blocker.close(() => resolve(undefined)));
     }

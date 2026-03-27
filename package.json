@@ -5,6 +5,7 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:check": "npm run build && node scripts/check-bundle-size.mjs",
     "start": "npm run build && npx electron dist/main.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -13,8 +14,14 @@
     "test:e2e": "npm run build && npx playwright test tests/e2e/",
     "lint": "biome check src/ tests/",
     "lint:fix": "biome check --write src/ tests/",
-    "check": "npm run typecheck && npm run lint && npm run test",
-    "package": "npm run build && npx electron-builder --mac"
+    "lint:types": "eslint src/",
+    "lint:arch": "which semgrep > /dev/null 2>&1 && semgrep --config .semgrep/ src/ || echo 'semgrep not installed — install via: pip3 install semgrep'",
+    "lint:dead": "knip",
+    "check": "npm run validate",
+    "validate": "concurrently -g npm:typecheck npm:lint npm:lint:types && concurrently -g npm:test npm:lint:dead npm:audit:deps",
+    "audit:deps": "npm audit --audit-level=high",
+    "package": "npm run build && npx electron-builder --mac",
+    "prepare": "husky"
   },
   "dependencies": {
     "@axiomhq/pino": "^1.5.0",
@@ -33,14 +40,29 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.8",
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.58.2",
     "@types/archiver": "^7.0.0",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.0",
+    "@vitest/coverage-v8": "^4.1.2",
+    "concurrently": "^9.2.1",
     "electron": "^33.0.0",
     "electron-builder": "^26.0.0",
+    "eslint": "^10.1.0",
+    "husky": "^9.1.7",
+    "knip": "^6.0.6",
+    "lint-staged": "^16.4.0",
     "typescript": "^5.8.0",
+    "typescript-eslint": "^8.57.2",
     "vitest": "^4.1.0"
+  },
+  "lint-staged": {
+    "{src,tests}/**/*.ts": [
+      "biome check --write"
+    ]
   },
   "build": {
     "appId": "com.bottega.app",

@@ -1,0 +1,9 @@
+rules:
+  # ipcMain.handle boundary → enforced by ESLint no-restricted-syntax in eslint.config.js
+  # electron import boundary → enforced by ESLint no-restricted-imports in eslint.config.js
+
+  - id: no-ts-ignore
+    pattern: "// @ts-ignore"
+    message: "Usa @ts-expect-error con commento invece di @ts-ignore"
+    severity: ERROR
+    languages: [typescript]

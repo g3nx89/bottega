@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -462,7 +462,7 @@ describe('SlotManager', () => {
 
   describe('setActiveSlot', () => {
     it('sets active slot ID', async () => {
-      const first = await manager.createSlot('file-abc', 'Design.fig');
+      const _first = await manager.createSlot('file-abc', 'Design.fig');
       const second = await manager.createSlot('file-def', 'Other.fig');
 
       manager.setActiveSlot(second.id);
@@ -471,7 +471,7 @@ describe('SlotManager', () => {
     });
 
     it('activeSlot getter returns slot matching activeSlotId', async () => {
-      const first = await manager.createSlot('file-abc', 'Design.fig');
+      const _first = await manager.createSlot('file-abc', 'Design.fig');
       const second = await manager.createSlot('file-def', 'Other.fig');
 
       manager.setActiveSlot(second.id);

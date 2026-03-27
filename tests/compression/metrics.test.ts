@@ -116,8 +116,8 @@ describe('CompressionMetricsCollector', () => {
     collector.recordToolCompression(makeEvent({ category: 'discovery' }));
 
     const metrics = collector.getSessionMetrics();
-    expect(metrics.toolCallsByCategory['mutation']).toBe(2);
-    expect(metrics.toolCallsByCategory['discovery']).toBe(1);
+    expect(metrics.toolCallsByCategory.mutation).toBe(2);
+    expect(metrics.toolCallsByCategory.discovery).toBe(1);
   });
 
   it('tracks compression by category', () => {
@@ -138,7 +138,7 @@ describe('CompressionMetricsCollector', () => {
     );
 
     const metrics = collector.getSessionMetrics();
-    expect(metrics.compressionByCategory['mutation']).toEqual({
+    expect(metrics.compressionByCategory.mutation).toEqual({
       totalBefore: 500,
       totalAfter: 25,
     });

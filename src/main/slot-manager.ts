@@ -96,7 +96,7 @@ export class SlotManager {
 
     await this.initSession(session, fileKey ?? null);
 
-    const suggester = new PromptSuggester(this.infra.authStorage, this.infra.modelRegistry);
+    const suggester = new PromptSuggester(this.infra.authStorage);
 
     const slot: SessionSlot = {
       id: randomUUID(),
@@ -203,7 +203,7 @@ export class SlotManager {
 
       slot.session = session;
       slot.modelConfig = modelConfig;
-      slot.suggester = new PromptSuggester(this.infra.authStorage, this.infra.modelRegistry);
+      slot.suggester = new PromptSuggester(this.infra.authStorage);
       if (slot.thinkingLevel !== DEFAULT_THINKING_LEVEL) {
         session.setThinkingLevel?.(slot.thinkingLevel);
       }

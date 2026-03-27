@@ -17,8 +17,8 @@ async function main() {
 
   // Initial state
   let statusClass = await (await window.$('#status-dot'))?.getAttribute('class');
-  let statusText = await window.textContent('#status-text');
-  console.log('Initial status:', statusClass, '|', statusText);
+  let statusTitle = await (await window.$('#status-dot'))?.getAttribute('title');
+  console.log('Initial status:', statusClass, '|', statusTitle);
   await window.screenshot({ path: 'tests/screenshot-disconnected.png' });
 
   // Wait up to 45s for plugin connection
@@ -29,8 +29,8 @@ async function main() {
     statusClass = await (await window.$('#status-dot'))?.getAttribute('class');
     if (statusClass?.includes('connected') && !statusClass?.includes('disconnected')) {
       connected = true;
-      statusText = await window.textContent('#status-text');
-      console.log('CONNECTED! Status text:', statusText);
+      statusTitle = await (await window.$('#status-dot'))?.getAttribute('title');
+      console.log('CONNECTED! Status title:', statusTitle);
       await window.screenshot({ path: 'tests/screenshot-connected.png' });
       break;
     }

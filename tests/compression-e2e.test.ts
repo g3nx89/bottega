@@ -332,9 +332,9 @@ describe('Compression E2E — metrics collection', () => {
     const session = metrics.getSessionMetrics();
     expect(session.totalToolCalls).toBe(4);
     expect(session.totalTokensSaved).toBeGreaterThan(0);
-    expect(session.toolCallsByCategory['mutation']).toBe(2);
-    expect(session.toolCallsByCategory['execute']).toBe(1);
-    expect(session.toolCallsByCategory['screenshot']).toBe(1);
+    expect(session.toolCallsByCategory.mutation).toBe(2);
+    expect(session.toolCallsByCategory.execute).toBe(1);
+    expect(session.toolCallsByCategory.screenshot).toBe(1);
   });
 
   it('flags large figma_execute results', async () => {

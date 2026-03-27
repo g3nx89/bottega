@@ -43,9 +43,10 @@ test.describe('App startup', () => {
     expect(statusDot).toBeTruthy();
   });
 
-  test('status text is visible', async () => {
-    const statusText = await window.textContent('#status-text');
-    expect(statusText).toBeTruthy();
+  test('status dot has a title attribute', async () => {
+    const statusDot = await window.$('#status-dot');
+    const title = await statusDot?.getAttribute('title');
+    expect(title).toBeTruthy();
   });
 
   test('input field is present', async () => {
@@ -159,6 +160,16 @@ test.describe('IPC communication', () => {
 // ── User Input Interaction ───────────────────────
 
 test.describe('User input interaction', () => {
+  test.beforeAll(async () => {
+    // Ensure there's an active tab — in test mode no Figma connection
+    // auto-creates tabs, so create one programmatically.
+    const tabs = await window.evaluate(() => window.api.listTabs());
+    if (tabs.length === 0) {
+      await window.evaluate(() => window.api.createTab());
+      await window.waitForTimeout(1000);
+    }
+  });
+
   test('typing a message and sending creates a user bubble', async () => {
     const inputField = await window.$('#input-field');
     await inputField.fill('Hello, Figma!');
@@ -230,6 +241,11 @@ test.describe('Model selector', () => {
       await window.click('#settings-btn');
       await window.waitForTimeout(500);
     }
+    // Wait for async initAuthUI() to populate model options (IPC roundtrip)
+    await window.waitForFunction(
+      () => document.querySelectorAll('#model-select option').length > 0,
+      { timeout: 10000 },
+    );
   });
 
   test('model selector is populated with options', async () => {
@@ -278,9 +294,10 @@ test.describe('Connection status (no Figma)', () => {
     expect(hasDisconnected).toBe(true);
   });
 
-  test('status text shows "Disconnected"', async () => {
-    const statusText = await window.textContent('#status-text');
-    expect(statusText).toBe('Disconnected');
+  test('status dot title shows "Disconnected"', async () => {
+    const statusDot = await window.$('#status-dot');
+    const title = await statusDot?.getAttribute('title');
+    expect(title).toBe('Disconnected');
   });
 
   test('status dot does not show connected class', async () => {
@@ -296,6 +313,11 @@ test.describe('Image generation settings', () => {
   test.beforeAll(async () => {
     await window.click('#settings-btn');
     await window.waitForTimeout(500);
+    // Wait for async initImageGenUI() to populate options and status
+    await window.waitForFunction(
+      () => document.querySelectorAll('#imagegen-model-select option').length > 0,
+      { timeout: 10000 },
+    );
   });
 
   test('image gen model selector exists and is populated', async () => {

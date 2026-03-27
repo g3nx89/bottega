@@ -29,7 +29,7 @@ export class OperationQueue {
         }
       });
       if (!this.running) {
-        this.drain();
+        void this.drain();
       }
     });
   }

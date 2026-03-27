@@ -13,7 +13,7 @@
  * Data flow: Main Process ←WebSocket→ ui.html ←postMessage→ code.js ←figma.*→ Figma
  */
 
-import { EventEmitter } from 'events';
+import { EventEmitter } from 'node:events';
 import { WebSocket, WebSocketServer as WSServer } from 'ws';
 import { createChildLogger } from './logger.js';
 import type { ConsoleLogEntry } from './types.js';
@@ -89,14 +89,12 @@ export class FigmaWebSocketServer extends EventEmitter {
   private requestIdCounter = 0;
   private options: WebSocketServerOptions;
   private _isStarted = false;
-  private _startedAt = Date.now();
   private consoleBufferSize = 1000;
   private documentChangeBufferSize = 200;
 
   constructor(options: WebSocketServerOptions) {
     super();
     this.options = options;
-    this._startedAt = Date.now();
   }
 
   /**

@@ -1,3 +1,5 @@
+import os from 'node:os';
+import path from 'node:path';
 import { getModel } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import {
@@ -8,8 +10,6 @@ import {
   ModelRegistry,
   SessionManager,
 } from '@mariozechner/pi-coding-agent';
-import os from 'os';
-import path from 'path';
 import type { FigmaAPI } from '../figma/figma-api.js';
 import type { FigmaWebSocketServer } from '../figma/websocket-server.js';
 import type { CompressionConfigManager } from './compression/compression-config.js';

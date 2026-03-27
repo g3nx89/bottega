@@ -46,7 +46,7 @@ import { existsSync, readdirSync } from 'node:fs';
       const versions = readdirSync(nvmDir)
         .filter((d) => d.startsWith('v'))
         .sort();
-      if (versions.length > 0) candidates.push(path.join(nvmDir, versions[versions.length - 1], 'bin'));
+      if (versions.length > 0) candidates.push(path.join(nvmDir, versions[versions.length - 1]!, 'bin'));
     } catch {}
   }
 
@@ -57,7 +57,7 @@ import { existsSync, readdirSync } from 'node:fs';
       const versions = readdirSync(fnmDir)
         .filter((d) => d.startsWith('v'))
         .sort();
-      if (versions.length > 0) candidates.push(path.join(fnmDir, versions[versions.length - 1], 'installation/bin'));
+      if (versions.length > 0) candidates.push(path.join(fnmDir, versions[versions.length - 1]!, 'installation/bin'));
     } catch {}
   }
 
@@ -359,7 +359,7 @@ if (!gotTheLock) {
       });
 
       // 7. Auto-updater (GitHub Releases)
-      initAutoUpdater(mainWindow);
+      void initAutoUpdater(mainWindow);
 
       // 8. Emit app_launch event with full system info + settings snapshot
       const startupMs = Date.now() - appStartTime;
@@ -444,7 +444,7 @@ if (!gotTheLock) {
 app.on('before-quit', (event) => {
   if (!cleaningUp) {
     event.preventDefault();
-    cleanup(0);
+    void cleanup(0);
   }
 });
 app.on('window-all-closed', () => app.quit());

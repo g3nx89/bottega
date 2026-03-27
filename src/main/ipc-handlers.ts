@@ -519,7 +519,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
           try {
             const parsed = new URL(info.url);
             if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
-              shell.openExternal(info.url);
+              void shell.openExternal(info.url);
             } else {
               log.warn({ url: info.url }, 'Refused to open non-HTTP URL');
             }
