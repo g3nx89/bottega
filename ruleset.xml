@@ -6,16 +6,22 @@
                              https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
 
     <description>
-        Bottega PMD ruleset — project is TypeScript/JS, PMD's ECMAScript
-        rules generate false positives on modern syntax. Disable all of them.
+        Bottega PMD ruleset — project is TypeScript/JS, not Java.
+        Include the ECMAScript error-prone category but exclude the rules
+        that produce false positives on modern JS syntax.
     </description>
 
-    <!-- Exclude all ECMAScript rules (trailing commas, etc.) -->
+    <rule ref="category/ecmascript/errorprone.xml">
+        <exclude name="AvoidTrailingComma"/>
+    </rule>
+
+    <!-- Exclude all file paths — nothing to analyze -->
     <exclude-pattern>.*/src/.*\.js</exclude-pattern>
     <exclude-pattern>.*/src/.*\.ts</exclude-pattern>
     <exclude-pattern>.*/tests/.*</exclude-pattern>
     <exclude-pattern>.*/dist/.*</exclude-pattern>
     <exclude-pattern>.*/figma-desktop-bridge/.*</exclude-pattern>
     <exclude-pattern>.*/scripts/.*</exclude-pattern>
+    <exclude-pattern>.*/node_modules/.*</exclude-pattern>
 
 </ruleset>
