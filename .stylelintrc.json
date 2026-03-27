@@ -1,0 +1,21 @@
+{
+  "rules": {
+    "color-no-invalid-hex": true,
+    "declaration-block-no-duplicate-properties": true,
+    "declaration-block-no-shorthand-property-overrides": true,
+    "font-family-no-duplicate-names": true,
+    "function-calc-no-unspaced-operator": true,
+    "no-duplicate-selectors": true,
+    "no-empty-source": true,
+    "property-no-unknown": true,
+    "unit-no-unknown": true,
+    "block-no-empty": true,
+    "selector-type-no-unknown": [true, {
+      "ignoreTypes": ["from", "to"]
+    }]
+  },
+  "ignoreFiles": [
+    "dist/**",
+    "node_modules/**"
+  ]
+}
