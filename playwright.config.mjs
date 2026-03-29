@@ -4,7 +4,7 @@ export default defineConfig({
   timeout: 120_000,
   retries: 0,
   workers: 1, // Electron tests must run serially
-  reporter: [['list']],
+  reporter: [['list'], ['./tests/helpers/agent-metrics-reporter.mjs']],
   outputDir: 'tests/.artifacts/results',
   use: {
     screenshot: 'only-on-failure',

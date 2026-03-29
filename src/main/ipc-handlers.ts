@@ -751,21 +751,41 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
 
   // ── Session persistence (per-slot) ─────────────────
 
+  async function resetSessionCore(slot: SessionSlot): Promise<void> {
+    if (slot.isStreaming) {
+      await slot.session.abort();
+      slot.isStreaming = false;
+    }
+    await slot.session.newSession();
+    slot.suggester.reset();
+    persistSlotSession(slot);
+    slotManager.persistState();
+  }
+
   ipcMain.handle('session:reset', async (_event, slotId: string) => {
     const slot = requireSlot(slotId);
     try {
-      if (slot.isStreaming) {
-        await slot.session.abort();
-        slot.isStreaming = false;
-      }
-      await slot.session.newSession();
-      slot.suggester.reset();
-      persistSlotSession(slot);
-      slotManager.persistState();
+      await resetSessionCore(slot);
       log.info({ slotId, fileKey: slot.fileKey }, 'Session reset');
       return { success: true };
     } catch (err: any) {
       log.error({ err, slotId }, 'Failed to reset session');
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('session:reset-with-clear', async (_event, slotId: string) => {
+    const slot = requireSlot(slotId);
+    try {
+      await resetSessionCore(slot);
+      slot.promptQueue.clear();
+      if (mainWindow) {
+        safeSend(mainWindow.webContents, 'session:chat-cleared', slotId);
+      }
+      log.info({ slotId, fileKey: slot.fileKey }, 'Session reset with UI clear');
+      return { success: true };
+    } catch (err: any) {
+      log.error({ err, slotId }, 'Failed to reset session with clear');
       return { success: false, error: err.message };
     }
   });

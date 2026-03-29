@@ -116,6 +116,9 @@ let cleaningUp = false;
 async function cleanup(exitCode = 0): Promise<void> {
   if (cleaningUp) return;
   cleaningUp = true;
+  if (process.env.BOTTEGA_FAST_QUIT) {
+    process.exit(exitCode);
+  }
   log.info('Shutting down');
   try {
     if (appState.slotManager) {
@@ -154,7 +157,7 @@ process.on('SIGTERM', () => {
 
 // ── Single instance lock ─────────────────────
 // Prevent multiple Bottega instances from conflicting on the WebSocket port.
-const gotTheLock = app.requestSingleInstanceLock();
+const gotTheLock = process.env.BOTTEGA_AGENT_TEST ? true : app.requestSingleInstanceLock();
 if (!gotTheLock) {
   log.warn('Another Bottega instance is already running — quitting');
   app.quit();
@@ -328,13 +331,15 @@ if (!gotTheLock) {
       appState.slotManager = slotManager;
 
       // Restore slots from previous session (tabs + prompt queues)
-      try {
-        const restoredCount = await slotManager.restoreFromDisk();
-        if (restoredCount > 0) {
-          log.info({ restoredCount }, 'Slots restored from previous session');
+      if (!process.env.BOTTEGA_SKIP_RESTORE) {
+        try {
+          const restoredCount = await slotManager.restoreFromDisk();
+          if (restoredCount > 0) {
+            log.info({ restoredCount }, 'Slots restored from previous session');
+          }
+        } catch (err: any) {
+          log.warn({ err }, 'Failed to restore slots from disk');
         }
-      } catch (err: any) {
-        log.warn({ err }, 'Failed to restore slots from disk');
       }
 
       const ipcController = setupIpcHandlers({

@@ -20,7 +20,13 @@ import {
 
 let app, win, slotId;
 
+function isTierFiltered() {
+  const envTier = process.env.BOTTEGA_AGENT_TEST_TIER;
+  return envTier !== undefined && envTier !== '' && Number(envTier) !== 0;
+}
+
 test.beforeAll(async () => {
+  if (isTierFiltered()) return;
   ({ app, win, slotId } = await launchAgentAppNoFigma());
 });
 
@@ -29,12 +35,14 @@ test.afterAll(async () => {
 });
 
 test.afterEach(async ({}, testInfo) => {
-  await captureDiagnostics(win, testInfo);
+  if (win) await captureDiagnostics(win, testInfo);
 });
 
 test.beforeEach(async () => {
   skipIfTierFiltered(test, 0);
-  await win.evaluate((id) => window.__testResetChat?.(id), slotId);
+  if (!win) return;
+  await win.evaluate((id) => window.api.resetSessionWithClear(id), slotId);
+  await win.waitForTimeout(300);
 });
 
 test.describe('Tier 0 — Smoke (no Figma)', () => {

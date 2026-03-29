@@ -387,6 +387,21 @@ function recallLastQueuedPrompt() {
 
 // ── Send message ─────────────────────────
 
+// Shared core: create user bubble + assistant bubble, init turn metrics.
+// Used by sendMessage() and __agentSubmit() to avoid divergence.
+function _initTurn(tab, text, images) {
+  addUserMessage(tab, text, images);
+  tab.currentAssistantBubble = createAssistantBubble(tab);
+  tab.isStreaming = true;
+  tab._turnStartTime = Date.now();
+  tab._turnToolCount = 0;
+  tab._turnToolErrors = 0;
+  tab._turnResponseLength = 0;
+  tab._turnHasScreenshot = false;
+  updateInputState();
+  renderTabBar();
+}
+
 function sendMessage() {
   const text = inputField.value.trim();
   const tab = getActiveTab();
@@ -400,15 +415,11 @@ function sendMessage() {
   // Queued prompts appear in chat when the agent actually starts processing them
   // (via the onQueuedPromptStart event).
   if (!tab.isStreaming) {
-    addUserMessage(
+    _initTurn(
       tab,
       text,
       pastedImages.map((p) => p.dataUrl),
     );
-    tab.currentAssistantBubble = createAssistantBubble(tab);
-    tab.isStreaming = true;
-    updateInputState();
-    renderTabBar();
   }
 
   pastedImages = [];
@@ -458,6 +469,7 @@ function appendToAssistant(tab, text) {
   if (!tab.currentAssistantBubble) return;
   const content = tab.currentAssistantBubble.querySelector('.message-content');
   content.textContent += text;
+  tab._turnResponseLength = (tab._turnResponseLength || 0) + text.length;
   scrollToBottom();
 }
 
@@ -505,6 +517,7 @@ function addScreenshot(tab, base64, opts) {
   img.alt = 'Figma screenshot';
   if (lazy) img.loading = 'lazy';
   tab.currentAssistantBubble.appendChild(img);
+  tab._turnHasScreenshot = true;
   scrollToBottom();
 }
 
@@ -615,7 +628,23 @@ if (typeof window.api?.__testFigmaExecute === 'function') {
     if (!tab) return false;
     return tab.chatContainer.querySelectorAll('.screenshot').length > 0;
   };
+  window.__agentSubmit = (slotId, text) => {
+    const tab = tabs.get(slotId);
+    if (!tab || !text?.trim()) return false;
+    switchToTab(slotId);
+    if (tab.isStreaming) return false;
+    hideSuggestions();
+    _initTurn(tab, text, []);
+    window.api.sendPrompt(slotId, text).catch(() => {});
+    return true;
+  };
 }
+
+// Listen for reset-with-clear IPC to clear chat on session reset
+window.api.onChatCleared?.((slotId) => {
+  const tab = tabs.get(slotId);
+  if (tab) clearChat(tab);
+});
 
 /**
  * Batch-render historical messages from a restored session.
@@ -775,7 +804,11 @@ window.api.onToolStart((slotId, toolName, toolCallId) =>
   withTab(slotId, (tab) => addToolCard(tab, toolName, toolCallId)),
 );
 window.api.onToolEnd((slotId, _toolName, toolCallId, success) =>
-  withTab(slotId, (tab) => completeToolCard(tab, toolCallId, success)),
+  withTab(slotId, (tab) => {
+    completeToolCard(tab, toolCallId, success);
+    tab._turnToolCount = (tab._turnToolCount || 0) + 1;
+    if (!success) tab._turnToolErrors = (tab._turnToolErrors || 0) + 1;
+  }),
 );
 window.api.onScreenshot((slotId, base64) => withTab(slotId, (tab) => addScreenshot(tab, base64)));
 
@@ -797,6 +830,19 @@ window.api.onAgentEnd((slotId) => {
   tab.isStreaming = false;
   updateInputState();
   renderTabBar();
+  // Emit structured turn-complete event with metrics
+  window.dispatchEvent(
+    new CustomEvent('agent:turn-complete', {
+      detail: {
+        slotId,
+        durationMs: Date.now() - (tab._turnStartTime || Date.now()),
+        toolCount: tab._turnToolCount || 0,
+        toolErrors: tab._turnToolErrors || 0,
+        responseLength: tab._turnResponseLength || 0,
+        hasScreenshot: tab._turnHasScreenshot || false,
+      },
+    }),
+  );
 });
 
 // ── Context usage bar ────────────────────

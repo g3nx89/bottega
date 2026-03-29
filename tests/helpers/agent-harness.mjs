@@ -3,7 +3,7 @@
  *
  * Provides helpers for testing the real AI agent end-to-end:
  * - Launch Bottega in production mode (real API, real WS port 9280)
- * - Send prompts and wait for agent completion (IPC-based + DOM fallback)
+ * - Send prompts and wait for agent completion (CustomEvent-based)
  * - Query Figma directly via test oracle IPC channel
  * - Fuzzy assertions for LLM non-determinism
  * - Diagnostic capture on failure
@@ -24,13 +24,16 @@ export const uniqueSuffix = () => Date.now().toString(36);
 
 /**
  * Close an Electron app with force-kill fallback.
- * Bottega's cleanup handlers can block shutdown; force-kill after 5s.
+ * BOTTEGA_FAST_QUIT ensures process.exit() runs immediately;
+ * SIGKILL is a safety net if that somehow fails.
  * @param {import('@playwright/test').ElectronApplication} app
  */
 export async function closeApp(app) {
   if (!app) return;
   const pid = app.process()?.pid;
   try {
+    // app.close() can hang if the Electron process doesn't respond.
+    // Force-kill after 5s as a safety net to prevent worker teardown timeouts.
     const timer = setTimeout(() => {
       try { process.kill(pid, 'SIGKILL'); } catch {}
     }, 5_000);
@@ -65,42 +68,46 @@ export function skipIfTierFiltered(test, tier) {
 
 /**
  * Shared Electron launch + initialization sequence.
+ * BOTTEGA_AGENT_TEST skips single-instance lock.
+ * BOTTEGA_SKIP_RESTORE skips session restore from disk.
+ * BOTTEGA_FAST_QUIT enables immediate process.exit() on shutdown.
  * @returns {Promise<{ app, win }>}
  */
 async function _launchBase(opts = {}) {
-  // Retry loop: previous tier's Electron process may still hold the single-instance lock.
-  const maxRetries = 3;
-  let lastError;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const app = await electron.launch({
-        args: ['dist/main.js'],
-        timeout: opts.launchTimeout ?? 30_000,
-        env: {
-          ...process.env,
-          BOTTEGA_AGENT_TEST: '1',
-          // NO BOTTEGA_TEST_MODE — real port 9280, real auth
-        },
-      });
-      const win = await app.firstWindow();
-      await win.waitForLoadState('domcontentloaded');
-      await win.waitForTimeout(POST_LOAD_SETTLE_MS);
+  const app = await electron.launch({
+    args: ['dist/main.js'],
+    timeout: opts.launchTimeout ?? 30_000,
+    env: {
+      ...process.env,
+      BOTTEGA_AGENT_TEST: '1',
+      BOTTEGA_SKIP_RESTORE: '1',
+      BOTTEGA_FAST_QUIT: '1',
+    },
+  });
+  const win = await app.firstWindow();
+  await win.waitForLoadState('domcontentloaded');
 
-      // Minimal compression for full tool results
-      await win.evaluate(() => window.api.compressionSetProfile('minimal'));
+  // Suppress the Figma plugin nudge BEFORE the settle wait.
+  // checkFigmaPlugin() runs async during init — if we wait 3s first, the nudge
+  // opens the settings overlay before we can prevent it.
+  await win.evaluate(() => localStorage.setItem('bottega:plugin-nudge-dismissed', '1'));
 
-      return { app, win };
-    } catch (err) {
-      lastError = err;
-      if (attempt < maxRetries && err.message?.includes('closed')) {
-        // Single-instance lock likely still held — wait and retry
-        await new Promise((r) => setTimeout(r, 3_000));
-        continue;
-      }
-      throw err;
+  await win.waitForTimeout(POST_LOAD_SETTLE_MS);
+
+  // Force-close settings overlay if it opened before our localStorage flag took effect
+  await win.evaluate(() => {
+    const overlay = document.getElementById('settings-overlay');
+    if (overlay && !overlay.classList.contains('hidden')) {
+      overlay.classList.add('hidden');
+      const btn = document.getElementById('settings-btn');
+      if (btn) btn.classList.remove('active');
     }
-  }
-  throw lastError;
+  });
+
+  // Minimal compression for full tool results
+  await win.evaluate(() => window.api.compressionSetProfile('minimal'));
+
+  return { app, win };
 }
 
 /**
@@ -176,18 +183,24 @@ export async function launchAgentAppNoFigma(opts = {}) {
  *
  * Includes:
  * - App launch with Figma connection wait
- * - Session reset + page clear in beforeEach
+ * - Atomic session reset + chat clear + page clear in beforeEach
  * - Abort + queue clear + diagnostic capture in afterEach
  * - Connection health ping before each test
  * - Graceful skip if Figma not connected
  *
  * @param {import('@playwright/test').TestType} test
+ * @param {number} [tier] - Tier number; if set and BOTTEGA_AGENT_TEST_TIER doesn't match, skip app launch entirely
  * @returns {{ app: any, win: any, slotId: string|null, fileKey: string|null, figmaConnected: boolean }}
  */
-export function useFigmaTierLifecycle(test) {
+export function useFigmaTierLifecycle(test, tier) {
   const ctx = { app: null, win: null, slotId: null, fileKey: null, figmaConnected: false };
 
   test.beforeAll(async () => {
+    // Skip app launch if tier is filtered out — avoids opening/closing the window for nothing
+    const envTier = process.env.BOTTEGA_AGENT_TEST_TIER;
+    if (tier !== undefined && envTier !== undefined && envTier !== '' && Number(envTier) !== tier) {
+      return;
+    }
     const result = await launchAgentApp();
     Object.assign(ctx, result);
   });
@@ -201,10 +214,26 @@ export function useFigmaTierLifecycle(test) {
       await ctx.win.evaluate((id) => window.api.abort(id), ctx.slotId).catch(() => {});
       await ctx.win.evaluate((id) => window.api.queueClear(id), ctx.slotId).catch(() => {});
     }
-    if (ctx.win) await captureDiagnostics(ctx.win, testInfo, ctx.fileKey);
+    if (ctx.win) {
+      await captureDiagnostics(ctx.win, testInfo, ctx.fileKey);
+      // Attach turn metrics from last sendAndWait (if available)
+      try {
+        const lastMetrics = await ctx.win.evaluate(() => window.__lastTurnMetrics);
+        if (lastMetrics) {
+          testInfo.attach('turn-metrics', {
+            body: JSON.stringify(lastMetrics, null, 2),
+            contentType: 'application/json',
+          });
+        }
+      } catch {}
+    }
   });
 
   test.beforeEach(async () => {
+    if (!ctx.win) {
+      test.skip(true, 'Tier filtered out — app not launched');
+      return;
+    }
     test.skip(!ctx.figmaConnected, 'Figma Desktop not connected');
     // Connection health ping — skip remaining tests if Figma disconnected mid-suite
     try {
@@ -213,12 +242,13 @@ export function useFigmaTierLifecycle(test) {
       ctx.figmaConnected = false;
       test.skip(true, 'Figma connection lost mid-suite');
     }
-    // Clear chat DOM + JS state (currentAssistantBubble) for this specific slot.
-    // NOTE: We do NOT call resetSession — it fires stale agent:end events that cause
-    // race conditions with the __agentDone flag. The agent session accumulates history
-    // but each prompt is self-contained and __testResetChat clears the UI.
-    await ctx.win.evaluate((id) => window.__testResetChat?.(id), ctx.slotId);
-    await clearFigmaPage(ctx.win, ctx.fileKey);
+    // Atomic reset: backend session + renderer chat DOM + JS state
+    await ctx.win.evaluate((id) => window.api.resetSessionWithClear(id), ctx.slotId);
+    await ctx.win.waitForTimeout(300);
+    const remaining = await clearFigmaPage(ctx.win, ctx.fileKey);
+    if (remaining !== 0) {
+      throw new Error(`clearFigmaPage left ${remaining} nodes — page not clean`);
+    }
   });
 
   return ctx;
@@ -231,100 +261,72 @@ export function useFigmaTierLifecycle(test) {
 /**
  * Send a prompt and wait for the agent to finish responding.
  *
- * Uses IPC-based agent-end detection when available (__testWaitForAgentEnd),
- * falling back to DOM polling. Extracts tool calls from the LAST assistant
- * message only (not accumulated across turns).
+ * Uses the deterministic `agent:turn-complete` CustomEvent emitted by the
+ * renderer after markdown render + bubble release (synchronous processing).
+ * This replaces the previous IPC-based + DOM polling approach.
  *
  * @param {import('@playwright/test').Page} win
  * @param {string} slotId
  * @param {string} prompt
  * @param {number} [timeout=160000]
- * @returns {Promise<{ toolCalls: Array<{name: string, success: boolean, error: boolean}>, response: string, hasScreenshot: boolean }>}
+ * @returns {Promise<{ toolCalls: Array<{name: string, success: boolean, error: boolean}>, response: string, hasScreenshot: boolean, metrics: object }>}
  */
 export async function sendAndWait(win, slotId, prompt, timeout = 160_000) {
-  // Switch to the correct tab — the input field submits to the active tab,
-  // and handleSubmit creates the assistant bubble + user message.
-  await win.evaluate((id) => window.__testSwitchTab?.(id), slotId);
-  await win.waitForTimeout(300);
-
-  // Register one-shot agent:end listener. No drain needed — resetSession is no longer
-  // called in beforeEach, so there are no stale agent:end events.
-  await win.evaluate((id) => {
-    window.__agentDone = false;
-    if (window.api.__testWaitForAgentEnd) {
-      window.api.__testWaitForAgentEnd(id).then(() => { window.__agentDone = true; });
+  // 1. Register turn-complete listener BEFORE submit (so we never miss the event).
+  // Does NOT use {once: true} — stale events (from resetSessionWithClear aborts)
+  // have responseLength=0 and are filtered out without consuming the listener.
+  await win.evaluate(() => {
+    window.__turnResult = null;
+    if (window.__turnHandler) {
+      window.removeEventListener('agent:turn-complete', window.__turnHandler);
     }
-  }, slotId);
+    window.__turnHandler = (e) => {
+      if (e.detail && e.detail.responseLength > 0) {
+        window.__turnResult = e.detail;
+        window.removeEventListener('agent:turn-complete', window.__turnHandler);
+        window.__turnHandler = null;
+      }
+    };
+    window.addEventListener('agent:turn-complete', window.__turnHandler);
+  });
 
-  // Submit via the UI input field (not direct IPC) to trigger the full renderer
-  // flow: user message div, assistant bubble creation, streaming state.
-  await win.fill('#input-field', prompt);
-  await win.press('#input-field', 'Enter');
-
-  // Wait for agent:end via the boolean flag (simple poll, no IPC needed)
-  await win.waitForFunction(() => window.__agentDone === true, { timeout, polling: 500 });
-
-  // Extra settle for renderer to finish processing final IPC events
-  await win.waitForTimeout(500);
-
-  // Extract results via slot-scoped helpers (bypass active-tab DOM issues)
-  const hasSlotHelpers = await win
-    .evaluate(() => typeof window.__testGetToolCalls === 'function')
-    .catch(() => false);
-
-  let toolCalls, response, hasScreenshot;
-  if (hasSlotHelpers) {
-    toolCalls = await win.evaluate((id) => window.__testGetToolCalls(id), slotId);
-    response = await win.evaluate((id) => window.__testGetResponse(id), slotId);
-    hasScreenshot = await win.evaluate((id) => window.__testHasScreenshot(id), slotId);
-  } else {
-    toolCalls = await getToolCalls(win);
-    response = await getAgentResponse(win);
-    hasScreenshot = await hasScreenshotInChat(win);
+  // 2. Submit via programmatic API (creates bubble + sends prompt atomically)
+  const submitted = await win.evaluate(
+    ([id, t]) => window.__agentSubmit(id, t),
+    [slotId, prompt],
+  );
+  if (!submitted) {
+    throw new Error('sendAndWait: __agentSubmit returned false (slot busy or not found)');
   }
-  return { toolCalls, response, hasScreenshot };
-}
 
-/**
- * Wait for the agent to finish responding (DOM polling fallback).
- *
- * Polls DOM for two conditions:
- * 1. No [data-testid="tab-item"].streaming (agent turn ended)
- * 2. No [data-testid="tool-spinner"] (all tool cards resolved)
- *
- * On timeout, force-aborts all slots and throws.
- */
-export async function waitForAgentEnd(win, slotId, timeout = 160_000) {
-  try {
-    // Use IPC-based check: poll the specific slot's isStreaming flag.
-    // This avoids DOM dependency on .tool-spinner which can leak from
-    // restored sessions or previous test messages.
-    await win.waitForFunction(
-      async (id) => {
-        const tabs = await window.api.listTabs();
-        const slot = tabs.find((t) => t.id === id);
-        return slot && !slot.isStreaming;
-      },
-      slotId,
-      { timeout, polling: 1_000 },
-    );
-    // Brief settle for DOM to sync with IPC state (tool cards complete rendering)
-    await win.waitForTimeout(500);
-  } catch (err) {
-    // Timeout — force abort and throw
-    const tabs = await win.evaluate(() => window.api.listTabs()).catch(() => []);
-    for (const tab of tabs) {
-      await win.evaluate((id) => window.api.abort(id), tab.id).catch(() => {});
-    }
-    if (err?.message?.includes('Timeout') || err?.message?.includes('timeout')) {
-      throw new Error(`waitForAgentEnd timed out after ${timeout}ms`);
-    }
-    throw err;
-  }
+  // 3. Wait for turn-complete (deterministic: fires after markdown render + bubble release)
+  // NOTE: pass null as arg explicitly — without it, Playwright may interpret the options
+  // object as the function argument, falling back to the default 30s timeout.
+  await win.waitForFunction(() => window.__turnResult !== null, null, { timeout, polling: 500 });
+
+  // 4. Observation delay — lets the human see the agent's response in the UI before the
+  //    test proceeds to extract results and tear down. Configurable via env var.
+  const observeMs = Number(process.env.BOTTEGA_TEST_OBSERVE_MS) || 3_000;
+  await win.waitForTimeout(observeMs);
+
+  // 5. Extract metrics + results via slot-scoped helpers
+  const metrics = await win.evaluate(() => {
+    const r = window.__turnResult;
+    window.__turnResult = null;
+    return r;
+  });
+  const toolCalls = await win.evaluate((id) => window.__testGetToolCalls?.(id) || [], slotId);
+  const response = await win.evaluate((id) => window.__testGetResponse?.(id) || '', slotId);
+  const hasScreenshot = await win.evaluate((id) => window.__testHasScreenshot?.(id) || false, slotId);
+
+  // Persist metrics for afterEach attachment
+  await win.evaluate((m) => { window.__lastTurnMetrics = m; }, metrics);
+
+  return { toolCalls, response, hasScreenshot, metrics };
 }
 
 // ═══════════════════════════════════════════════════
-// DOM EXTRACTION
+// DOM EXTRACTION (fallback)
 // ═══════════════════════════════════════════════════
 
 /**
@@ -421,17 +423,8 @@ export async function queryFigma(win, code, timeoutMs = 15_000, fileKey = undefi
 }
 
 /**
- * Escape regex metacharacters in a string for safe interpolation.
- * @param {string} str
- * @returns {string}
- */
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
  * Assert a Figma node exists matching namePattern with optional property checks.
- * Uses string.includes() for plain strings (safe) or escaped regex for RegExp.
+ * Uses string.includes() for plain strings (safe) or JSON.stringify-escaped regex for RegExp.
  *
  * @param {import('@playwright/test').Page} win
  * @param {string|RegExp} namePattern - String to search (uses includes) or RegExp
@@ -442,10 +435,9 @@ export async function assertFigmaNodeExists(win, namePattern, expectedProps = {}
   // For plain strings, use includes() which is injection-safe.
   // For RegExp, escape the source to prevent injection.
   const isRegex = namePattern instanceof RegExp;
-  const searchStr = isRegex ? escapeRegex(namePattern.source) : JSON.stringify(namePattern);
   const matchExpr = isRegex
     ? `n.name.match(new RegExp(${JSON.stringify(namePattern.source)}, 'i'))`
-    : `n.name.includes(${searchStr})`;
+    : `n.name.includes(${JSON.stringify(namePattern)})`;
 
   // NOTE: Figma plugin wraps code as (async function() { <code> })()
   // so all code must use explicit top-level return statements.
@@ -479,6 +471,44 @@ export async function assertFigmaNodeExists(win, namePattern, expectedProps = {}
   }
 
   return node;
+}
+
+/**
+ * Deep property inspection of a Figma node by name pattern.
+ * Returns detailed info: type, size, fills, strokes, layout, text, etc.
+ *
+ * @param {import('@playwright/test').Page} win
+ * @param {string} namePattern - String to match via includes()
+ * @param {string} [fileKey]
+ * @returns {Promise<object|null>}
+ */
+export async function verifyFigmaNode(win, namePattern, fileKey) {
+  return queryFigma(win, `
+    var n = figma.currentPage.findOne(function(n) {
+      return n.name.includes(${JSON.stringify(namePattern)});
+    });
+    if (!n) return null;
+    var fills = n.fills || [];
+    var f = fills[0] || null;
+    var strokes = n.strokes || [];
+    return {
+      name: n.name, type: n.type,
+      width: Math.round(n.width), height: Math.round(n.height),
+      visible: n.visible !== false,
+      opacity: typeof n.opacity === 'number' ? n.opacity : 1,
+      childCount: 'children' in n ? n.children.length : 0,
+      layoutMode: n.layoutMode || 'NONE',
+      itemSpacing: n.itemSpacing || 0,
+      cornerRadius: typeof n.cornerRadius === 'number' ? n.cornerRadius : 0,
+      characters: n.type === 'TEXT' ? (n.characters || '') : null,
+      fillType: f ? f.type : null,
+      fillColor: f && f.type === 'SOLID'
+        ? [Math.round(f.color.r*255), Math.round(f.color.g*255), Math.round(f.color.b*255)]
+        : null,
+      hasGradient: fills.some(function(x) { return x.type && x.type.indexOf('GRADIENT') === 0; }),
+      strokeWeight: strokes.length > 0 ? (n.strokeWeight || 0) : 0,
+    };
+  `, 15_000, fileKey);
 }
 
 /**

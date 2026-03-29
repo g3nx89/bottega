@@ -16,11 +16,12 @@ import {
   assertResponseContains,
   assertFigmaNodeExists,
   getFigmaPageNodeCount,
+  verifyFigmaNode,
   skipIfTierFiltered,
   uniqueSuffix,
 } from '../helpers/agent-harness.mjs';
 
-const ctx = useFigmaTierLifecycle(test);
+const ctx = useFigmaTierLifecycle(test, 2);
 
 test.describe('Tier 2 — Creation', () => {
   test.beforeEach(() => skipIfTierFiltered(test, 2));
@@ -35,6 +36,12 @@ test.describe('Tier 2 — Creation', () => {
     assertToolCalled(toolCalls, 'figma_execute', 'figma_create_child', 'figma_render_jsx');
     assertResponseContains(response, ['hero', 'gradient', 'rectangle', 'created', 'purple']);
     await assertFigmaNodeExists(ctx.win, 'Hero_', {}, ctx.fileKey);
+    const node = await verifyFigmaNode(ctx.win, 'Hero_', ctx.fileKey);
+    expect(node).not.toBeNull();
+    expect(node.type).toBe('RECTANGLE');
+    expect(node.width).toBe(400);
+    expect(node.height).toBe(200);
+    expect(node.hasGradient).toBe(true);
   });
 
   test('2.2 text layout with auto-layout', async () => {
@@ -50,6 +57,10 @@ test.describe('Tier 2 — Creation', () => {
     ]);
     const count = await getFigmaPageNodeCount(ctx.win, ctx.fileKey);
     expect(count).toBeGreaterThanOrEqual(1);
+    const node = await verifyFigmaNode(ctx.win, 'Layout_', ctx.fileKey);
+    expect(node).not.toBeNull();
+    expect(node.layoutMode).toBe('VERTICAL');
+    expect(node.childCount).toBeGreaterThan(0);
   });
 
   test('2.3 icon grid', async () => {
@@ -73,6 +84,10 @@ test.describe('Tier 2 — Creation', () => {
     expect(toolCalls.length).toBeGreaterThan(0);
     assertResponseContains(response, ['button', 'submit', 'created']);
     await assertFigmaNodeExists(ctx.win, 'PrimaryBtn_', {}, ctx.fileKey);
+    const node = await verifyFigmaNode(ctx.win, 'PrimaryBtn_', ctx.fileKey);
+    expect(node).not.toBeNull();
+    expect(node.cornerRadius).toBeGreaterThan(0);
+    expect(node.childCount).toBeGreaterThan(0);
   });
 
   test('2.5 app header', async () => {
@@ -138,12 +153,14 @@ test.describe('Tier 2 — Creation', () => {
     await assertFigmaNodeExists(ctx.win, 'LintTarget_', {}, ctx.fileKey);
   });
 
-  test('2.10 image fill from URL', async () => {
+  test('2.10 image fill from base64', async () => {
     const name = `ImgFill_${uniqueSuffix()}`;
+    // Provide a valid 1x1 red PNG base64 so the agent doesn't have to generate one
+    const redPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
     const { toolCalls, response } = await sendAndWait(
       ctx.win,
       ctx.slotId,
-      `Create a rectangle named '${name}' (300x200) and set its fill to an image from this URL: https://picsum.photos/300/200. Use figma_set_image_fill.`,
+      `Create a rectangle named '${name}' (300x200). Then use figma_set_image_fill to set an image as its fill. Use this exact base64-encoded PNG data (do NOT generate your own): ${redPng}`,
     );
     assertToolCalled(toolCalls, 'figma_set_image_fill', 'figma_execute');
     assertResponseContains(response, ['image', 'fill', 'rectangle', 'created', 'set']);

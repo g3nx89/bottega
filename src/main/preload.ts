@@ -110,6 +110,11 @@ contextBridge.exposeInMainWorld('api', {
   // ── Session persistence (per-slot) ────────
   resetSession: (slotId: string) =>
     ipcRenderer.invoke('session:reset', slotId) as Promise<{ success: boolean; error?: string }>,
+  resetSessionWithClear: (slotId: string) =>
+    ipcRenderer.invoke('session:reset-with-clear', slotId) as Promise<{ success: boolean; error?: string }>,
+  onChatCleared: (cb: (slotId: string) => void) => {
+    ipcRenderer.on('session:chat-cleared', (_event, slotId) => cb(slotId));
+  },
   getSessionMessages: (slotId: string) => ipcRenderer.invoke('session:get-messages', slotId) as Promise<any[]>,
   // ── Window controls (global) ──────────────
   togglePin: () => ipcRenderer.invoke('window:toggle-pin') as Promise<boolean>,
@@ -192,16 +197,6 @@ contextBridge.exposeInMainWorld('api', {
     ? {
         __testFigmaExecute: (code: string, timeoutMs?: number, fileKey?: string) =>
           ipcRenderer.invoke('test:figma-execute', code, timeoutMs, fileKey),
-        __testWaitForAgentEnd: (slotId: string) =>
-          new Promise<void>((resolve) => {
-            const handler = (_event: any, sid: string) => {
-              if (sid === slotId) {
-                ipcRenderer.removeListener('agent:end', handler);
-                resolve();
-              }
-            };
-            ipcRenderer.on('agent:end', handler);
-          }),
       }
     : {}),
 });

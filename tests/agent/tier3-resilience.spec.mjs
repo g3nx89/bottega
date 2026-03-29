@@ -23,7 +23,7 @@ import {
   skipIfTierFiltered,
 } from '../helpers/agent-harness.mjs';
 
-const ctx = useFigmaTierLifecycle(test);
+const ctx = useFigmaTierLifecycle(test, 3);
 
 test.describe('Tier 3 — Resilience', () => {
   test.beforeEach(() => skipIfTierFiltered(test, 3));
