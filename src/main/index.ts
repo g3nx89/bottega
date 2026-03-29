@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, crashReporter, dialog } from 'electron';
+import { app, BrowserWindow, crashReporter, dialog, ipcMain } from 'electron';
 import { createChildLogger, logFilePath, logger, sessionUid } from '../figma/logger.js';
 import { DEFAULT_WS_PORT } from '../figma/port-discovery.js';
 import { createAgentInfra } from './agent.js';
@@ -357,6 +357,23 @@ if (!gotTheLock) {
         currentModel.provider = config.provider;
         currentModel.modelId = config.modelId;
       });
+
+      // ── Agent test oracle: direct Figma code execution ──
+      // Only registered when BOTTEGA_AGENT_TEST env var is set (never in production).
+      if (process.env.BOTTEGA_AGENT_TEST) {
+        ipcMain.handle(
+          'test:figma-execute',
+          async (_event: any, code: string, timeoutMs?: number, fileKey?: string) => {
+            const timeout = timeoutMs ?? 15_000;
+            return figmaCore?.wsServer.sendCommand(
+              'EXECUTE_CODE',
+              { code, timeout },
+              timeout + 2_000,
+              fileKey || undefined,
+            );
+          },
+        );
+      }
 
       // 7. Auto-updater (GitHub Releases)
       void initAutoUpdater(mainWindow);

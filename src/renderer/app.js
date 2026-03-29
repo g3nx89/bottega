@@ -249,6 +249,7 @@ function renderTabBar() {
       (id === activeTabId ? ' active' : '') +
       (tab.isStreaming ? ' streaming' : '') +
       (!tab.isConnected ? ' disconnected' : '');
+    el.dataset.testid = 'tab-item';
 
     const dot = el.querySelector('.tab-dot');
     dot.className = 'tab-dot' + (tab.isConnected ? ' connected' : ' disconnected');
@@ -443,8 +444,10 @@ function addUserMessage(tab, text, images) {
 function createAssistantBubble(tab) {
   const msg = document.createElement('div');
   msg.className = 'message assistant-message';
+  msg.dataset.testid = 'assistant-message';
   const content = document.createElement('div');
   content.className = 'message-content';
+  content.dataset.testid = 'message-content';
   msg.appendChild(content);
   tab.chatContainer.appendChild(msg);
   scrollToBottom();
@@ -463,12 +466,15 @@ function addToolCard(tab, toolName, toolCallId) {
   if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
   const card = document.createElement('div');
   card.className = 'tool-card';
+  card.dataset.testid = 'tool-card';
   card.dataset.toolCallId = toolCallId;
   // Build with DOM methods — no untrusted content set via innerHTML
   const spinner = document.createElement('span');
   spinner.className = 'tool-spinner';
+  spinner.dataset.testid = 'tool-spinner';
   const nameEl = document.createElement('span');
   nameEl.className = 'tool-name';
+  nameEl.dataset.testid = 'tool-name';
   nameEl.textContent = toolName; // textContent: safe
   card.appendChild(spinner);
   card.appendChild(nameEl);
@@ -483,6 +489,7 @@ function completeToolCard(tab, toolCallId, success) {
   const spinner = card.querySelector('.tool-spinner');
   if (spinner) {
     spinner.className = 'tool-status ' + (success ? 'tool-success' : 'tool-error');
+    spinner.dataset.testid = 'tool-status';
     spinner.textContent = success ? '\u2713' : '\u2717'; // ✓ / ✗ via textContent
   }
 }
@@ -493,6 +500,7 @@ function addScreenshot(tab, base64, opts) {
   if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
   const img = document.createElement('img');
   img.className = 'screenshot';
+  img.dataset.testid = 'screenshot';
   img.src = 'data:image/png;base64,' + base64;
   img.alt = 'Figma screenshot';
   if (lazy) img.loading = 'lazy';
@@ -575,6 +583,38 @@ function clearChat(tab) {
   tab.isStreaming = false;
   hideSuggestions();
   updateInputState();
+}
+
+// Test helpers: slot-scoped access to chat state (only when agent test oracle is available).
+// These bypass active-tab issues by accessing tabs.get(slotId).chatContainer directly.
+if (typeof window.api?.__testFigmaExecute === 'function') {
+  window.__testSwitchTab = (slotId) => switchToTab(slotId);
+  window.__testResetChat = (slotId) => {
+    const tab = slotId ? tabs.get(slotId) : getActiveTab();
+    if (tab) clearChat(tab);
+  };
+  window.__testGetToolCalls = (slotId) => {
+    const tab = tabs.get(slotId);
+    if (!tab) return [];
+    return [...tab.chatContainer.querySelectorAll('.tool-card')].map((card) => ({
+      name: card.querySelector('.tool-name')?.textContent || '',
+      success: !!card.querySelector('.tool-success'),
+      error: !!card.querySelector('.tool-error'),
+    }));
+  };
+  window.__testGetResponse = (slotId) => {
+    const tab = tabs.get(slotId);
+    if (!tab) return '';
+    const msgs = [...tab.chatContainer.querySelectorAll('.assistant-message')];
+    if (!msgs.length) return '';
+    const last = msgs[msgs.length - 1];
+    return last.querySelector('.message-content')?.textContent || '';
+  };
+  window.__testHasScreenshot = (slotId) => {
+    const tab = tabs.get(slotId);
+    if (!tab) return false;
+    return tab.chatContainer.querySelectorAll('.screenshot').length > 0;
+  };
 }
 
 /**

@@ -186,4 +186,22 @@ contextBridge.exposeInMainWorld('api', {
   onUpdateError: (cb: (message: string) => void) => {
     ipcRenderer.on('update:error', (_event, message) => cb(message));
   },
+
+  // ── Agent test oracle (conditional, never in production) ──
+  ...(process.env.BOTTEGA_AGENT_TEST
+    ? {
+        __testFigmaExecute: (code: string, timeoutMs?: number, fileKey?: string) =>
+          ipcRenderer.invoke('test:figma-execute', code, timeoutMs, fileKey),
+        __testWaitForAgentEnd: (slotId: string) =>
+          new Promise<void>((resolve) => {
+            const handler = (_event: any, sid: string) => {
+              if (sid === slotId) {
+                ipcRenderer.removeListener('agent:end', handler);
+                resolve();
+              }
+            };
+            ipcRenderer.on('agent:end', handler);
+          }),
+      }
+    : {}),
 });
