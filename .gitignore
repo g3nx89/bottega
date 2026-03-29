@@ -14,8 +14,9 @@ dist/
 .ntm/
 
 # Test artifacts
-tests/*.png
+tests/.artifacts/
 test-results/
+coverage/
 
 # Local/generated files
 firebase-debug.log

@@ -6,7 +6,7 @@ const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 export default defineConfig({
   define: { '__APP_VERSION__': JSON.stringify(pkg.version) },
   test: {
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/unit/**/*.test.ts'],
     environment: 'node',
     testTimeout: 10000,
     coverage: {
