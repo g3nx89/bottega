@@ -52,45 +52,71 @@ function convertValue(value: unknown): string | number | boolean {
   return String(value);
 }
 
+function buildModeLookup(modes: any[]): Record<string, string> {
+  const lookup: Record<string, string> = {};
+  for (const m of modes) {
+    lookup[m.modeId] = m.name;
+  }
+  return lookup;
+}
+
+function compactVariable(
+  variable: any,
+  modeIdToName: Record<string, string>,
+): { type: string; values: Record<string, string | number | boolean> } {
+  const resolvedType: string = variable.resolvedType ?? variable.type ?? 'UNKNOWN';
+  const valuesByMode: Record<string, unknown> = variable.valuesByMode ?? {};
+  const values: Record<string, string | number | boolean> = {};
+  for (const [modeId, value] of Object.entries(valuesByMode)) {
+    values[modeIdToName[modeId] ?? modeId] = convertValue(value);
+  }
+  return { type: resolvedType, values };
+}
+
+function compactCollection(collection: any): CompactVariableCollection {
+  const modeList: Array<{ modeId: string; name: string }> = Array.isArray(collection.modes) ? collection.modes : [];
+  const modeIdToName = buildModeLookup(modeList);
+  const embeddedVars: any[] = Array.isArray(collection.variables) ? collection.variables : [];
+
+  const vars: Record<string, { type: string; values: Record<string, string | number | boolean> }> = {};
+  for (const variable of embeddedVars) {
+    vars[variable.name ?? ''] = compactVariable(variable, modeIdToName);
+  }
+
+  return {
+    name: collection.name ?? '',
+    modes: modeList.map((m) => m.name),
+    vars,
+  };
+}
+
+function compactComponent(comp: any, setVariants: Record<string, string[]>): CompactComponent {
+  const result: CompactComponent = {
+    name: comp.name ?? '',
+    key: comp.key ?? '',
+  };
+
+  const setName: string | undefined = comp.componentSetName;
+  if (setName && setVariants[setName]) {
+    result.variants = setVariants[setName];
+  }
+
+  const compProps = comp.componentProperties;
+  if (compProps && typeof compProps === 'object') {
+    const propNames = Object.keys(compProps);
+    if (propNames.length > 0) {
+      result.props = propNames;
+    }
+  }
+
+  return result;
+}
+
 export function compactDesignSystem(raw: any): CompactDesignSystem {
   const rawVariables: any[] = Array.isArray(raw?.variables) ? raw.variables : [];
   const rawComponents: any[] = Array.isArray(raw?.components) ? raw.components : [];
 
-  const variables: CompactVariableCollection[] = rawVariables.map((collection: any) => {
-    const modeList: Array<{ modeId: string; name: string }> = Array.isArray(collection.modes) ? collection.modes : [];
-    const modeNames = modeList.map((m) => m.name);
-
-    // Build a modeId → modeName lookup for value keys
-    const modeIdToName: Record<string, string> = {};
-    for (const m of modeList) {
-      modeIdToName[m.modeId] = m.name;
-    }
-
-    // Variables may be embedded objects or referenced by variableIds
-    const embeddedVars: any[] = Array.isArray(collection.variables) ? collection.variables : [];
-
-    const vars: Record<string, { type: string; values: Record<string, string | number | boolean> }> = {};
-
-    for (const variable of embeddedVars) {
-      const varName: string = variable.name ?? '';
-      const resolvedType: string = variable.resolvedType ?? variable.type ?? 'UNKNOWN';
-      const valuesByMode: Record<string, unknown> = variable.valuesByMode ?? {};
-
-      const values: Record<string, string | number | boolean> = {};
-      for (const [modeId, value] of Object.entries(valuesByMode)) {
-        const modeName = modeIdToName[modeId] ?? modeId;
-        values[modeName] = convertValue(value);
-      }
-
-      vars[varName] = { type: resolvedType, values };
-    }
-
-    return {
-      name: collection.name ?? '',
-      modes: modeNames,
-      vars,
-    };
-  });
+  const variables = rawVariables.map(compactCollection);
 
   // Group components by componentSetName when available
   const setVariants: Record<string, string[]> = {};
@@ -102,27 +128,7 @@ export function compactDesignSystem(raw: any): CompactDesignSystem {
     }
   }
 
-  const components: CompactComponent[] = rawComponents.map((comp: any) => {
-    const result: CompactComponent = {
-      name: comp.name ?? '',
-      key: comp.key ?? '',
-    };
-
-    const setName: string | undefined = comp.componentSetName;
-    if (setName && setVariants[setName]) {
-      result.variants = setVariants[setName];
-    }
-
-    const compProps = comp.componentProperties;
-    if (compProps && typeof compProps === 'object') {
-      const propNames = Object.keys(compProps);
-      if (propNames.length > 0) {
-        result.props = propNames;
-      }
-    }
-
-    return result;
-  });
+  const components = rawComponents.map((comp) => compactComponent(comp, setVariants));
 
   return { variables, components };
 }

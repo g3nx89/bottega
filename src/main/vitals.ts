@@ -91,16 +91,21 @@ export interface SettingsRefs {
   getDiagnosticsEnabled?: () => boolean;
 }
 
+/** Call an optional getter, returning fallback if the getter is undefined or returns undefined. */
+function getOr<T>(getter: (() => T) | undefined, fallback: T): T {
+  return getter ? (getter() ?? fallback) : fallback;
+}
+
 export function captureSettings(refs: SettingsRefs): SettingsSnapshotData {
   return {
-    model: refs.getModelConfig?.() ?? { provider: 'unknown', modelId: 'unknown' },
-    thinkingLevel: refs.getThinkingLevel?.() ?? 'unknown',
-    compressionProfile: refs.getCompressionProfile?.() ?? 'unknown',
-    contextSize: refs.getContextSize?.() ?? 0,
-    auth: refs.getAuthStatus?.() ?? {},
-    imageGen: refs.getImageGenInfo?.() ?? { hasKey: false, model: 'unknown' },
-    windowPinned: refs.getWindowPinned?.() ?? false,
-    windowOpacity: refs.getWindowOpacity?.() ?? 1.0,
-    sendDiagnostics: refs.getDiagnosticsEnabled?.() ?? false,
+    model: getOr(refs.getModelConfig, { provider: 'unknown', modelId: 'unknown' }),
+    thinkingLevel: getOr(refs.getThinkingLevel, 'unknown'),
+    compressionProfile: getOr(refs.getCompressionProfile, 'unknown'),
+    contextSize: getOr(refs.getContextSize, 0),
+    auth: getOr(refs.getAuthStatus, {}),
+    imageGen: getOr(refs.getImageGenInfo, { hasKey: false, model: 'unknown' }),
+    windowPinned: getOr(refs.getWindowPinned, false),
+    windowOpacity: getOr(refs.getWindowOpacity, 1.0),
+    sendDiagnostics: getOr(refs.getDiagnosticsEnabled, false),
   };
 }

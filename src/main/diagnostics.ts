@@ -192,33 +192,34 @@ function safeSize(filePath: string): number {
  * Delete log and metric files older than RETENTION_DAYS.
  * Called once at app startup. Non-blocking, best-effort.
  */
+async function cleanDirectory(dir: string, cutoffMs: number): Promise<number> {
+  if (!existsSync(dir)) return 0;
+  let cleaned = 0;
+  try {
+    const files = await fs.readdir(dir);
+    for (const file of files) {
+      if (file === 'app.log') continue; // keep active log
+      try {
+        const fullPath = path.join(dir, file);
+        const stat = await fs.stat(fullPath);
+        if (stat.mtimeMs < cutoffMs) {
+          await fs.unlink(fullPath);
+          cleaned++;
+        }
+      } catch {
+        // ignore individual file errors
+      }
+    }
+  } catch {
+    // ignore directory read errors
+  }
+  return cleaned;
+}
+
 export async function cleanOldLogs(): Promise<void> {
   const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  let cleaned = 0;
-
-  for (const dir of [LOG_DIR, CRASHES_DIR, METRICS_DIR]) {
-    if (!existsSync(dir)) continue;
-    try {
-      const files = await fs.readdir(dir);
-      for (const file of files) {
-        // Only clean rotated/old files, not the active app.log
-        if (file === 'app.log') continue;
-        const fullPath = path.join(dir, file);
-        try {
-          const stat = await fs.stat(fullPath);
-          if (stat.mtimeMs < cutoff) {
-            await fs.unlink(fullPath);
-            cleaned++;
-          }
-        } catch {
-          // ignore individual file errors
-        }
-      }
-    } catch {
-      // ignore directory read errors
-    }
-  }
-
+  const results = await Promise.all([LOG_DIR, CRASHES_DIR, METRICS_DIR].map((dir) => cleanDirectory(dir, cutoff)));
+  const cleaned = results.reduce((a, b) => a + b, 0);
   if (cleaned > 0) {
     log.info({ cleaned, retentionDays: RETENTION_DAYS }, 'Old log files cleaned up');
   }

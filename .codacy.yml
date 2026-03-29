@@ -67,12 +67,17 @@ engines:
     enabled: false
 
 exclude_paths:
+  # Test files — complexity metrics on tests are noise
+  - "tests/**"
+  # Documentation — markdown lint false positives (duplicate headings etc.)
+  - "docs/**"
   # Custom semgrep rules (Opengrep flags false duplicate-id)
   - ".semgrep/**"
   # Build output
   - "dist/**"
-  # Forked Figma plugin — upstream code, not our responsibility
+  # Forked upstream code — not our responsibility
   - "figma-desktop-bridge/**"
+  - "src/figma/**"
   # Generated/utility scripts
   - "scripts/**"
   # Test artifacts

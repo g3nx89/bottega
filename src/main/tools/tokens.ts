@@ -3,6 +3,44 @@ import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
+async function createModes(
+  connector: ToolDeps['connector'],
+  collectionId: string,
+  modeNames: string[],
+  defaultModeId?: string,
+): Promise<Record<string, string>> {
+  const modeIds: Record<string, string> = {};
+  if (defaultModeId && modeNames[0]) {
+    await connector.renameMode(collectionId, defaultModeId, modeNames[0]);
+    modeIds[modeNames[0]] = defaultModeId;
+  }
+  for (let i = 1; i < modeNames.length; i++) {
+    const name = modeNames[i]!;
+    const mode = await connector.addMode(collectionId, name);
+    modeIds[name] = mode.modeId || mode.id;
+  }
+  return modeIds;
+}
+
+async function createVariablesWithValues(
+  connector: ToolDeps['connector'],
+  collectionId: string,
+  variables: Array<{ name: string; type: string; values: Record<string, unknown> }>,
+  modeIds: Record<string, string>,
+): Promise<Array<{ name: string; id: string }>> {
+  const created: Array<{ name: string; id: string }> = [];
+  for (const v of variables) {
+    const variable = await connector.createVariable(v.name, collectionId, v.type);
+    const varId = variable.id || variable.variableId;
+    for (const [modeName, value] of Object.entries(v.values)) {
+      const modeId = modeIds[modeName];
+      if (modeId) await connector.updateVariable(varId, modeId, value);
+    }
+    created.push({ name: v.name, id: varId });
+  }
+  return created;
+}
+
 export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
 
@@ -25,38 +63,11 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
-          // 1. Create collection
           const collection = await connector.createVariableCollection(params.collectionName);
           const collectionId = collection.id || collection.collectionId;
-
-          // 2. Add modes (first mode is created automatically)
-          const modeIds: Record<string, string> = {};
-          if (collection.defaultModeId) {
-            // Rename default mode to first mode name
-            await connector.renameMode(collectionId, collection.defaultModeId, params.modes[0]);
-            modeIds[params.modes[0]] = collection.defaultModeId;
-          }
-          for (let i = 1; i < params.modes.length; i++) {
-            const mode = await connector.addMode(collectionId, params.modes[i]);
-            modeIds[params.modes[i]] = mode.modeId || mode.id;
-          }
-
-          // 3. Create variables and set values per mode
-          const createdVars: any[] = [];
-          for (const v of params.variables) {
-            const variable = await connector.createVariable(v.name, collectionId, v.type);
-            const varId = variable.id || variable.variableId;
-
-            for (const [modeName, value] of Object.entries(v.values)) {
-              const modeId = modeIds[modeName];
-              if (modeId) {
-                await connector.updateVariable(varId, modeId, value);
-              }
-            }
-            createdVars.push({ name: v.name, id: varId });
-          }
-
-          return textResult({ collectionId, modeIds, variables: createdVars });
+          const modeIds = await createModes(connector, collectionId, params.modes, collection.defaultModeId);
+          const variables = await createVariablesWithValues(connector, collectionId, params.variables, modeIds);
+          return textResult({ collectionId, modeIds, variables });
         });
       },
     },

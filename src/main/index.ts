@@ -113,6 +113,15 @@ const appState: {
 } = { infra: null, usageTracker: null, slotManager: null };
 let cleaningUp = false;
 
+/** Run fn, swallowing errors (best-effort cleanup step). */
+async function safeRun(fn: () => void | Promise<void>, label = 'cleanup step'): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    log.warn({ err }, `Error during ${label}`);
+  }
+}
+
 async function cleanup(exitCode = 0): Promise<void> {
   if (cleaningUp) return;
   cleaningUp = true;
@@ -120,31 +129,15 @@ async function cleanup(exitCode = 0): Promise<void> {
     process.exit(exitCode);
   }
   log.info('Shutting down');
-  try {
-    if (appState.slotManager) {
-      appState.slotManager.persistStateSync();
-    }
-  } catch {
-    // best-effort
-  }
-  try {
-    if (appState.usageTracker) {
-      appState.usageTracker.trackAppQuit(Math.round(process.uptime()), 0);
-      appState.usageTracker.stopHeartbeat();
-    }
-  } catch {
-    // best-effort
-  }
-  try {
-    if (appState.infra) await appState.infra.metricsCollector.finalize();
-  } catch (err) {
-    log.warn({ err }, 'Error finalizing metrics');
-  }
-  try {
-    if (figmaCore) await figmaCore.stop();
-  } catch (err) {
-    log.error({ err }, 'Error during cleanup');
-  }
+  await safeRun(() => appState.slotManager?.persistStateSync(), 'persisting slot state');
+  await safeRun(() => {
+    appState.usageTracker?.trackAppQuit(Math.round(process.uptime()), 0);
+    appState.usageTracker?.stopHeartbeat();
+  }, 'tracking app quit');
+  await Promise.all([
+    safeRun(() => appState.infra?.metricsCollector.finalize(), 'finalizing metrics'),
+    safeRun(() => figmaCore?.stop(), 'stopping Figma (WS cleanup)'),
+  ]);
   process.exit(exitCode);
 }
 

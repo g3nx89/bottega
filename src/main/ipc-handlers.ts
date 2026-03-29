@@ -12,7 +12,6 @@ import {
   OAUTH_PROVIDER_MAP,
 } from './agent.js';
 import { checkForUpdates, downloadUpdate, getAppVersion, quitAndInstall } from './auto-updater.js';
-import { categorizeToolName } from './compression/metrics.js';
 import { exportDiagnosticsZip, formatSystemInfoForClipboard } from './diagnostics.js';
 import { effectiveApiKey, type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
 import { DEFAULT_IMAGE_MODEL, IMAGE_GEN_MODELS, ImageGenerator } from './image-gen/image-generator.js';
@@ -38,6 +37,7 @@ import {
 } from './remote-logger.js';
 import { extractRenderableMessages, type RenderableTurn } from './renderable-messages.js';
 import { safeSend } from './safe-send.js';
+import { createEventRouter } from './session-events.js';
 import type { SessionStore } from './session-store.js';
 import type { SessionSlot, SlotManager } from './slot-manager.js';
 
@@ -83,11 +83,6 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   const { slotManager, mainWindow, infra, imageGenState, sessionStore, usageTracker } = deps;
   const modelChangeListeners: Array<(config: ModelConfig) => void> = [];
 
-  // Track tool execution timing for usage analytics (per toolCallId, across all slots)
-  const toolStartTimes = new Map<string, number>();
-  // Track which sessions have been subscribed to prevent duplicate listeners on model switch
-  const subscribedSessions = new WeakSet<AgentSessionLike>();
-
   /** Helper: get slot or throw. */
   function requireSlot(slotId: string): SessionSlot {
     const slot = slotManager.getSlot(slotId);
@@ -102,156 +97,8 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     }
   }
 
-  // ── Per-event handlers for slot subscription ───────
-
-  function handleMessageUpdate(wc: Electron.WebContents, slot: SessionSlot, event: any) {
-    if (event.assistantMessageEvent?.type === 'text_delta') {
-      safeSend(wc, 'agent:text-delta', slot.id, event.assistantMessageEvent.delta);
-      slot.suggester.appendAssistantText(event.assistantMessageEvent.delta);
-    }
-    if (event.assistantMessageEvent?.type === 'thinking_delta') {
-      safeSend(wc, 'agent:thinking', slot.id, event.assistantMessageEvent.delta);
-    }
-  }
-
-  function handleToolStart(wc: Electron.WebContents, slot: SessionSlot, event: any) {
-    log.info({ tool: event.toolName, callId: event.toolCallId, slotId: slot.id }, 'Tool start');
-    safeSend(wc, 'agent:tool-start', slot.id, event.toolName, event.toolCallId);
-    toolStartTimes.set(event.toolCallId, Date.now());
-  }
-
-  function handleToolEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
-    const resultPreview = event.result?.content
-      ? event.result.content.map((c: any) => ({
-          type: c.type,
-          ...(c.type === 'text' ? { text: (c.text || '').slice(0, 200) } : {}),
-          ...(c.type === 'image' ? { hasData: !!c.data, dataLen: c.data?.length } : {}),
-        }))
-      : 'no content';
-    log.info({ tool: event.toolName, callId: event.toolCallId, isError: event.isError, slotId: slot.id }, 'Tool end');
-    log.debug({ tool: event.toolName, callId: event.toolCallId, resultContent: resultPreview }, 'Tool result detail');
-    safeSend(wc, 'agent:tool-end', slot.id, event.toolName, event.toolCallId, !event.isError, event.result);
-
-    const startTime = toolStartTimes.get(event.toolCallId);
-    const durationMs = startTime ? Date.now() - startTime : 0;
-    toolStartTimes.delete(event.toolCallId);
-    const category = categorizeToolName(event.toolName);
-    if (event.isError) {
-      usageTracker?.trackToolError(event.toolName, JSON.stringify(resultPreview), undefined);
-    }
-    usageTracker?.trackToolCall(event.toolName, category, !event.isError, durationMs);
-
-    if (
-      event.toolName.startsWith('figma_generate_') ||
-      event.toolName.startsWith('figma_edit_') ||
-      event.toolName === 'figma_restore_image'
-    ) {
-      usageTracker?.trackImageGen(event.toolName.replace('figma_', ''), 'gemini', !event.isError, durationMs);
-    }
-    if (event.toolName === 'figma_screenshot' && !event.isError && event.result?.content) {
-      const imageContent = event.result.content.find((c: any) => c.type === 'image');
-      if (imageContent) safeSend(wc, 'agent:screenshot', slot.id, imageContent.data);
-    }
-  }
-
-  function handleMessageEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
-    const msg = event.message;
-    if (msg?.role === 'assistant' && msg.usage) {
-      safeSend(wc, 'agent:usage', slot.id, {
-        input: msg.usage.input,
-        output: msg.usage.output,
-        total: msg.usage.totalTokens,
-      });
-    }
-  }
-
-  function handleAgentEnd(wc: Electron.WebContents, slot: SessionSlot) {
-    if (!slot.isStreaming) return; // stale event after abort — ignore
-    const next = slot.promptQueue.dequeue();
-    if (next) {
-      safeSend(wc, 'queue:updated', slot.id, slot.promptQueue.list());
-      safeSend(wc, 'agent:queued-prompt-start', slot.id, next.text);
-      usageTracker?.trackPromptDequeued(slot.promptQueue.length);
-      persistSlotSession(slot);
-      slotManager.persistState();
-      slot.session.prompt(next.text).catch((err: any) => {
-        log.error({ err, slotId: slot.id }, 'Queued prompt failed');
-        slot.isStreaming = false;
-        slot.promptQueue.clear();
-        safeSend(wc, 'agent:text-delta', slot.id, `\n\nError: ${err.message || MSG_REQUEST_FAILED_FALLBACK}`);
-        safeSend(wc, 'agent:end', slot.id);
-        safeSend(wc, 'queue:updated', slot.id, []);
-      });
-    } else {
-      slot.isStreaming = false;
-      safeSend(wc, 'agent:end', slot.id);
-      persistSlotSession(slot);
-      slotManager.persistState();
-      const suggestStart = Date.now();
-      slot.suggester
-        .suggest(slot.modelConfig)
-        .then((suggestions) => {
-          usageTracker?.trackSuggestionsGenerated(suggestions.length, Date.now() - suggestStart);
-          if (suggestions.length > 0) safeSend(wc, 'agent:suggestions', slot.id, suggestions);
-          slot.suggester.resetAssistantText();
-        })
-        .catch((err) => {
-          log.warn({ err, slotId: slot.id }, 'Failed to generate suggestions');
-          slot.suggester.resetAssistantText();
-        });
-    }
-  }
-
-  /**
-   * Subscribe to a slot's session events and route them to the renderer with slotId.
-   * Called once per slot (after creation or restore), and again after model switch
-   * (which creates a new session object).
-   *
-   * Listener lifecycle: Pi SDK's subscribe() has no unsubscribe API. When a model switch
-   * replaces slot.session, the old session's listener becomes a no-op via the stale-event
-   * guard below. The old listener closure is GC'd when the old AgentSession is collected.
-   * This is bounded by MAX_SLOTS * model_switches_per_session.
-   */
-  function subscribeToSlot(slot: SessionSlot) {
-    if (subscribedSessions.has(slot.session)) return;
-    subscribedSessions.add(slot.session);
-    const wc = mainWindow.webContents;
-    const boundSession = slot.session; // capture identity for stale-event guard
-    slot.session.subscribe((event: any) => {
-      // Stale-event guard: if session was replaced (model switch) or slot removed, bail
-      if (slot.session !== boundSession || !slotManager.getSlot(slot.id)) return;
-      switch (event.type) {
-        case 'message_update':
-          handleMessageUpdate(wc, slot, event);
-          break;
-        case 'tool_execution_start':
-          handleToolStart(wc, slot, event);
-          break;
-        case 'tool_execution_end':
-          handleToolEnd(wc, slot, event);
-          break;
-        case 'message_end':
-          handleMessageEnd(wc, slot, event);
-          break;
-        case 'agent_end':
-          handleAgentEnd(wc, slot);
-          break;
-        case 'auto_compaction_start':
-          safeSend(wc, 'agent:compaction', slot.id, true);
-          break;
-        case 'auto_compaction_end':
-          safeSend(wc, 'agent:compaction', slot.id, false);
-          usageTracker?.trackCompaction(0, 0);
-          break;
-        case 'auto_retry_start':
-          safeSend(wc, 'agent:retry', slot.id, true);
-          break;
-        case 'auto_retry_end':
-          safeSend(wc, 'agent:retry', slot.id, false);
-          break;
-      }
-    });
-  }
+  // Session event routing (extracted to session-events.ts)
+  const subscribeToSlot = createEventRouter({ slotManager, mainWindow, usageTracker, persistSlotSession });
 
   // ── Agent prompt/abort ─────────────────
 

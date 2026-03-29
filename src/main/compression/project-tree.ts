@@ -41,6 +41,10 @@ interface FillResult {
   hasComplexFill?: true;
 }
 
+const GRADIENT_TYPES = new Set(['GRADIENT_LINEAR', 'GRADIENT_RADIAL', 'GRADIENT_ANGULAR', 'GRADIENT_DIAMOND']);
+const IMAGE_FILL: Readonly<FillResult> = { fill: 'img', hasComplexFill: true };
+const GRADIENT_FILL: Readonly<FillResult> = { fill: 'grad', hasComplexFill: true };
+
 function resolveFill(fills: any[]): FillResult | null {
   if (!Array.isArray(fills) || fills.length === 0) return null;
 
@@ -50,22 +54,11 @@ function resolveFill(fills: any[]): FillResult | null {
   const type: string = visible.type ?? '';
 
   if (type === 'SOLID') {
-    if (!visible.color) return null;
-    return { fill: rgbaToHex(visible.color) };
+    return visible.color ? { fill: rgbaToHex(visible.color) } : null;
   }
 
-  if (type === 'IMAGE') {
-    return { fill: 'img', hasComplexFill: true };
-  }
-
-  if (
-    type === 'GRADIENT_LINEAR' ||
-    type === 'GRADIENT_RADIAL' ||
-    type === 'GRADIENT_ANGULAR' ||
-    type === 'GRADIENT_DIAMOND'
-  ) {
-    return { fill: 'grad', hasComplexFill: true };
-  }
+  if (type === 'IMAGE') return IMAGE_FILL;
+  if (GRADIENT_TYPES.has(type)) return GRADIENT_FILL;
 
   return null;
 }
@@ -112,6 +105,27 @@ function resolveStroke(node: any): string | undefined {
   return `${hex}/${weight}`;
 }
 
+// ── Type-specific projection helpers ────────────
+
+function projectTextProps(node: any, projected: ProjectedNode, detail: ProjectionDetail): void {
+  const chars: string | undefined = node.characters;
+  if (chars && chars.length > 0) {
+    projected.text = chars.slice(0, 100);
+  }
+  if (detail === 'detailed' && typeof node.fontSize === 'number') {
+    projected.fontSize = node.fontSize;
+  }
+}
+
+function projectComponentProps(node: any, projected: ProjectedNode): void {
+  if (node.type === 'INSTANCE') {
+    const key = node.componentId ?? node.mainComponent?.key;
+    if (key !== undefined) projected.componentKey = key;
+  } else if (node.type === 'COMPONENT' && node.key !== undefined) {
+    projected.componentRef = node.key;
+  }
+}
+
 // ── Core projection ──────────────────────────────
 
 export function projectTree(rawNode: any, detail: ProjectionDetail = 'standard'): ProjectedNode {
@@ -130,78 +144,40 @@ export function projectTree(rawNode: any, detail: ProjectionDetail = 'standard')
     projected.box = `${Math.round(rawNode.width)}x${Math.round(rawNode.height)}`;
   }
 
-  // layout
+  // layout + gap
   const layout = resolveLayout(rawNode);
   if (layout !== undefined) {
     projected.layout = layout;
-
-    // gap — only when auto-layout is active
     if (typeof rawNode.itemSpacing === 'number' && rawNode.itemSpacing > 0) {
       projected.gap = rawNode.itemSpacing;
     }
   }
 
-  // padding
+  // padding / fill / stroke
   const padding = resolvePadding(rawNode);
-  if (padding !== undefined) {
-    projected.padding = padding;
-  }
+  if (padding !== undefined) projected.padding = padding;
 
-  // fill
   const fillResult = resolveFill(rawNode.fills);
   if (fillResult !== null) {
     projected.fill = fillResult.fill;
-    if (fillResult.hasComplexFill) {
-      projected.hasComplexFill = true;
-    }
+    if (fillResult.hasComplexFill) projected.hasComplexFill = true;
   }
 
-  // stroke
   const stroke = resolveStroke(rawNode);
-  if (stroke !== undefined) {
-    projected.stroke = stroke;
-  }
+  if (stroke !== undefined) projected.stroke = stroke;
 
-  // text (TEXT nodes only)
-  if (rawNode.type === 'TEXT') {
-    const chars: string | undefined = rawNode.characters;
-    if (chars && chars.length > 0) {
-      projected.text = chars.slice(0, 100);
-    }
+  // type-specific properties
+  if (rawNode.type === 'TEXT') projectTextProps(rawNode, projected, detail);
+  if (rawNode.type === 'INSTANCE' || rawNode.type === 'COMPONENT') projectComponentProps(rawNode, projected);
 
-    // fontSize — detailed mode only
-    if (detail === 'detailed' && typeof rawNode.fontSize === 'number') {
-      projected.fontSize = rawNode.fontSize;
-    }
-  }
-
-  // opacity — detailed mode only, only if !== 1
+  // detailed-mode opacity
   if (detail === 'detailed' && typeof rawNode.opacity === 'number' && rawNode.opacity !== 1) {
     projected.opacity = rawNode.opacity;
   }
 
-  // componentKey (INSTANCE nodes)
-  if (rawNode.type === 'INSTANCE') {
-    const key = rawNode.componentId ?? rawNode.mainComponent?.key;
-    if (key !== undefined) {
-      projected.componentKey = key;
-    }
-  }
-
-  // componentRef (COMPONENT nodes)
-  if (rawNode.type === 'COMPONENT' && rawNode.key !== undefined) {
-    projected.componentRef = rawNode.key;
-  }
-
-  // hidden
-  if (rawNode.visible === false) {
-    projected.hidden = true;
-  }
-
-  // hasEffects
-  if (Array.isArray(rawNode.effects) && rawNode.effects.length > 0) {
-    projected.hasEffects = true;
-  }
+  // flags
+  if (rawNode.visible === false) projected.hidden = true;
+  if (Array.isArray(rawNode.effects) && rawNode.effects.length > 0) projected.hasEffects = true;
 
   // children — recurse
   if (Array.isArray(rawNode.children) && rawNode.children.length > 0) {
