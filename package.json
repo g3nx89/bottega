@@ -15,6 +15,7 @@
     "test:uat": "npm run build && npx playwright test --project=uat",
     "test:agent": "npm run build && npx playwright test --project=agent",
     "test:agent:smoke": "npm run build && npx playwright test --project=agent --grep @smoke",
+    "test:agent:imagegen": "npm run build && npx playwright test --project=imagegen",
     "lint": "biome check src/ tests/",
     "lint:fix": "biome check --write src/ tests/",
     "lint:types": "eslint src/",

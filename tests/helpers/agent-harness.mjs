@@ -11,8 +11,23 @@
  */
 
 import { _electron as electron } from '@playwright/test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+// Load .env file if present (no dotenv dependency needed)
+try {
+  const envFile = readFileSync(join(process.cwd(), '.env'), 'utf-8');
+  for (const line of envFile.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const val = trimmed.slice(eq + 1).trim();
+    if (!process.env[key]) process.env[key] = val; // don't override existing
+  }
+} catch {}
+
 
 const ARTIFACTS_DIR = 'tests/.artifacts/agent';
 

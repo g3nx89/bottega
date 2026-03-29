@@ -25,9 +25,16 @@ export default defineConfig({
     {
       name: 'agent',
       testDir: 'tests/agent',
-      testMatch: '**/*.spec.mjs',
+      testMatch: '**/tier[0-4]*.spec.mjs',
       timeout: 180_000,
       retries: 2,
+    },
+    {
+      name: 'imagegen',
+      testDir: 'tests/agent',
+      testMatch: '**/tier5*.spec.mjs',
+      timeout: 300_000,
+      retries: 1,
     },
   ],
 });

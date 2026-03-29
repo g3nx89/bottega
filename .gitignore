@@ -18,6 +18,10 @@ tests/.artifacts/
 test-results/
 coverage/
 
+# Environment variables (API keys)
+.env
+.env.local
+
 # Local/generated files
 firebase-debug.log
 skills-lock.json
