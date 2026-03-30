@@ -113,7 +113,7 @@ describe('Core Tools', () => {
 
       await tool.execute('call-8', {}, undefined, undefined, undefined);
 
-      expect(deps.connector.captureScreenshot).toHaveBeenCalledWith('', { format: 'PNG' });
+      expect(deps.connector.captureScreenshot).toHaveBeenCalledWith('', { format: 'PNG', maxDimension: 1568 });
     });
 
     it('propagates errors from connector', async () => {

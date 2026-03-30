@@ -9,6 +9,7 @@ import {
   buildPatternPrompt,
   buildStoryStepPrompt,
 } from '../image-gen/prompt-builders.js';
+import { getVisionMaxDimension } from './core.js';
 import { type ToolDeps, textResult } from './index.js';
 
 function requireImageGen(deps: ToolDeps): ImageGenerator {
@@ -20,7 +21,8 @@ function requireImageGen(deps: ToolDeps): ImageGenerator {
 
 /** Export a Figma node as base64 PNG via the existing captureScreenshot connector. */
 async function exportNodeBase64(deps: ToolDeps, nodeId: string): Promise<string> {
-  const result = await deps.connector.captureScreenshot(nodeId, { format: 'PNG' });
+  const maxDimension = getVisionMaxDimension(deps.getProvider?.() ?? '');
+  const result = await deps.connector.captureScreenshot(nodeId, { format: 'PNG', maxDimension });
   const base64 = result?.image?.base64 ?? result?.imageData;
   if (!base64) throw new Error('Failed to export node image');
   return base64;

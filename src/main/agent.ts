@@ -212,6 +212,7 @@ async function buildAgentSession(
 export function createScopedTools(
   infra: AgentInfra,
   fileKey: string,
+  getProvider?: () => string,
 ): { tools: ToolDefinition[]; connector: ScopedConnector } {
   const connector = new ScopedConnector(infra.wsServer, fileKey);
   const operationQueue = infra.queueManager.getQueue(fileKey);
@@ -225,6 +226,7 @@ export function createScopedTools(
     designSystemCache: infra.designSystemCache,
     configManager: infra.configManager,
     fileKey,
+    getProvider,
   });
 
   return { tools, connector };

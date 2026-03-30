@@ -85,6 +85,7 @@ figma.showUI(__html__, { width: 140, height: 50, visible: true, themeColors: tru
         valuesByMode: v.valuesByMode,
         variableCollectionId: v.variableCollectionId,
         scopes: v.scopes,
+        codeSyntax: v.codeSyntax || {},
         description: v.description,
         hiddenFromPublishing: v.hiddenFromPublishing
       })),
@@ -2186,9 +2187,50 @@ figma.ui.onmessage = async (msg) => {
         throw new Error('Node type ' + node.type + ' does not support export');
       }
 
-      // Configure export settings
+      // Configure export settings — AI-optimized defaults (PNG 1x)
       var format = msg.format || 'PNG';
-      var scale = msg.scale || 2;
+      var scale = msg.scale || 1;
+
+      // AI vision cap: models resize images beyond their processing ceiling,
+      // so exporting larger just wastes bandwidth and export time.
+      // msg.maxDimension is set per-provider by the host (e.g. 1568 for Claude, 2048 for GPT).
+      var maxDim = msg.maxDimension || 1568;
+      var nodeWidth = 0;
+      var nodeHeight = 0;
+
+      if (node.type === 'PAGE') {
+        // Pages don't have fixed dimensions — calculate from visible children
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (var i = 0; i < node.children.length; i++) {
+          var child = node.children[i];
+          if (child.visible !== false && 'absoluteBoundingBox' in child && child.absoluteBoundingBox) {
+            var bb = child.absoluteBoundingBox;
+            minX = Math.min(minX, bb.x);
+            minY = Math.min(minY, bb.y);
+            maxX = Math.max(maxX, bb.x + bb.width);
+            maxY = Math.max(maxY, bb.y + bb.height);
+          }
+        }
+        if (minX !== Infinity) {
+          nodeWidth = maxX - minX;
+          nodeHeight = maxY - minY;
+        }
+      } else if ('width' in node && 'height' in node) {
+        nodeWidth = node.width;
+        nodeHeight = node.height;
+      }
+
+      // Cap scale so the longest exported side doesn't exceed the AI processing ceiling
+      if (nodeWidth > 0 && nodeHeight > 0) {
+        var longestSide = Math.max(nodeWidth, nodeHeight);
+        var exportedLongest = longestSide * scale;
+        if (exportedLongest > maxDim) {
+          var cappedScale = maxDim / longestSide;
+          console.log('🌉 [Desktop Bridge] Capping scale from', scale, 'to', cappedScale.toFixed(3),
+            '(node ' + Math.round(longestSide) + 'px, cap ' + maxDim + 'px)');
+          scale = cappedScale;
+        }
+      }
 
       var exportSettings = {
         format: format,

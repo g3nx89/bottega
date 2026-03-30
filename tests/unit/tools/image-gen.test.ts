@@ -146,7 +146,7 @@ describe('Image Gen Tools', () => {
       const tool = findTool('figma_edit_image');
       await run(tool, { prompt: 'remove background', nodeId: '3:4' });
 
-      expect(deps.connector.captureScreenshot).toHaveBeenCalledWith('3:4', { format: 'PNG' });
+      expect(deps.connector.captureScreenshot).toHaveBeenCalledWith('3:4', { format: 'PNG', maxDimension: 1568 });
       expect(mockGen.edit).toHaveBeenCalledWith('remove background', 'source-img-base64');
     });
 
@@ -206,7 +206,7 @@ describe('Image Gen Tools', () => {
       const tool = findTool('figma_restore_image');
       const result = await run(tool, { prompt: 'enhance quality', nodeId: '7:8' });
 
-      expect(deps.connector.captureScreenshot).toHaveBeenCalledWith('7:8', { format: 'PNG' });
+      expect(deps.connector.captureScreenshot).toHaveBeenCalledWith('7:8', { format: 'PNG', maxDimension: 1568 });
       expect(mockGen.edit).toHaveBeenCalledWith('enhance quality', 'source-img');
       expect(deps.connector.setImageFill).toHaveBeenCalledWith(['7:8'], 'edited-img-base64', 'FILL');
       const parsed = parseResult(result);

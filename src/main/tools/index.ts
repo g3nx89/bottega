@@ -25,6 +25,8 @@ export interface ToolDeps {
   configManager: CompressionConfigManager;
   /** File key for cache scoping in multi-tab (UNBOUND_FILE_KEY for tabs without a file). */
   fileKey: string;
+  /** Returns the current AI provider ('anthropic' | 'openai' | 'google' etc). Used for model-aware screenshot optimization. */
+  getProvider?: () => string;
 }
 
 /** Standard text result wrapper — avoids repeating the same shape in every tool. */

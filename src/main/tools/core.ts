@@ -3,6 +3,29 @@ import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
+/**
+ * AI vision processing limits per provider (max px on longest side).
+ * Beyond this, the provider either downscales (Claude, OpenAI) or
+ * tiles into more tokens with diminishing returns (Gemini).
+ *
+ * Claude:  images > 1568px are resized before tokenization — zero quality gain.
+ * OpenAI:  GPT-5.4 "high" mode caps at 2048px, then patches within that budget.
+ * Gemini:  no hard cap but tokens scale linearly with area — 1568 balances quality/cost.
+ */
+const VISION_MAX_DIMENSION: Record<string, number> = {
+  anthropic: 1568,
+  openai: 2048,
+  'openai-codex': 2048,
+  google: 1568,
+  'google-gemini-cli': 1568,
+};
+const DEFAULT_VISION_MAX_DIMENSION = 1568;
+
+/** Resolve the AI vision processing ceiling (px) for a given provider. */
+export function getVisionMaxDimension(provider: string): number {
+  return VISION_MAX_DIMENSION[provider] ?? DEFAULT_VISION_MAX_DIMENSION;
+}
+
 export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue, wsServer } = deps;
 
@@ -38,8 +61,10 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
         format: Type.Optional(StringEnum(['PNG', 'JPG'] as const, { default: 'PNG' })),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+        const maxDimension = getVisionMaxDimension(deps.getProvider?.() ?? '');
         const result = await connector.captureScreenshot(params.nodeId ?? '', {
           format: (params.format ?? 'PNG').toUpperCase(),
+          maxDimension,
         });
         // Plugin returns { success, image: { base64, format, scale, node, bounds } }
         const base64 = result?.image?.base64 ?? result?.imageData;

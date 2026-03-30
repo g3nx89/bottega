@@ -59,7 +59,7 @@ export class WebSocketConnector implements IFigmaConnector {
             success: true,
             timestamp: Date.now(),
             fileMetadata: { fileName: figma.root.name, fileKey: figma.fileKey || null },
-            variables: variables.map(function(v) { return { id: v.id, name: v.name, key: v.key, resolvedType: v.resolvedType, valuesByMode: v.valuesByMode, variableCollectionId: v.variableCollectionId, scopes: v.scopes, description: v.description, hiddenFromPublishing: v.hiddenFromPublishing }; }),
+            variables: variables.map(function(v) { return { id: v.id, name: v.name, key: v.key, resolvedType: v.resolvedType, valuesByMode: v.valuesByMode, variableCollectionId: v.variableCollectionId, scopes: v.scopes, codeSyntax: v.codeSyntax || {}, description: v.description, hiddenFromPublishing: v.hiddenFromPublishing }; }),
             variableCollections: collections.map(function(c) { return { id: c.id, name: c.name, key: c.key, modes: c.modes, defaultModeId: c.defaultModeId, variableIds: c.variableIds }; })
           };
         } catch (error) {
@@ -256,6 +256,7 @@ export class WebSocketConnector implements IFigmaConnector {
     const params: any = { nodeId };
     if (options?.format) params.format = options.format;
     if (options?.scale) params.scale = options.scale;
+    if (options?.maxDimension) params.maxDimension = options.maxDimension;
     return this.wsServer.sendCommand('CAPTURE_SCREENSHOT', params, 45000);
   }
 

@@ -207,7 +207,7 @@ describe('SlotManager', () => {
     it('calls createScopedTools with correct fileKey', async () => {
       await manager.createSlot('file-abc', 'Design.fig');
 
-      expect(createScopedTools).toHaveBeenCalledWith(infra, 'file-abc');
+      expect(createScopedTools).toHaveBeenCalledWith(infra, 'file-abc', expect.any(Function));
     });
 
     it('calls createFigmaAgentForSlot with default model', async () => {
@@ -226,7 +226,7 @@ describe('SlotManager', () => {
     it('calls createScopedTools with __unbound__ when no fileKey', async () => {
       await manager.createSlot();
 
-      expect(createScopedTools).toHaveBeenCalledWith(infra, '__unbound__');
+      expect(createScopedTools).toHaveBeenCalledWith(infra, '__unbound__', expect.any(Function));
     });
 
     it('tries switchSession when SessionStore has entry for fileKey', async () => {

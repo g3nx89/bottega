@@ -44,6 +44,8 @@ export interface SessionSlot extends TurnTracking {
   promptQueue: PromptQueue;
   scopedTools: ToolDefinition[];
   createdAt: number;
+  /** Mutable ref for the current provider — tools capture a closure over this for model-aware screenshot optimization. */
+  _providerRef: { current: string };
 }
 
 export interface SlotInfo {
@@ -99,7 +101,9 @@ export class SlotManager {
     }
 
     const effectiveModel = modelConfig || DEFAULT_MODEL;
-    const { tools } = createScopedTools(this.infra, fileKey || UNBOUND_FILE_KEY);
+    // Mutable ref: tools capture a closure over this; slot manager updates it on model switch
+    const providerRef = { current: effectiveModel.provider };
+    const { tools } = createScopedTools(this.infra, fileKey || UNBOUND_FILE_KEY, () => providerRef.current);
     const result = await createFigmaAgentForSlot(this.infra, tools, effectiveModel);
     const session = result.session as AgentSessionLike;
 
@@ -115,6 +119,7 @@ export class SlotManager {
       isStreaming: false,
       thinkingLevel: DEFAULT_THINKING_LEVEL,
       modelConfig: effectiveModel,
+      _providerRef: providerRef,
       suggester,
       promptQueue: new PromptQueue(),
       scopedTools: tools,
@@ -217,6 +222,7 @@ export class SlotManager {
 
       slot.session = session;
       slot.modelConfig = modelConfig;
+      slot._providerRef.current = modelConfig.provider;
       slot.suggester = new PromptSuggester(this.infra.authStorage);
       if (slot.thinkingLevel !== DEFAULT_THINKING_LEVEL) {
         session.setThinkingLevel?.(slot.thinkingLevel);

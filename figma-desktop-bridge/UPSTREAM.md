@@ -10,6 +10,13 @@
 - Handlers ported: DEEP_GET_COMPONENT, ANALYZE_COMPONENT_SET, GET_ANNOTATIONS, SET_ANNOTATIONS, GET_ANNOTATION_CATEGORIES
 - Also synced: ui.html relay (window functions, methodMap, result cases)
 
+## figma-console-mcp v1.19.2 partial sync (2026-03-30)
+- Upstream ref: v1.19.2 (commit 7fcd998)
+- Screenshot AI optimization (c73603e): default scale 1x, auto-cap to AI vision ceiling
+  - Bottega extension: model-aware maxDimension (1568px Claude/Gemini, 2048px OpenAI) via ToolDeps.getProvider
+- codeSyntax in initial variables fetch: added `codeSyntax: v.codeSyntax || {}` (consistency with REFRESH handler)
+- NOT imported: FigJam/Slides tools, bootloader, HTTP+WS server, port discovery cleanup, editorType detection
+
 ### Bottega-specific divergences from upstream
 
 | Area | Upstream | Bottega | Reason |
