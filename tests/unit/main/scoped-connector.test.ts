@@ -65,12 +65,12 @@ describe('ScopedConnector', () => {
     );
   });
 
-  it('captureScreenshot passes fileKey as targetFileKey with 30000 timeout', async () => {
+  it('captureScreenshot passes fileKey as targetFileKey with 45000 timeout', async () => {
     await connector.captureScreenshot('node1', { format: 'PNG', scale: 2 });
     expect(mockWsServer.sendCommand).toHaveBeenCalledWith(
       'CAPTURE_SCREENSHOT',
       { nodeId: 'node1', format: 'PNG', scale: 2 },
-      30000,
+      45000,
       FILE_KEY,
     );
   });

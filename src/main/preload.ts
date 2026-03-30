@@ -107,6 +107,14 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('figma:version-mismatch', (_event, info) => cb(info));
   },
 
+  // ── Feedback ─────────────────────────────
+  submitFeedback: (data: {
+    slotId: string;
+    sentiment: 'positive' | 'negative';
+    issueType?: string;
+    details?: string;
+  }) => ipcRenderer.invoke('feedback:submit', data),
+
   // ── Session persistence (per-slot) ────────
   resetSession: (slotId: string) =>
     ipcRenderer.invoke('session:reset', slotId) as Promise<{ success: boolean; error?: string }>,

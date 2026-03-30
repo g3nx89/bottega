@@ -2,6 +2,7 @@
  * Session event routing — handles Pi SDK session events and routes them
  * to the renderer via IPC. Extracted from ipc-handlers.ts to reduce file size.
  */
+import { randomUUID } from 'node:crypto';
 import { createChildLogger } from '../figma/logger.js';
 import { categorizeToolName } from './compression/metrics.js';
 import type { AgentSessionLike } from './ipc-handlers.js';
@@ -19,25 +20,64 @@ export interface EventRouterDeps {
   persistSlotSession: (slot: SessionSlot) => void;
 }
 
+/** Initialize a new turn on the slot: assign promptId, increment turnIndex, track prompt. */
+export function beginTurn(slot: SessionSlot, text: string, isFollowUp: boolean, usageTracker?: UsageTracker): void {
+  const promptId = randomUUID();
+  slot.turnIndex += 1;
+  slot.currentPromptId = promptId;
+  slot.promptStartTime = Date.now();
+  usageTracker?.trackPrompt(text.length, isFollowUp, {
+    promptId,
+    slotId: slot.id,
+    turnIndex: slot.turnIndex,
+    content: text,
+  });
+}
+
 export function createEventRouter(deps: EventRouterDeps) {
   const { slotManager, mainWindow, usageTracker, persistSlotSession } = deps;
   const toolStartTimes = new Map<string, number>();
   const subscribedSessions = new WeakSet<AgentSessionLike>();
 
+  // ── Per-turn accumulators (keyed by slotId) ──
+  const turnToolNames = new Map<string, string[]>();
+  const turnResponseLength = new Map<string, number>();
+
+  /** Get prompt correlation context from the slot's current turn. */
+  function turnContext(slot: SessionSlot): { promptId: string | undefined; slotId: string; turnIndex: number } {
+    return {
+      promptId: slot.currentPromptId ?? undefined,
+      slotId: slot.id,
+      turnIndex: slot.turnIndex,
+    };
+  }
+
   function handleMessageUpdate(wc: Electron.WebContents, slot: SessionSlot, event: any) {
     if (event.assistantMessageEvent?.type === 'text_delta') {
       safeSend(wc, 'agent:text-delta', slot.id, event.assistantMessageEvent.delta);
       slot.suggester.appendAssistantText(event.assistantMessageEvent.delta);
+      const prev = turnResponseLength.get(slot.id) ?? 0;
+      turnResponseLength.set(slot.id, prev + event.assistantMessageEvent.delta.length);
     }
     if (event.assistantMessageEvent?.type === 'thinking_delta') {
       safeSend(wc, 'agent:thinking', slot.id, event.assistantMessageEvent.delta);
     }
   }
 
+  // Store tool inputs for screenshot metadata (captured at start, used at end)
+  const toolInputs = new Map<string, any>();
+
   function handleToolStart(wc: Electron.WebContents, slot: SessionSlot, event: any) {
     log.info({ tool: event.toolName, callId: event.toolCallId, slotId: slot.id }, 'Tool start');
     safeSend(wc, 'agent:tool-start', slot.id, event.toolName, event.toolCallId);
     toolStartTimes.set(event.toolCallId, Date.now());
+    if (event.toolName === 'figma_screenshot' && event.toolInput) {
+      toolInputs.set(event.toolCallId, event.toolInput);
+    }
+    // Track tool name for this turn
+    const names = turnToolNames.get(slot.id) ?? [];
+    names.push(event.toolName);
+    turnToolNames.set(slot.id, names);
   }
 
   function handleToolEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
@@ -56,10 +96,24 @@ export function createEventRouter(deps: EventRouterDeps) {
     const durationMs = startTime ? Date.now() - startTime : 0;
     toolStartTimes.delete(event.toolCallId);
     const category = categorizeToolName(event.toolName);
+    const ctx = turnContext(slot);
+
     if (event.isError) {
-      usageTracker?.trackToolError(event.toolName, JSON.stringify(resultPreview), undefined);
+      usageTracker?.trackToolError(event.toolName, JSON.stringify(resultPreview), undefined, ctx);
     }
-    usageTracker?.trackToolCall(event.toolName, category, !event.isError, durationMs);
+
+    // Screenshot metadata for analytics (prefer stored input from start event)
+    const input = toolInputs.get(event.toolCallId) ?? event.toolInput;
+    toolInputs.delete(event.toolCallId);
+    const screenshotMeta =
+      event.toolName === 'figma_screenshot'
+        ? { nodeId: input?.nodeId, scale: input?.scale, format: input?.format }
+        : undefined;
+
+    usageTracker?.trackToolCall(event.toolName, category, !event.isError, durationMs, {
+      ...ctx,
+      screenshotMeta,
+    });
 
     if (
       event.toolName.startsWith('figma_generate_') ||
@@ -85,10 +139,44 @@ export function createEventRouter(deps: EventRouterDeps) {
     }
   }
 
+  /** Emit turn_end metrics and reset per-turn accumulators. */
+  function finalizeTurn(slot: SessionSlot): void {
+    if (!slot.currentPromptId) return; // idempotent — already finalized
+    const toolNames = turnToolNames.get(slot.id) ?? [];
+    const responseCharLength = turnResponseLength.get(slot.id) ?? 0;
+    const responseDurationMs = slot.promptStartTime ? Date.now() - slot.promptStartTime : 0;
+
+    if (slot.currentPromptId) {
+      usageTracker?.trackTurnEnd({
+        promptId: slot.currentPromptId,
+        slotId: slot.id,
+        turnIndex: slot.turnIndex,
+        responseCharLength,
+        responseDurationMs,
+        toolCallCount: toolNames.length,
+        toolNames: [...new Set(toolNames)],
+        hasAction: toolNames.length > 0,
+      });
+    }
+
+    // Preserve last completed turn for feedback correlation
+    slot.lastCompletedPromptId = slot.currentPromptId;
+    slot.lastCompletedTurnIndex = slot.turnIndex;
+
+    // Reset per-turn state
+    turnToolNames.delete(slot.id);
+    turnResponseLength.delete(slot.id);
+    slot.currentPromptId = null;
+    slot.promptStartTime = null;
+  }
+
   function handleAgentEnd(wc: Electron.WebContents, slot: SessionSlot) {
     if (!slot.isStreaming) return;
+    finalizeTurn(slot);
     const next = slot.promptQueue.dequeue();
     if (next) {
+      beginTurn(slot, next.text, true, usageTracker);
+
       safeSend(wc, 'queue:updated', slot.id, slot.promptQueue.list());
       safeSend(wc, 'agent:queued-prompt-start', slot.id, next.text);
       usageTracker?.trackPromptDequeued(slot.promptQueue.length);
@@ -96,6 +184,7 @@ export function createEventRouter(deps: EventRouterDeps) {
       slotManager.persistState();
       slot.session.prompt(next.text).catch((err: any) => {
         log.error({ err, slotId: slot.id }, 'Queued prompt failed');
+        finalizeTurn(slot);
         slot.isStreaming = false;
         slot.promptQueue.clear();
         safeSend(wc, 'agent:text-delta', slot.id, `\n\nError: ${err.message || MSG_REQUEST_FAILED_FALLBACK}`);
@@ -144,14 +233,18 @@ export function createEventRouter(deps: EventRouterDeps) {
    * Pi SDK's subscribe() has no unsubscribe API. When a model switch replaces
    * slot.session, the old listener becomes a no-op via the stale-event guard.
    */
-  return function subscribeToSlot(slot: SessionSlot): void {
-    if (subscribedSessions.has(slot.session)) return;
-    subscribedSessions.add(slot.session);
-    const wc = mainWindow.webContents;
-    const boundSession = slot.session;
-    slot.session.subscribe((event: any) => {
-      if (slot.session !== boundSession || !slotManager.getSlot(slot.id)) return;
-      eventHandlers[event.type]?.(wc, slot, event);
-    });
+  return {
+    subscribeToSlot(slot: SessionSlot): void {
+      if (subscribedSessions.has(slot.session)) return;
+      subscribedSessions.add(slot.session);
+      const wc = mainWindow.webContents;
+      const boundSession = slot.session;
+      slot.session.subscribe((event: any) => {
+        if (slot.session !== boundSession || !slotManager.getSlot(slot.id)) return;
+        eventHandlers[event.type]?.(wc, slot, event);
+      });
+    },
+    /** Clean up per-turn accumulators for a slot (e.g. after a failed prompt). */
+    finalizeTurn,
   };
 }

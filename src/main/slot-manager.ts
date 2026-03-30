@@ -23,7 +23,16 @@ const log = createChildLogger({ component: 'slot-manager' });
 export const MAX_SLOTS = 4;
 export const UNBOUND_FILE_KEY = '__unbound__'; // nosemgrep: hard-coded-password — sentinel value, not a password
 
-export interface SessionSlot {
+/** Per-turn analytics correlation state, grouped for clarity. */
+export interface TurnTracking {
+  turnIndex: number;
+  currentPromptId: string | null;
+  promptStartTime: number | null;
+  lastCompletedPromptId: string | null;
+  lastCompletedTurnIndex: number;
+}
+
+export interface SessionSlot extends TurnTracking {
   id: string;
   fileKey: string | null;
   fileName: string | null;
@@ -110,6 +119,11 @@ export class SlotManager {
       promptQueue: new PromptQueue(),
       scopedTools: tools,
       createdAt: Date.now(),
+      turnIndex: 0,
+      currentPromptId: null,
+      promptStartTime: null,
+      lastCompletedPromptId: null,
+      lastCompletedTurnIndex: 0,
     };
 
     this.slots.set(slot.id, slot);

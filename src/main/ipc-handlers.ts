@@ -24,7 +24,7 @@ import {
 } from './remote-logger.js';
 import { extractRenderableMessages, type RenderableTurn } from './renderable-messages.js';
 import { safeSend } from './safe-send.js';
-import { createEventRouter } from './session-events.js';
+import { beginTurn, createEventRouter } from './session-events.js';
 import type { SessionStore } from './session-store.js';
 import type { SessionSlot, SlotManager } from './slot-manager.js';
 
@@ -85,7 +85,8 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   }
 
   // Session event routing (extracted to session-events.ts)
-  const subscribeToSlot = createEventRouter({ slotManager, mainWindow, usageTracker, persistSlotSession });
+  const eventRouter = createEventRouter({ slotManager, mainWindow, usageTracker, persistSlotSession });
+  const { subscribeToSlot } = eventRouter;
 
   // ── Agent prompt/abort ─────────────────
 
@@ -110,15 +111,16 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
       return;
     }
 
-    // Direct send
+    // Direct send — assign a promptId for correlation across tool calls and turn end
+    beginTurn(slot, text, false, usageTracker);
     slot.suggester.trackUserPrompt(text);
     slot.suggester.resetAssistantText();
-    usageTracker?.trackPrompt(text.length, false);
     slot.isStreaming = true;
     try {
       await slot.session.prompt(text);
     } catch (err: any) {
       log.error({ err, slotId }, 'Prompt failed');
+      eventRouter.finalizeTurn(slot);
       slot.isStreaming = false;
       const errType = err.code === 'EAUTH' ? 'auth' : err.status === 429 ? 'rate_limit' : 'unknown';
       usageTracker?.trackAgentError(errType, err.message || 'Prompt failed');
@@ -137,6 +139,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   ipcMain.handle('agent:abort', async (_event, slotId: string) => {
     const slot = requireSlot(slotId);
     await slot.session.abort();
+    eventRouter.finalizeTurn(slot);
     slot.promptQueue.clear();
     slot.isStreaming = false;
     safeSend(mainWindow.webContents, 'queue:updated', slot.id, []);
@@ -170,8 +173,13 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
       return { success: false, error: `Unknown model: ${config.provider}/${config.modelId}` };
     }
     const slot = requireSlot(slotId);
-    log.info({ slotId, provider: config.provider, model: config.modelId }, 'Switching model');
     const previousModel = { provider: slot.modelConfig.provider, modelId: slot.modelConfig.modelId };
+    // Skip session recreation if the model hasn't actually changed
+    if (previousModel.provider === config.provider && previousModel.modelId === config.modelId) {
+      log.info({ slotId, provider: config.provider, model: config.modelId }, 'Model switch skipped (same model)');
+      return { success: true };
+    }
+    log.info({ slotId, provider: config.provider, model: config.modelId }, 'Switching model');
     try {
       await slotManager.recreateSession(slotId, config);
       // Re-subscribe to the new session
@@ -262,6 +270,24 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     const slot = requireSlot(slotId);
     return slot.promptQueue.list();
   });
+
+  // ── Feedback ─────────────────────────────────────
+
+  ipcMain.handle(
+    'feedback:submit',
+    (_event, data: { slotId: string; sentiment: 'positive' | 'negative'; issueType?: string; details?: string }) => {
+      const slot = slotManager.getSlot(data.slotId);
+      usageTracker?.trackFeedback({
+        sentiment: data.sentiment,
+        issueType: data.issueType,
+        details: data.details,
+        promptId: slot?.lastCompletedPromptId ?? slot?.currentPromptId ?? undefined,
+        slotId: data.slotId,
+        turnIndex: slot?.lastCompletedTurnIndex ?? slot?.turnIndex,
+      });
+      log.info({ slotId: data.slotId, sentiment: data.sentiment, issueType: data.issueType }, 'Feedback submitted');
+    },
+  );
 
   // ── Window controls (global) ────────────────────
 
@@ -434,6 +460,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   async function resetSessionCore(slot: SessionSlot): Promise<void> {
     if (slot.isStreaming) {
       await slot.session.abort();
+      eventRouter.finalizeTurn(slot);
       slot.isStreaming = false;
     }
     await slot.session.newSession();

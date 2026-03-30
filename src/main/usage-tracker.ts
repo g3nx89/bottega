@@ -34,6 +34,16 @@ export function redactMessage(msg: string): string {
     .replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]');
 }
 
+/** Conditionally spread promptId/slotId/turnIndex when present. */
+function spreadTurnContext(ctx?: { promptId?: string; slotId?: string; turnIndex?: number }): Record<string, unknown> {
+  if (!ctx) return {};
+  return {
+    ...(ctx.promptId && { promptId: ctx.promptId }),
+    ...(ctx.slotId && { slotId: ctx.slotId }),
+    ...(ctx.turnIndex != null && { turnIndex: ctx.turnIndex }),
+  };
+}
+
 export class UsageTracker {
   private logger: pino.Logger;
   private config: DiagnosticsConfig;
@@ -151,16 +161,66 @@ export class UsageTracker {
 
   // ── Agent interaction events ─────────
 
-  trackPrompt(charLength: number, isFollowUp: boolean): void {
-    this.emit('usage:prompt', { charLength, isFollowUp });
+  trackPrompt(
+    charLength: number,
+    isFollowUp: boolean,
+    context?: { promptId: string; slotId: string; turnIndex: number; content: string },
+  ): void {
+    this.emit('usage:prompt', {
+      charLength,
+      isFollowUp,
+      ...spreadTurnContext(context),
+      ...(context?.content && { contentPreview: context.content.slice(0, 500) }),
+    });
   }
 
-  trackToolCall(toolName: string, category: string, success: boolean, durationMs: number): void {
-    this.emit('usage:tool_call', { toolName, category, success, durationMs });
+  trackToolCall(
+    toolName: string,
+    category: string,
+    success: boolean,
+    durationMs: number,
+    context?: {
+      promptId?: string;
+      slotId?: string;
+      turnIndex?: number;
+      screenshotMeta?: { nodeId?: string; scale?: number; format?: string };
+    },
+  ): void {
+    this.emit('usage:tool_call', {
+      toolName,
+      category,
+      success,
+      durationMs,
+      ...spreadTurnContext(context),
+      ...(context?.screenshotMeta && { screenshotMeta: context.screenshotMeta }),
+    });
   }
 
-  trackToolError(toolName: string, errorMessage: string, errorCode?: string): void {
-    this.emit('usage:tool_error', { toolName, errorMessage: redactMessage(errorMessage), errorCode });
+  trackTurnEnd(data: {
+    promptId: string;
+    slotId: string;
+    turnIndex: number;
+    responseCharLength: number;
+    responseDurationMs: number;
+    toolCallCount: number;
+    toolNames: string[];
+    hasAction: boolean;
+  }): void {
+    this.emit('usage:turn_end', data);
+  }
+
+  trackToolError(
+    toolName: string,
+    errorMessage: string,
+    errorCode?: string,
+    context?: { promptId?: string; slotId?: string; turnIndex?: number },
+  ): void {
+    this.emit('usage:tool_error', {
+      toolName,
+      errorMessage: redactMessage(errorMessage),
+      errorCode,
+      ...spreadTurnContext(context),
+    });
   }
 
   trackAgentError(errorType: string, message: string): void {
@@ -203,6 +263,22 @@ export class UsageTracker {
 
   trackImageGen(imageType: string, model: string, success: boolean, durationMs: number): void {
     this.emit('usage:image_gen', { imageType, model, success, durationMs });
+  }
+
+  // ── Feedback events ──────────────────
+
+  trackFeedback(data: {
+    sentiment: 'positive' | 'negative';
+    issueType?: string;
+    details?: string;
+    promptId?: string;
+    slotId?: string;
+    turnIndex?: number;
+  }): void {
+    this.emit('usage:feedback', {
+      ...data,
+      ...(data.details && { details: redactMessage(data.details) }),
+    });
   }
 
   // ── Suggestion events ────────────────

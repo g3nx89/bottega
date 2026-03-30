@@ -256,7 +256,7 @@ export class WebSocketConnector implements IFigmaConnector {
     const params: any = { nodeId };
     if (options?.format) params.format = options.format;
     if (options?.scale) params.scale = options.scale;
-    return this.wsServer.sendCommand('CAPTURE_SCREENSHOT', params, 30000);
+    return this.wsServer.sendCommand('CAPTURE_SCREENSHOT', params, 45000);
   }
 
   async setInstanceProperties(nodeId: string, properties: any): Promise<any> {

@@ -416,6 +416,12 @@ if (!gotTheLock) {
               ipcController.subscribeSlot(slot);
               const slotInfo = slotManager.getSlotInfo(slot.id);
               if (slotInfo && mainWindow) safeSend(mainWindow.webContents, 'tab:created', slotInfo);
+              // Warmup: fire a low-res screenshot to prime Figma's rendering pipeline.
+              // Fire-and-forget — failure is harmless.
+              figmaCore?.wsServer
+                .sendCommand('CAPTURE_SCREENSHOT', { nodeId: '', scale: 0.25 }, 30000, info.fileKey)
+                .catch((err: any) => log.debug({ err, fileKey: info.fileKey }, 'Screenshot warmup failed'));
+              log.debug({ fileKey: info.fileKey }, 'Screenshot warmup triggered');
             })
             .catch((err: any) => {
               log.warn({ err, fileKey: info.fileKey }, 'Auto-tab creation failed');

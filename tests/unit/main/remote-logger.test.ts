@@ -314,6 +314,183 @@ describe('UsageTracker', () => {
   });
 });
 
+describe('UsageTracker enhanced logging', () => {
+  let tracker: UsageTracker;
+  let mockLogger: any;
+
+  beforeEach(() => {
+    mockLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), fatal: vi.fn() };
+    tracker = new UsageTracker(mockLogger, { sendDiagnostics: true, anonymousId: 'test-anon' }, {});
+  });
+
+  afterEach(() => {
+    tracker.stopHeartbeat();
+  });
+
+  it('trackPrompt with context includes promptId, slotId, turnIndex, content', () => {
+    tracker.trackPrompt(20, false, {
+      promptId: 'p-123',
+      slotId: 's-456',
+      turnIndex: 3,
+      content: 'Make the button blue',
+    });
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:prompt',
+        charLength: 20,
+        isFollowUp: false,
+        promptId: 'p-123',
+        slotId: 's-456',
+        turnIndex: 3,
+        contentPreview: 'Make the button blue',
+      }),
+    );
+  });
+
+  it('trackPrompt without context omits correlation fields', () => {
+    tracker.trackPrompt(10, true);
+
+    const call = mockLogger.info.mock.calls[0][0];
+    expect(call.event).toBe('usage:prompt');
+    expect(call.charLength).toBe(10);
+    expect(call).not.toHaveProperty('promptId');
+    expect(call).not.toHaveProperty('slotId');
+  });
+
+  it('trackToolCall with context includes promptId and screenshotMeta', () => {
+    tracker.trackToolCall('figma_screenshot', 'screenshot', true, 500, {
+      promptId: 'p-123',
+      slotId: 's-456',
+      turnIndex: 2,
+      screenshotMeta: { nodeId: '1:42', scale: 2, format: 'PNG' },
+    });
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:tool_call',
+        toolName: 'figma_screenshot',
+        durationMs: 500,
+        promptId: 'p-123',
+        slotId: 's-456',
+        turnIndex: 2,
+        screenshotMeta: { nodeId: '1:42', scale: 2, format: 'PNG' },
+      }),
+    );
+  });
+
+  it('trackToolCall without context omits correlation fields', () => {
+    tracker.trackToolCall('figma_execute', 'core', true, 100);
+
+    const call = mockLogger.info.mock.calls[0][0];
+    expect(call.event).toBe('usage:tool_call');
+    expect(call).not.toHaveProperty('promptId');
+    expect(call).not.toHaveProperty('screenshotMeta');
+  });
+
+  it('trackTurnEnd emits full turn metrics', () => {
+    tracker.trackTurnEnd({
+      promptId: 'p-abc',
+      slotId: 's-def',
+      turnIndex: 5,
+      responseCharLength: 28,
+      responseDurationMs: 3200,
+      toolCallCount: 2,
+      toolNames: ['figma_set_fills', 'figma_screenshot'],
+      hasAction: true,
+    });
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:turn_end',
+        promptId: 'p-abc',
+        slotId: 's-def',
+        turnIndex: 5,
+        responseCharLength: 28,
+        responseDurationMs: 3200,
+        toolCallCount: 2,
+        toolNames: ['figma_set_fills', 'figma_screenshot'],
+        hasAction: true,
+      }),
+    );
+  });
+
+  it('trackTurnEnd with hasAction false for text-only turns', () => {
+    tracker.trackTurnEnd({
+      promptId: 'p-xyz',
+      slotId: 's-123',
+      turnIndex: 1,
+      responseCharLength: 33,
+      responseDurationMs: 1500,
+      toolCallCount: 0,
+      toolNames: [],
+      hasAction: false,
+    });
+
+    const call = mockLogger.info.mock.calls[0][0];
+    expect(call.hasAction).toBe(false);
+    expect(call.toolCallCount).toBe(0);
+    expect(call.toolNames).toEqual([]);
+  });
+
+  it('trackFeedback emits positive feedback', () => {
+    tracker.trackFeedback({
+      sentiment: 'positive',
+      details: 'Great design!',
+      promptId: 'p-123',
+      slotId: 's-456',
+      turnIndex: 2,
+    });
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:feedback',
+        sentiment: 'positive',
+        details: 'Great design!',
+        promptId: 'p-123',
+      }),
+    );
+  });
+
+  it('trackFeedback emits negative feedback with issueType', () => {
+    tracker.trackFeedback({
+      sentiment: 'negative',
+      issueType: 'did_not_use_tools',
+      details: 'Expected action, got text',
+      promptId: 'p-789',
+      slotId: 's-abc',
+      turnIndex: 3,
+    });
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:feedback',
+        sentiment: 'negative',
+        issueType: 'did_not_use_tools',
+        details: 'Expected action, got text',
+      }),
+    );
+  });
+
+  it('trackToolError with context includes promptId', () => {
+    tracker.trackToolError('figma_execute', 'Node not found', 'ERR_404', {
+      promptId: 'p-err',
+      slotId: 's-err',
+      turnIndex: 1,
+    });
+
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'usage:tool_error',
+        toolName: 'figma_execute',
+        promptId: 'p-err',
+        slotId: 's-err',
+        turnIndex: 1,
+      }),
+    );
+  });
+});
+
 describe('UsageTracker multi-tab events', () => {
   let tracker: UsageTracker;
   let mockLogger: any;

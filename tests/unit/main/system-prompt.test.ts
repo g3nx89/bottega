@@ -19,6 +19,14 @@ describe('buildSystemPrompt', () => {
     expect(result).toContain('figma_execute');
   });
 
+  it('should include Action Bias section', () => {
+    const result = buildSystemPrompt('Test Model');
+    expect(result).toContain('## Action Bias');
+    expect(result).toContain('ALWAYS use tools to execute it');
+    expect(result).toContain('Do first, refine later');
+    expect(result).toContain('session reset');
+  });
+
   it('should produce a string of reasonable length', () => {
     const result = buildSystemPrompt('X');
     // System prompt should be substantial (>1000 chars)

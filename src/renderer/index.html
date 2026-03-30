@@ -223,6 +223,35 @@
     </div>
   </div>
 
+    <!-- Feedback modal -->
+    <div id="feedback-modal" class="modal-overlay hidden">
+      <div class="modal-panel feedback-panel">
+        <div class="modal-header" id="feedback-modal-title">Give feedback</div>
+        <div class="modal-body">
+          <div id="feedback-issue-group">
+            <label class="feedback-label">What type of issue do you wish to report? (optional)</label>
+            <select id="feedback-issue-select" class="feedback-select">
+              <option value="">Select...</option>
+              <option value="did_not_follow_request">Did not follow my request</option>
+              <option value="wrong_design_action">Wrong design action</option>
+              <option value="did_not_use_tools">Did not use tools</option>
+              <option value="not_factually_correct">Not factually correct</option>
+              <option value="incomplete_response">Incomplete response</option>
+              <option value="made_unwanted_changes">Made unwanted changes</option>
+              <option value="slow_response">Slow response</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <label class="feedback-label">Please provide details: (optional)</label>
+          <textarea id="feedback-details" class="feedback-textarea" rows="3" placeholder=""></textarea>
+        </div>
+        <div class="modal-actions">
+          <button id="feedback-submit-btn" class="modal-btn primary">Submit</button>
+          <button id="feedback-cancel-btn" class="modal-btn secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
   <script src="app.js"></script>
   <script src="slash-commands.js"></script>
   <script src="settings.js"></script>

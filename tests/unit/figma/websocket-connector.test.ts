@@ -25,10 +25,10 @@ describe('WebSocketConnector', () => {
     expect(mockSendCommand).toHaveBeenCalledWith('EXECUTE_CODE', { code: 'figma.root.name', timeout: 5000 }, 7000);
   });
 
-  it('captureScreenshot sends CAPTURE_SCREENSHOT with 30s timeout', async () => {
+  it('captureScreenshot sends CAPTURE_SCREENSHOT with 45s timeout', async () => {
     await connector.captureScreenshot('1:2', { scale: 2 });
 
-    expect(mockSendCommand).toHaveBeenCalledWith('CAPTURE_SCREENSHOT', { nodeId: '1:2', scale: 2 }, 30000);
+    expect(mockSendCommand).toHaveBeenCalledWith('CAPTURE_SCREENSHOT', { nodeId: '1:2', scale: 2 }, 45000);
   });
 
   it('createFromJsx sends CREATE_FROM_JSX with 60s timeout', async () => {

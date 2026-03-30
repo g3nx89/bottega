@@ -163,6 +163,16 @@ describe('SlotManager', () => {
       expect(slot.createdAt).toBeTypeOf('number');
     });
 
+    it('initializes turn tracking fields', async () => {
+      const slot = await manager.createSlot('file-abc', 'Design.fig');
+
+      expect(slot.turnIndex).toBe(0);
+      expect(slot.currentPromptId).toBeNull();
+      expect(slot.promptStartTime).toBeNull();
+      expect(slot.lastCompletedPromptId).toBeNull();
+      expect(slot.lastCompletedTurnIndex).toBe(0);
+    });
+
     it('sets first slot as active automatically', async () => {
       expect(manager.activeSlotId).toBeNull();
 

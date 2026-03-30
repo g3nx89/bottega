@@ -307,11 +307,20 @@ function switchToTab(slotId) {
 
 /** Update the model and effort bar labels to reflect a tab's actual config. */
 function syncBarToTab(tab) {
-  // Model label
+  // Model label + dropdown
   if (tab.modelConfig && typeof availableModels === 'object') {
     const allModels = Object.values(availableModels).flat();
     const match = allModels.find((m) => m.sdkProvider === tab.modelConfig.provider && m.id === tab.modelConfig.modelId);
     if (match && barModelLabel) barModelLabel.textContent = match.label.replace(/ \(.*\)/, '');
+    // Keep the settings dropdown in sync with the active tab's model
+    const sel = document.getElementById('model-select');
+    if (sel) {
+      const val = tab.modelConfig.provider + ':' + tab.modelConfig.modelId;
+      if (sel.value !== val) sel.value = val;
+    }
+    // Keep localStorage in sync so next populateModelSelect() restores correctly
+    localStorage.setItem('bottega:provider', tab.modelConfig.provider);
+    localStorage.setItem('bottega:model', tab.modelConfig.modelId);
   }
   // Effort label — read from tab's thinkingLevel if present, else fall back to global
   const effort = tab.thinkingLevel || currentEffort;
@@ -402,6 +411,8 @@ function _initTurn(tab, text, images) {
   tab._turnToolErrors = 0;
   tab._turnResponseLength = 0;
   tab._turnHasScreenshot = false;
+  tab._lastPromptText = text;
+  tab._lastPromptImages = images;
   updateInputState();
   renderTabBar();
 }
@@ -494,6 +505,23 @@ function addToolCard(tab, toolName, toolCallId) {
   nameEl.textContent = toolName; // textContent: safe
   card.appendChild(spinner);
   card.appendChild(nameEl);
+  // Screenshot progress indicator — show elapsed time after 3s
+  if (toolName === 'figma_screenshot') {
+    const startTime = Date.now();
+    const elapsed = document.createElement('span');
+    elapsed.className = 'tool-elapsed';
+    card.appendChild(elapsed);
+    const timer = setInterval(() => {
+      const sec = ((Date.now() - startTime) / 1000).toFixed(0);
+      elapsed.textContent = sec + 's';
+    }, 1000);
+    // Show after 3s delay
+    elapsed.style.display = 'none';
+    card._elapsedShowTimeout = setTimeout(() => {
+      elapsed.style.display = '';
+    }, 3000);
+    card._elapsedTimer = timer;
+  }
   tab.currentAssistantBubble.appendChild(card);
   scrollToBottom();
 }
@@ -508,7 +536,108 @@ function completeToolCard(tab, toolCallId, success) {
     spinner.dataset.testid = 'tool-status';
     spinner.textContent = success ? '\u2713' : '\u2717'; // ✓ / ✗ via textContent
   }
+  // Clear screenshot elapsed timer
+  if (card._elapsedTimer) {
+    clearInterval(card._elapsedTimer);
+    card._elapsedTimer = null;
+    if (card._elapsedShowTimeout) clearTimeout(card._elapsedShowTimeout);
+    card._elapsedShowTimeout = null;
+    const elapsed = card.querySelector('.tool-elapsed');
+    if (elapsed) elapsed.remove();
+  }
 }
+
+// ── Response action bar (copy, thumbs up/down, retry) ───────
+
+function _actionBtn(label, title, onClick) {
+  const btn = document.createElement('button');
+  btn.className = 'action-btn';
+  btn.title = title;
+  btn.textContent = label;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+function createActionBar(bubble, tab) {
+  const bar = document.createElement('div');
+  bar.className = 'response-action-bar';
+
+  const copyBtn = _actionBtn('\u2398', 'Copy response', () => {
+    const content = bubble.querySelector('.message-content');
+    if (content) navigator.clipboard.writeText(content.textContent || '');
+    copyBtn.textContent = '\u2713';
+    setTimeout(() => {
+      copyBtn.textContent = '\u2398';
+    }, 1500);
+  });
+
+  bar.appendChild(copyBtn);
+  bar.appendChild(_actionBtn('\uD83D\uDC4D', 'Good response', () => openFeedbackModal('positive', tab)));
+  bar.appendChild(_actionBtn('\uD83D\uDC4E', 'Bad response', () => openFeedbackModal('negative', tab)));
+  bar.appendChild(
+    _actionBtn('\u21BB', 'Retry', () => {
+      if (tab._lastPromptText && !tab.isStreaming && tab.id) {
+        window.api.sendPrompt(tab.id, tab._lastPromptText);
+        _initTurn(tab, tab._lastPromptText, tab._lastPromptImages || []);
+      }
+    }),
+  );
+  bubble.appendChild(bar);
+}
+
+// ── Feedback modal logic ───────────────────
+
+let _feedbackSentiment = null;
+let _feedbackSlotId = null;
+const feedbackModal = document.getElementById('feedback-modal');
+const feedbackTitle = document.getElementById('feedback-modal-title');
+const feedbackIssueGroup = document.getElementById('feedback-issue-group');
+const feedbackIssueSelect = document.getElementById('feedback-issue-select');
+const feedbackDetails = document.getElementById('feedback-details');
+const feedbackSubmitBtn = document.getElementById('feedback-submit-btn');
+const feedbackCancelBtn = document.getElementById('feedback-cancel-btn');
+
+function openFeedbackModal(sentiment, tab) {
+  _feedbackSentiment = sentiment;
+  _feedbackSlotId = tab.id;
+  feedbackTitle.textContent = sentiment === 'positive' ? 'Give positive feedback' : 'Give negative feedback';
+  feedbackIssueGroup.style.display = sentiment === 'negative' ? '' : 'none';
+  feedbackDetails.placeholder =
+    sentiment === 'positive'
+      ? 'What was satisfying about this response?'
+      : 'What was unsatisfying about this response?';
+  feedbackIssueSelect.value = '';
+  feedbackDetails.value = '';
+  feedbackModal.classList.remove('hidden');
+  feedbackDetails.focus();
+}
+
+function closeFeedbackModal() {
+  feedbackModal.classList.add('hidden');
+  _feedbackSentiment = null;
+  _feedbackSlotId = null;
+}
+
+feedbackSubmitBtn.addEventListener('click', () => {
+  if (!_feedbackSlotId) return;
+  window.api.submitFeedback({
+    slotId: _feedbackSlotId,
+    sentiment: _feedbackSentiment,
+    issueType: _feedbackSentiment === 'negative' ? feedbackIssueSelect.value || undefined : undefined,
+    details: feedbackDetails.value.trim() || undefined,
+  });
+  closeFeedbackModal();
+});
+
+feedbackCancelBtn.addEventListener('click', closeFeedbackModal);
+
+feedbackModal.addEventListener('click', (e) => {
+  if (e.target === feedbackModal) closeFeedbackModal();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !feedbackModal.classList.contains('hidden')) closeFeedbackModal();
+});
 
 // Screenshots
 function addScreenshot(tab, base64, opts) {
@@ -819,6 +948,7 @@ window.api.onAgentEnd((slotId) => {
       // safe: escapeHtml applied first inside renderMarkdown()
       content.innerHTML = renderMarkdown(content.textContent);
     }
+    createActionBar(tab.currentAssistantBubble, tab);
   }
   tab.currentAssistantBubble = null;
   tab.isStreaming = false;

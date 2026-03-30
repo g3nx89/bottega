@@ -449,6 +449,15 @@ describe('setupIpcHandlers', () => {
 
       expect(result).toEqual({ success: false, error: 'Invalid credentials' });
     });
+
+    it('should skip session recreation when model has not changed', async () => {
+      // slot.modelConfig is { provider: 'anthropic', modelId: 'claude-sonnet-4' }
+      const sameConfig = { provider: 'anthropic', modelId: 'claude-sonnet-4' };
+      const result = await invokeHandler('auth:switch-model', slotId, sameConfig);
+
+      expect(result).toEqual({ success: true });
+      expect(slotManager.recreateSession).not.toHaveBeenCalled();
+    });
   });
 
   // ── Untested event forwarding ─────────────────────────────────
