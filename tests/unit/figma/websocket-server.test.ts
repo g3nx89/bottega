@@ -782,12 +782,13 @@ describe('FigmaWebSocketServer', () => {
           page: 'Page 1',
           timestamp: Date.now(),
         });
-        await vi.advanceTimersByTimeAsync(50);
+        // Yield to real event loop so WS I/O delivers the message (fake timers don't process real I/O)
+        await new Promise((r) => setImmediate(r));
         expect(server.getActiveFileKey()).toBe('file-A');
 
         // Disconnect file-A
         await clientA.close();
-        await vi.advanceTimersByTimeAsync(100);
+        await new Promise((r) => setImmediate(r));
 
         // During grace period, activeFileKey is still file-A
         expect(server.getActiveFileKey()).toBe('file-A');
