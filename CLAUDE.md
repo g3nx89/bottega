@@ -16,6 +16,8 @@ Electron Main Process (src/main/)
 ├── operation-queue.ts    — Promise-based mutex for serializing Figma mutations
 ├── operation-queue-manager.ts — Multi-queue manager (per-file queue isolation)
 ├── ipc-handlers.ts       — Bridges agent events → renderer via IPC
+├── ipc-handlers-auth.ts  — Auth-specific IPC handlers (OAuth, API keys)
+├── session-events.ts     — Agent session event wiring (message-end, usage, analytics)
 ├── preload.ts            — contextBridge exposing window.api (MUST be built as CJS)
 ├── system-prompt.ts      — LLM system prompt with tool reference and design patterns
 ├── jsx-parser.ts         — JSX string → TreeNode via esbuild transform + vm sandbox
@@ -38,13 +40,14 @@ Electron Main Process (src/main/)
 ├── fs-utils.ts           — File system helpers
 ├── compression/          — Context compression (config, extension-factory, design-system-cache, mutation-compressor, metrics, color-utils, execute-enricher, project-tree)
 ├── image-gen/            — Gemini-based image generation (config, generator, prompt builders)
-└── tools/                — 34 ToolDefinition[] for Pi SDK (TypeBox schemas)
+└── tools/                — 39 ToolDefinition[] for Pi SDK (TypeBox schemas)
     ├── index.ts          — Aggregator, ToolDeps interface, textResult helper, abort-check wrapper
     ├── core.ts           — execute, screenshot, status, get_selection
     ├── discovery.ts      — get_file_data, search_components, get_library_components, get_component_details, design_system
     ├── components.ts     — instantiate, set_instance_properties, arrange_component_set
     ├── manipulation.ts   — set_fills, set_strokes, set_text, set_image_fill, resize, move, create_child, clone, delete, rename
     ├── tokens.ts         — setup_tokens, lint
+    ├── annotations.ts    — get_annotations, set_annotations, get_annotation_categories
     ├── jsx-render.ts     — render_jsx, create_icon, bind_variable
     └── image-gen.ts      — generate_image, edit_image, restore_image, generate_icon, generate_pattern, generate_story, generate_diagram
 
@@ -64,7 +67,9 @@ Desktop Bridge Plugin (figma-desktop-bridge/)   — Fork of figma-console-mcp pl
 Renderer (src/renderer/)          — Vanilla HTML/CSS/JS, no framework
 ├── index.html             — Chat layout with CSP headers
 ├── styles.css             — macOS-native design, #A259FF accent, dark mode
-└── app.js                 — Streaming text, tool cards, screenshots, markdown
+├── app.js                 — Streaming text, tool cards, screenshots, markdown
+├── settings.js            — Settings panel (auth, model select, API keys, compression)
+└── slash-commands.js      — Slash command menu handling
 ```
 
 ## Build & Development
@@ -79,7 +84,7 @@ npm run test:e2e                # Playwright e2e tests (builds first)
 npm run test:coverage           # vitest with coverage report
 npm run lint                    # biome check src/ tests/
 npm run lint:fix                # biome auto-fix
-npm run check                   # typecheck + lint + test (all-in-one gate)
+npm run check                   # typecheck + lint + lint:types + test + lint:dead + audit:deps
 npx tsc --noEmit                # type check only
 npm run package                 # build + electron-builder .dmg
 ```
@@ -129,13 +134,14 @@ node tests/electron-smoke.mjs
 - **Image generation**: `image-gen/` wraps Gemini API (`@google/genai`). Tools can generate, edit, and restore images on Figma nodes. Requires a Gemini API key configured in Settings.
 - **Prompt suggester**: After each agent turn, `prompt-suggester.ts` generates follow-up suggestions via a lightweight LLM call, forwarded as clickable chips in the renderer.
 
-## Tool Categories (34 tools)
+## Tool Categories (39 tools)
 
 - **Core** (4): `figma_execute`, `figma_screenshot`, `figma_status`, `figma_get_selection`
-- **Discovery** (5): `figma_get_file_data`, `figma_search_components`, `figma_get_library_components`, `figma_get_component_details`, `figma_design_system`
-- **Components** (3): `figma_instantiate`, `figma_set_instance_properties`, `figma_arrange_component_set`
+- **Discovery** (6): `figma_get_file_data`, `figma_search_components`, `figma_get_library_components`, `figma_get_component_details`, `figma_get_component_deep`, `figma_design_system`
+- **Components** (4): `figma_instantiate`, `figma_set_instance_properties`, `figma_arrange_component_set`, `figma_analyze_component_set`
 - **Manipulation** (10): `figma_set_fills`, `figma_set_strokes`, `figma_set_text`, `figma_set_image_fill`, `figma_resize`, `figma_move`, `figma_create_child`, `figma_clone`, `figma_delete`, `figma_rename`
 - **Tokens** (2): `figma_setup_tokens`, `figma_lint`
+- **Annotations** (3): `figma_get_annotations`, `figma_set_annotations`, `figma_get_annotation_categories`
 - **JSX Render** (3): `figma_render_jsx`, `figma_create_icon`, `figma_bind_variable`
 - **Image Gen** (7): `figma_generate_image`, `figma_edit_image`, `figma_restore_image`, `figma_generate_icon`, `figma_generate_pattern`, `figma_generate_story`, `figma_generate_diagram`
 
