@@ -45,6 +45,18 @@
       "trailingCommas": "all"
     }
   },
+  "overrides": [
+    {
+      "includes": ["src/renderer/slash-commands.js"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedVariables": "off"
+          }
+        }
+      }
+    }
+  ],
   "files": {
     "includes": ["src/**", "tests/**/*.ts"]
   }

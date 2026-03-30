@@ -29,6 +29,13 @@ engines:
   # --- Complexity ---
 
   # Lizard — cyclomatic complexity and function length
+  # Known false positives (Lizard mis-parses TypeScript function boundaries):
+  #   - project-tree.ts: rgbaToHex CC=15 (actual CC≈1, 6-line function in color-utils.ts)
+  #   - project-tree.ts: resolveLayout CC=12 (actual CC≈4, 12-line function)
+  #   - project-tree.ts: projectTextProps CC=11 (actual CC≈3, 9-line function)
+  #   - design-system-cache.ts: compactVariable CC=10 (actual CC≈3, merges isColorValue CC)
+  #   - design-system-cache.ts: compactComponent CC=10 (actual CC≈4, 20-line function)
+  #   - prompt-suggester.ts: parseSuggestions 91 LoC (actual: 13 lines, boundary error)
   lizard:
     enabled: true
 

@@ -71,6 +71,7 @@ export default tseslint.config(
       'src/main/index.ts',
       'src/main/preload.ts',
       'src/main/ipc-handlers.ts',
+      'src/main/ipc-handlers-auth.ts',
       'src/main/auto-updater.ts',
       'src/main/diagnostics.ts',
       'src/main/startup-guards.ts',
@@ -79,6 +80,21 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': 'off',
       'no-restricted-syntax': 'off',
+      // index.ts has AuthStorage stubs with async () => undefined to match the real async interface
+      '@typescript-eslint/require-await': 'off',
+    },
+  },
+  // Disable require-await where async is mandated by Pi SDK interfaces
+  // (ToolDefinition.execute returns Promise<AgentToolResult>, pi.on handler
+  // accepts Promise<any>|any, AuthStorage.getApiKey is async in the real impl)
+  {
+    files: [
+      'src/main/tools/**/*.ts',
+      'src/main/compression/extension-factory.ts',
+      'src/main/figma-core.ts',
+    ],
+    rules: {
+      '@typescript-eslint/require-await': 'off',
     },
   },
 );

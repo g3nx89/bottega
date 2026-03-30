@@ -128,6 +128,39 @@ function projectComponentProps(node: any, projected: ProjectedNode): void {
 
 // ── Core projection ──────────────────────────────
 
+function projectLayoutProps(rawNode: any, projected: ProjectedNode): void {
+  if (typeof rawNode.width === 'number' && typeof rawNode.height === 'number') {
+    projected.box = `${Math.round(rawNode.width)}x${Math.round(rawNode.height)}`;
+  }
+  const layout = resolveLayout(rawNode);
+  if (layout !== undefined) {
+    projected.layout = layout;
+    if (typeof rawNode.itemSpacing === 'number' && rawNode.itemSpacing > 0) {
+      projected.gap = rawNode.itemSpacing;
+    }
+  }
+  const padding = resolvePadding(rawNode);
+  if (padding !== undefined) projected.padding = padding;
+}
+
+function projectStyleProps(rawNode: any, projected: ProjectedNode): void {
+  const fillResult = resolveFill(rawNode.fills);
+  if (fillResult !== null) {
+    projected.fill = fillResult.fill;
+    if (fillResult.hasComplexFill) projected.hasComplexFill = true;
+  }
+  const stroke = resolveStroke(rawNode);
+  if (stroke !== undefined) projected.stroke = stroke;
+}
+
+function projectFlags(rawNode: any, projected: ProjectedNode, detail: ProjectionDetail): void {
+  if (detail === 'detailed' && typeof rawNode.opacity === 'number' && rawNode.opacity !== 1) {
+    projected.opacity = rawNode.opacity;
+  }
+  if (rawNode.visible === false) projected.hidden = true;
+  if (Array.isArray(rawNode.effects) && rawNode.effects.length > 0) projected.hasEffects = true;
+}
+
 export function projectTree(rawNode: any, detail: ProjectionDetail = 'standard'): ProjectedNode {
   if (!rawNode || typeof rawNode !== 'object') {
     return { id: '?', type: 'UNKNOWN', name: '?' };
@@ -139,47 +172,14 @@ export function projectTree(rawNode: any, detail: ProjectionDetail = 'standard')
     name: rawNode.name ?? '?',
   };
 
-  // box
-  if (typeof rawNode.width === 'number' && typeof rawNode.height === 'number') {
-    projected.box = `${Math.round(rawNode.width)}x${Math.round(rawNode.height)}`;
-  }
+  projectLayoutProps(rawNode, projected);
+  projectStyleProps(rawNode, projected);
 
-  // layout + gap
-  const layout = resolveLayout(rawNode);
-  if (layout !== undefined) {
-    projected.layout = layout;
-    if (typeof rawNode.itemSpacing === 'number' && rawNode.itemSpacing > 0) {
-      projected.gap = rawNode.itemSpacing;
-    }
-  }
-
-  // padding / fill / stroke
-  const padding = resolvePadding(rawNode);
-  if (padding !== undefined) projected.padding = padding;
-
-  const fillResult = resolveFill(rawNode.fills);
-  if (fillResult !== null) {
-    projected.fill = fillResult.fill;
-    if (fillResult.hasComplexFill) projected.hasComplexFill = true;
-  }
-
-  const stroke = resolveStroke(rawNode);
-  if (stroke !== undefined) projected.stroke = stroke;
-
-  // type-specific properties
   if (rawNode.type === 'TEXT') projectTextProps(rawNode, projected, detail);
   if (rawNode.type === 'INSTANCE' || rawNode.type === 'COMPONENT') projectComponentProps(rawNode, projected);
 
-  // detailed-mode opacity
-  if (detail === 'detailed' && typeof rawNode.opacity === 'number' && rawNode.opacity !== 1) {
-    projected.opacity = rawNode.opacity;
-  }
+  projectFlags(rawNode, projected, detail);
 
-  // flags
-  if (rawNode.visible === false) projected.hidden = true;
-  if (Array.isArray(rawNode.effects) && rawNode.effects.length > 0) projected.hasEffects = true;
-
-  // children — recurse
   if (Array.isArray(rawNode.children) && rawNode.children.length > 0) {
     projected.children = rawNode.children.map((child: any) => projectTree(child, detail));
   }
