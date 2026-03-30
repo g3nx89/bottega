@@ -2,7 +2,7 @@ import { cpSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { app, type BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { createChildLogger } from '../figma/logger.js';
-import { type AgentInfra, AVAILABLE_MODELS, isThinkingLevel, type ModelConfig } from './agent.js';
+import { type AgentInfra, AVAILABLE_MODELS, CONTEXT_SIZES, isThinkingLevel, type ModelConfig } from './agent.js';
 import { checkForUpdates, downloadUpdate, getAppVersion, quitAndInstall } from './auto-updater.js';
 import { exportDiagnosticsZip, formatSystemInfoForClipboard } from './diagnostics.js';
 import { effectiveApiKey, type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
@@ -85,7 +85,13 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   }
 
   // Session event routing (extracted to session-events.ts)
-  const eventRouter = createEventRouter({ slotManager, mainWindow, usageTracker, persistSlotSession });
+  const eventRouter = createEventRouter({
+    slotManager,
+    mainWindow,
+    usageTracker,
+    persistSlotSession,
+    contextSizes: CONTEXT_SIZES,
+  });
   const { subscribeToSlot } = eventRouter;
 
   // ── Agent prompt/abort ─────────────────

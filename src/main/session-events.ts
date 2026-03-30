@@ -18,6 +18,7 @@ export interface EventRouterDeps {
   mainWindow: { webContents: Electron.WebContents };
   usageTracker?: UsageTracker;
   persistSlotSession: (slot: SessionSlot) => void;
+  contextSizes: Record<string, number>;
 }
 
 /** Initialize a new turn on the slot: assign promptId, increment turnIndex, track prompt. */
@@ -35,7 +36,7 @@ export function beginTurn(slot: SessionSlot, text: string, isFollowUp: boolean, 
 }
 
 export function createEventRouter(deps: EventRouterDeps) {
-  const { slotManager, mainWindow, usageTracker, persistSlotSession } = deps;
+  const { slotManager, mainWindow, usageTracker, persistSlotSession, contextSizes } = deps;
   const toolStartTimes = new Map<string, number>();
   const subscribedSessions = new WeakSet<AgentSessionLike>();
 
@@ -131,10 +132,40 @@ export function createEventRouter(deps: EventRouterDeps) {
   function handleMessageEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
     const msg = event.message;
     if (msg?.role === 'assistant' && msg.usage) {
-      safeSend(wc, 'agent:usage', slot.id, {
-        input: msg.usage.input,
-        output: msg.usage.output,
-        total: msg.usage.totalTokens,
+      // input = non-cached tokens, cacheRead/cacheWrite = cached tokens
+      // contextTokens = total input context (what fills the context window)
+      const u = msg.usage;
+      const contextTokens = (u.input || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0);
+      const usage = { input: contextTokens, output: u.output, total: u.totalTokens };
+      log.info(
+        {
+          slotId: slot.id,
+          turnIndex: slot.turnIndex,
+          contextTokens,
+          raw: {
+            input: u.input,
+            cacheRead: u.cacheRead,
+            cacheWrite: u.cacheWrite,
+            output: u.output,
+            totalTokens: u.totalTokens,
+          },
+        },
+        'Context usage update',
+      );
+      safeSend(wc, 'agent:usage', slot.id, usage);
+
+      // Track context fill level on Axiom
+      const contextWindow = contextSizes[slot.modelConfig.modelId] || 200_000;
+      const fillPercent = Math.min(100, (contextTokens / contextWindow) * 100);
+      usageTracker?.trackContextLevel({
+        inputTokens: contextTokens,
+        outputTokens: u.output,
+        totalTokens: u.totalTokens,
+        contextWindow,
+        fillPercent,
+        slotId: slot.id,
+        turnIndex: slot.turnIndex,
+        modelId: slot.modelConfig.modelId,
       });
     }
   }

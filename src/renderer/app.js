@@ -997,6 +997,18 @@ function updateContextBar(inputTokens) {
 }
 
 window.api.onUsage((slotId, usage) => {
+  console.log(
+    '[context-bar] slotId=' +
+      slotId +
+      ' activeTab=' +
+      activeTabId +
+      ' hasTab=' +
+      tabs.has(slotId) +
+      ' match=' +
+      (tabs.get(slotId)?.id === activeTabId) +
+      ' usage=' +
+      JSON.stringify(usage),
+  );
   const tab = tabs.get(slotId);
   if (tab && tab.id === activeTabId) updateContextBar(usage.input);
 });
@@ -1371,10 +1383,11 @@ function showSuggestions(suggestions) {
     chip.textContent = text;
     chip.addEventListener('click', () => {
       window.api.trackSuggestionClicked(index);
-      inputField.value = text;
-      autoResizeInput();
+      const tab = getActiveTab();
+      if (!tab) return;
       hideSuggestions();
-      inputField.focus();
+      if (!tab.isStreaming) _initTurn(tab, text, []);
+      window.api.sendPrompt(tab.id, text).catch(() => {});
     });
     suggestionsContainer.appendChild(chip);
   });

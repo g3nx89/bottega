@@ -60,6 +60,7 @@ function makeTracker(): any {
     trackTurnEnd: vi.fn(),
     trackPrompt: vi.fn(),
     trackCompaction: vi.fn(),
+    trackContextLevel: vi.fn(),
   };
 }
 
@@ -77,6 +78,7 @@ function makeDeps(overrides: Partial<any> = {}) {
     mainWindow,
     usageTracker,
     persistSlotSession,
+    contextSizes: { 'claude-sonnet-4-6': 1_000_000 },
     ...overrides,
   };
 }

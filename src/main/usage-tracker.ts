@@ -227,6 +227,19 @@ export class UsageTracker {
     this.emit('usage:agent_error', { errorType, message: redactMessage(message) });
   }
 
+  trackContextLevel(data: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    contextWindow: number;
+    fillPercent: number;
+    slotId: string;
+    turnIndex: number;
+    modelId: string;
+  }): void {
+    this.emit('usage:context_level', data);
+  }
+
   trackCompaction(tokensBefore: number, tokensAfter: number): void {
     this.emit('usage:compaction', { tokensBefore, tokensAfter, tokensSaved: tokensBefore - tokensAfter });
   }
