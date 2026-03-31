@@ -177,18 +177,16 @@ export function createEventRouter(deps: EventRouterDeps) {
     const responseCharLength = turnResponseLength.get(slot.id) ?? 0;
     const responseDurationMs = slot.promptStartTime ? Date.now() - slot.promptStartTime : 0;
 
-    if (slot.currentPromptId) {
-      usageTracker?.trackTurnEnd({
-        promptId: slot.currentPromptId,
-        slotId: slot.id,
-        turnIndex: slot.turnIndex,
-        responseCharLength,
-        responseDurationMs,
-        toolCallCount: toolNames.length,
-        toolNames: [...new Set(toolNames)],
-        hasAction: toolNames.length > 0,
-      });
-    }
+    usageTracker?.trackTurnEnd({
+      promptId: slot.currentPromptId,
+      slotId: slot.id,
+      turnIndex: slot.turnIndex,
+      responseCharLength,
+      responseDurationMs,
+      toolCallCount: toolNames.length,
+      toolNames: [...new Set(toolNames)],
+      hasAction: toolNames.length > 0,
+    });
 
     // Preserve last completed turn for feedback correlation
     slot.lastCompletedPromptId = slot.currentPromptId;

@@ -60,17 +60,20 @@ function buildModeLookup(modes: any[]): Record<string, string> {
   return lookup;
 }
 
+function resolveVariableType(variable: any): string {
+  return variable.resolvedType ?? variable.type ?? 'UNKNOWN';
+}
+
 function compactVariable(
   variable: any,
   modeIdToName: Record<string, string>,
 ): { type: string; values: Record<string, string | number | boolean> } {
-  const resolvedType: string = variable.resolvedType ?? variable.type ?? 'UNKNOWN';
-  const valuesByMode: Record<string, unknown> = variable.valuesByMode ?? {};
+  const valuesByMode = variable.valuesByMode ?? {};
   const values: Record<string, string | number | boolean> = {};
   for (const [modeId, value] of Object.entries(valuesByMode)) {
     values[modeIdToName[modeId] ?? modeId] = convertValue(value);
   }
-  return { type: resolvedType, values };
+  return { type: resolveVariableType(variable), values };
 }
 
 function compactCollection(collection: any): CompactVariableCollection {
@@ -90,6 +93,13 @@ function compactCollection(collection: any): CompactVariableCollection {
   };
 }
 
+function extractComponentProps(comp: any): string[] | undefined {
+  const compProps = comp.componentProperties;
+  if (!compProps || typeof compProps !== 'object') return undefined;
+  const propNames = Object.keys(compProps);
+  return propNames.length > 0 ? propNames : undefined;
+}
+
 function compactComponent(comp: any, setVariants: Record<string, string[]>): CompactComponent {
   const result: CompactComponent = {
     name: comp.name ?? '',
@@ -101,13 +111,8 @@ function compactComponent(comp: any, setVariants: Record<string, string[]>): Com
     result.variants = setVariants[setName];
   }
 
-  const compProps = comp.componentProperties;
-  if (compProps && typeof compProps === 'object') {
-    const propNames = Object.keys(compProps);
-    if (propNames.length > 0) {
-      result.props = propNames;
-    }
-  }
+  const props = extractComponentProps(comp);
+  if (props) result.props = props;
 
   return result;
 }

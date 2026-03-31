@@ -232,6 +232,16 @@ function tabItemClass(id, tab) {
   return cls;
 }
 
+function updateTabElement(el, id, tab) {
+  el.className = tabItemClass(id, tab);
+  el.dataset.testid = 'tab-item';
+  const dot = el.querySelector('.tab-dot');
+  dot.className = tab.isConnected ? 'tab-dot connected' : 'tab-dot disconnected';
+  const label = el.querySelector('.tab-label');
+  const newLabel = tab.fileName || 'New Tab';
+  if (label.textContent !== newLabel) label.textContent = newLabel;
+}
+
 function renderTabBar() {
   const tabIds = [...tabs.keys()];
   const existingEls = tabList.querySelectorAll('.tab-item');
@@ -251,18 +261,7 @@ function renderTabBar() {
   for (const id of tabIds) {
     const tab = tabs.get(id);
     const el = existingById.get(id) || createTabElement(id);
-
-    el.className = tabItemClass(id, tab);
-    el.dataset.testid = 'tab-item';
-
-    const dot = el.querySelector('.tab-dot');
-    dot.className = tab.isConnected ? 'tab-dot connected' : 'tab-dot disconnected';
-
-    const label = el.querySelector('.tab-label');
-    const newLabel = tab.fileName || 'New Tab';
-    if (label.textContent !== newLabel) label.textContent = newLabel;
-
-    // Ensure correct DOM order
+    updateTabElement(el, id, tab);
     if (el !== insertBefore) tabList.insertBefore(el, insertBefore);
     insertBefore = el.nextSibling;
   }
@@ -305,27 +304,32 @@ function switchToTab(slotId) {
   }
 }
 
-/** Update the model and effort bar labels to reflect a tab's actual config. */
-function syncBarToTab(tab) {
-  // Model label + dropdown
-  if (tab.modelConfig && typeof availableModels === 'object') {
-    const allModels = Object.values(availableModels).flat();
-    const match = allModels.find((m) => m.sdkProvider === tab.modelConfig.provider && m.id === tab.modelConfig.modelId);
-    if (match && barModelLabel) barModelLabel.textContent = match.label.replace(/ \(.*\)/, '');
-    // Keep the settings dropdown in sync with the active tab's model
-    const sel = document.getElementById('model-select');
-    if (sel) {
-      const val = tab.modelConfig.provider + ':' + tab.modelConfig.modelId;
-      if (sel.value !== val) sel.value = val;
-    }
-    // Keep localStorage in sync so next populateModelSelect() restores correctly
-    localStorage.setItem('bottega:provider', tab.modelConfig.provider);
-    localStorage.setItem('bottega:model', tab.modelConfig.modelId);
-  }
-  // Effort label — read from tab's thinkingLevel if present, else fall back to global
+function syncModelToTab(modelConfig) {
+  if (!modelConfig || typeof availableModels !== 'object') return;
+  const allModels = Object.values(availableModels).flat();
+  const match = allModels.find((m) => m.sdkProvider === modelConfig.provider && m.id === modelConfig.modelId);
+  if (match && barModelLabel) barModelLabel.textContent = match.label.replace(/ \(.*\)/, '');
+  syncModelDropdown(modelConfig);
+}
+
+function syncModelDropdown(modelConfig) {
+  const sel = document.getElementById('model-select');
+  const val = modelConfig.provider + ':' + modelConfig.modelId;
+  if (sel && sel.value !== val) sel.value = val;
+  localStorage.setItem('bottega:provider', modelConfig.provider);
+  localStorage.setItem('bottega:model', modelConfig.modelId);
+}
+
+function syncEffortToTab(tab) {
   const effort = tab.thinkingLevel || currentEffort;
   const level = EFFORT_LEVELS.find((e) => e.id === effort);
   if (level && barEffortLabel) barEffortLabel.textContent = level.label;
+}
+
+/** Update the model and effort bar labels to reflect a tab's actual config. */
+function syncBarToTab(tab) {
+  syncModelToTab(tab.modelConfig);
+  syncEffortToTab(tab);
 }
 
 function createTabState(slotInfo) {
@@ -1060,15 +1064,24 @@ window.api.onPluginNeedsSetup(() => {
   if (pluginBanner) pluginBanner.style.display = 'flex';
 });
 
-pluginRetryBtn?.addEventListener('click', async () => {
-  const result = await window.api.installFigmaPlugin();
-  if (result.success && (result.autoRegistered || result.alreadyRegistered)) {
+function handlePluginInstallResult(result) {
+  const installed = result.success && (result.autoRegistered || result.alreadyRegistered);
+  if (installed) {
     if (pluginBanner) pluginBanner.style.display = 'none';
-  } else if (result.success && result.figmaRunning) {
-    if (pluginRetryBtn) pluginRetryBtn.textContent = 'Figma still running \u2014 try again';
-  } else {
-    if (pluginRetryBtn) pluginRetryBtn.textContent = 'Could not auto-register \u2014 use Settings to install manually';
+    return;
   }
+  updateRetryButtonText(result);
+}
+
+function updateRetryButtonText(result) {
+  if (!pluginRetryBtn) return;
+  pluginRetryBtn.textContent = result.success && result.figmaRunning
+    ? 'Figma still running \u2014 try again'
+    : 'Could not auto-register \u2014 use Settings to install manually';
+}
+
+pluginRetryBtn?.addEventListener('click', async () => {
+  handlePluginInstallResult(await window.api.installFigmaPlugin());
 });
 
 document.getElementById('plugin-setup-dismiss')?.addEventListener('click', () => {

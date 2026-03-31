@@ -117,14 +117,21 @@ function projectTextProps(node: any, projected: ProjectedNode, detail: Projectio
   }
 }
 
-function projectComponentProps(node: any, projected: ProjectedNode): void {
-  if (node.type === 'INSTANCE') {
-    const key = node.componentId ?? node.mainComponent?.key;
-    if (key !== undefined) projected.componentKey = key;
-  } else if (node.type === 'COMPONENT' && node.key !== undefined) {
-    projected.componentRef = node.key;
-  }
+function projectInstanceProps(node: any, projected: ProjectedNode, _detail: ProjectionDetail): void {
+  const key = node.componentId ?? node.mainComponent?.key;
+  if (key !== undefined) projected.componentKey = key;
 }
+
+function projectComponentRefProps(node: any, projected: ProjectedNode, _detail: ProjectionDetail): void {
+  if (node.key !== undefined) projected.componentRef = node.key;
+}
+
+/** Map node types → type-specific projection helpers. */
+const TYPE_PROJECTORS: Record<string, (node: any, projected: ProjectedNode, detail: ProjectionDetail) => void> = {
+  TEXT: projectTextProps,
+  INSTANCE: projectInstanceProps,
+  COMPONENT: projectComponentRefProps,
+};
 
 // ── Core projection ──────────────────────────────
 
@@ -161,28 +168,33 @@ function projectFlags(rawNode: any, projected: ProjectedNode, detail: Projection
   if (Array.isArray(rawNode.effects) && rawNode.effects.length > 0) projected.hasEffects = true;
 }
 
+/** Assign identity fields with safe defaults (reduces branch count in projectTree). */
+function assignIdentity(rawNode: any, projected: ProjectedNode): void {
+  projected.id = rawNode.id ?? '?';
+  projected.type = rawNode.type ?? 'UNKNOWN';
+  projected.name = rawNode.name ?? '?';
+}
+
+function projectChildren(rawNode: any, projected: ProjectedNode, detail: ProjectionDetail): void {
+  const children = rawNode.children;
+  if (Array.isArray(children) && children.length > 0) {
+    projected.children = children.map((c: any) => projectTree(c, detail));
+  }
+}
+
 export function projectTree(rawNode: any, detail: ProjectionDetail = 'standard'): ProjectedNode {
   if (!rawNode || typeof rawNode !== 'object') {
     return { id: '?', type: 'UNKNOWN', name: '?' };
   }
 
-  const projected: ProjectedNode = {
-    id: rawNode.id ?? '?',
-    type: rawNode.type ?? 'UNKNOWN',
-    name: rawNode.name ?? '?',
-  };
+  const projected = {} as ProjectedNode;
+  assignIdentity(rawNode, projected);
 
   projectLayoutProps(rawNode, projected);
   projectStyleProps(rawNode, projected);
-
-  if (rawNode.type === 'TEXT') projectTextProps(rawNode, projected, detail);
-  if (rawNode.type === 'INSTANCE' || rawNode.type === 'COMPONENT') projectComponentProps(rawNode, projected);
-
+  TYPE_PROJECTORS[rawNode.type]?.(rawNode, projected, detail);
   projectFlags(rawNode, projected, detail);
-
-  if (Array.isArray(rawNode.children) && rawNode.children.length > 0) {
-    projected.children = rawNode.children.map((child: any) => projectTree(child, detail));
-  }
+  projectChildren(rawNode, projected, detail);
 
   return projected;
 }
