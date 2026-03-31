@@ -223,7 +223,7 @@ if (!gotTheLock) {
         if (process.env.BOTTEGA_TEST_MOCK_AUTH) {
           authStorage.getApiKey = async () => undefined;
         }
-        const modelRegistry = new ModelRegistry(authStorage);
+        const modelRegistry = ModelRegistry.create(authStorage);
         const tmpDir = app.getPath('temp');
         const sessionManager = SessionManager.create(tmpDir, path.join(tmpDir, '.bottega-test-sessions'));
 

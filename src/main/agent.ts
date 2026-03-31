@@ -148,7 +148,7 @@ export async function createAgentInfra(
   const compressionExtensionFactory = createCompressionExtensionFactory(configManager, metricsCollector);
 
   const authStorage = AuthStorage.create();
-  const modelRegistry = new ModelRegistry(authStorage);
+  const modelRegistry = ModelRegistry.create(authStorage);
   const sessionManager = SessionManager.create(os.tmpdir(), opts.sessionsDir || DEFAULT_SESSIONS_DIR);
   const { OperationQueueManager: OQM } = await import('./operation-queue-manager.js');
   const queueManager = new OQM();
