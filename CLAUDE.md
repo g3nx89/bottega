@@ -156,6 +156,40 @@ node tests/electron-smoke.mjs
 - **JSX Render** (3): `figma_render_jsx`, `figma_create_icon`, `figma_bind_variable`
 - **Image Gen** (7): `figma_generate_image`, `figma_edit_image`, `figma_restore_image`, `figma_generate_icon`, `figma_generate_pattern`, `figma_generate_story`, `figma_generate_diagram`
 
+## Playbook Test Harness
+
+Deterministic agent testing without LLM calls — replaces the model with scripted responses while exercising real tools, compression extension, and OperationQueue.
+
+**Files:**
+- `tests/helpers/playbook.ts` — DSL: `when()`, `calls()`, `says()`, late-bound `() => params`, `.chain()` chaining
+- `tests/helpers/event-collector.ts` — Event recording with query helpers (`toolSequence()`, `mutationTools()`, `compressedResults()`)
+- `tests/helpers/bottega-test-session.ts` — Creates real Pi SDK AgentSession with playbook streamFn + mocked deps
+- `tests/unit/main/agent-playbook.test.ts` — Base tests (pipeline, chaining, multi-turn)
+- `tests/unit/main/agent-playbook-extended.test.ts` — Extended tests (compression e2e, OperationQueue serialization, JSX pipeline, error recovery, realistic tool chains)
+
+**Quick start:** `createBottegaTestSession({ toolDeps, mockTools, compressionProfile })` → `t.run(when("prompt", [calls("tool", params), says("text")]))` → assert on `t.events`. See `agent-playbook.test.ts` for examples.
+
+**When to write playbook tests:**
+- New tool: write a playbook test exercising it against mock connector
+- Bug regression: reproduce with a scripted scenario before fixing
+- Compression changes: verify profile behavior with `compressionProfile` option
+- Tool chain validation: test multi-step sequences with `.chain()` + late-bound params
+
+**When NOT to use playbook (use agent tests instead):**
+- Testing system prompt effectiveness (requires real LLM)
+- Testing model-specific behavior (reasoning, tool selection quality)
+- Testing WebSocket resilience (requires real connection)
+
+## Test Helpers (`tests/helpers/`)
+
+- `mock-connector.ts` — `createTestToolDeps()` (complete ToolDeps with real OperationQueue + mocked everything else), `createMockConnector()`, `createMockWsServer()`, `createMockFigmaAPI()`, `createMockDesignSystemCache()`, `createMockConfigManager()`
+- `mock-session.ts` — `createMockSession()` with `emitEvent()` for subscriber testing
+- `mock-slot-manager.ts` — `createMockSlotManager()` for multi-tab IPC tests
+- `mock-ipc.ts` / `mock-window.ts` — Electron IPC and BrowserWindow mocks
+- `scripted-session.ts` — `ScriptedSession` replays event sequences (for IPC handler tests)
+- `script-fragments.ts` — Factory functions: `textDeltaEvents()`, `toolCallEvents()`, `screenshotToolEvents()`, etc.
+- `playbook.ts` / `event-collector.ts` / `bottega-test-session.ts` — Playbook harness (see above)
+
 ## Language & Conventions
 
 - TypeScript with ESM modules (main process), CJS (preload only)
