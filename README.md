@@ -2,6 +2,8 @@
 
 A macOS desktop app for **design pair-programming**. Describe what you want in natural language — an AI agent operates directly on Figma Desktop via WebSocket, shows screenshots, and iterates based on your feedback.
 
+[![Version](https://img.shields.io/github/v/release/g3nx89/bottega?label=version)](https://github.com/g3nx89/bottega/releases/latest)
+[![CI](https://github.com/g3nx89/bottega/actions/workflows/ci.yml/badge.svg)](https://github.com/g3nx89/bottega/actions/workflows/ci.yml)
 ![Electron](https://img.shields.io/badge/Electron-33-47848F?logo=electron)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript)
 ![Pi SDK](https://img.shields.io/badge/Pi%20SDK-0.61-blue)
@@ -10,7 +12,7 @@ A macOS desktop app for **design pair-programming**. Describe what you want in n
 ## How It Works
 
 1. **You chat** — type a natural-language request in the Bottega window.
-2. **The agent plans** — powered by [Pi SDK](https://github.com/nicolevanderhoeven/pi-coding-agent), it picks from 34 Figma tools to fulfill your request.
+2. **The agent plans** — powered by [Pi SDK](https://github.com/nicolevanderhoeven/pi-coding-agent), it picks from 39 Figma tools to fulfill your request.
 3. **Figma updates live** — a WebSocket bridge plugin relays commands to Figma Desktop in real time.
 4. **Visual verification** — the agent takes screenshots, checks its own work, and iterates if needed.
 
@@ -24,7 +26,7 @@ A macOS desktop app for **design pair-programming**. Describe what you want in n
 ## Features
 
 - **Multi-model support** — Claude (Anthropic), GPT (OpenAI), and Gemini (Google) via Pi SDK OAuth
-- **34 design tools** — create, modify, discover, and lint design elements without leaving the chat
+- **39 design tools** — create, modify, discover, and lint design elements without leaving the chat
 - **JSX rendering** — describe complex layouts in JSX; they're parsed and created in Figma in a single roundtrip
 - **Component discovery** — search local and library components, instantiate them, override properties
 - **Design tokens** — set up variable collections, lint for token compliance
@@ -92,7 +94,7 @@ src/
 │   ├── prompt-suggester.ts  # Follow-up suggestion chips
 │   ├── compression/         # Context compression profiles & metrics
 │   ├── image-gen/           # Gemini-based image generation
-│   └── tools/               # 34 ToolDefinition[] for Pi SDK
+│   └── tools/               # 39 ToolDefinition[] for Pi SDK
 │       ├── core.ts          # execute, screenshot, status, get_selection
 │       ├── discovery.ts     # file data, components, design system
 │       ├── components.ts    # instantiate, properties, arrange
@@ -128,8 +130,9 @@ figma-desktop-bridge/        # Figma plugin (forked from figma-console-mcp)
 | Category | Count | Examples |
 |----------|-------|---------|
 | Core | 4 | `figma_execute`, `figma_screenshot`, `figma_status`, `figma_get_selection` |
-| Discovery | 5 | `figma_search_components`, `figma_get_library_components`, `figma_design_system` |
-| Components | 3 | `figma_instantiate`, `figma_set_instance_properties`, `figma_arrange_component_set` |
+| Discovery | 6 | `figma_search_components`, `figma_get_library_components`, `figma_design_system` |
+| Components | 4 | `figma_instantiate`, `figma_set_instance_properties`, `figma_arrange_component_set` |
+| Annotations | 3 | `figma_get_annotations`, `figma_set_annotations`, `figma_get_annotation_categories` |
 | Manipulation | 10 | `figma_set_fills`, `figma_set_text`, `figma_resize`, `figma_move`, `figma_create_child` |
 | Tokens | 2 | `figma_setup_tokens`, `figma_lint` |
 | JSX Render | 3 | `figma_render_jsx`, `figma_create_icon`, `figma_bind_variable` |
@@ -170,6 +173,12 @@ node tests/electron-smoke.mjs
 | Logging | Pino |
 | Tests | Vitest + Playwright |
 | Linting | Biome |
+
+## Releases
+
+Download the latest `.dmg` from [Releases](https://github.com/g3nx89/bottega/releases/latest). The app auto-updates via `electron-updater` when new versions are published.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 ## Packaging
 
