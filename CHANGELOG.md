@@ -6,6 +6,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-03-31
+
+### Added
+- Playbook test harness for deterministic agent testing without LLM calls (29 tests)
+- Bottega Observatory skill for Axiom log investigation
+- Bottega Dev Debug skill for interactive app debugging
+- Consolidated post-edit hook script for parallel typecheck/biome/build
+
+### Changed
+- Upgrade Pi SDK from 0.61.0 to 0.64.0
+- Reduce cyclomatic complexity across 4 files for Codacy compliance
+
 ## [0.9.0] - 2026-03-31
 
 ### Fixed
