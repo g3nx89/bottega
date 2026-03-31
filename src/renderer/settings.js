@@ -524,27 +524,46 @@ if (compressionRefreshBtn) {
 
 const setupFigmaBtn = document.getElementById('setup-figma-btn');
 const setupFigmaStatus = document.getElementById('setup-figma-status');
+const figmaPluginResult = document.getElementById('figma-plugin-result');
+const figmaMsgAuto = document.getElementById('figma-msg-auto');
+const figmaMsgRunning = document.getElementById('figma-msg-running');
+const figmaMsgManual = document.getElementById('figma-msg-manual');
 const figmaPluginSteps = document.getElementById('figma-plugin-steps');
+
+function showPluginResult(variant) {
+  if (figmaPluginResult) figmaPluginResult.classList.remove('hidden');
+  if (figmaMsgAuto) figmaMsgAuto.classList.toggle('hidden', variant !== 'auto');
+  if (figmaMsgRunning) figmaMsgRunning.classList.toggle('hidden', variant !== 'running');
+  if (figmaMsgManual) figmaMsgManual.classList.toggle('hidden', variant !== 'manual');
+  if (figmaPluginSteps) figmaPluginSteps.classList.toggle('hidden', variant === 'auto');
+}
 
 if (setupFigmaBtn) {
   setupFigmaBtn.addEventListener('click', async () => {
     setupFigmaBtn.disabled = true;
     setupFigmaBtn.textContent = 'Installing\u2026';
     setupFigmaStatus.textContent = '';
+    if (figmaPluginResult) figmaPluginResult.classList.add('hidden');
     try {
       const result = await window.api.installFigmaPlugin();
       if (result.success) {
         setupFigmaBtn.textContent = 'Reinstall Figma Plugin';
-        figmaPluginSteps.classList.remove('hidden');
+        if (result.autoRegistered || result.alreadyRegistered) {
+          showPluginResult('auto');
+        } else if (result.figmaRunning) {
+          showPluginResult('running');
+        } else {
+          showPluginResult('manual');
+        }
       } else {
         setupFigmaStatus.textContent = result.error || 'Setup failed.';
         setupFigmaBtn.textContent = 'Install Figma Plugin';
-        figmaPluginSteps.classList.add('hidden');
+        if (figmaPluginResult) figmaPluginResult.classList.add('hidden');
       }
     } catch {
       setupFigmaStatus.textContent = 'Setup failed \u2014 see logs.';
       setupFigmaBtn.textContent = 'Install Figma Plugin';
-      figmaPluginSteps.classList.add('hidden');
+      if (figmaPluginResult) figmaPluginResult.classList.add('hidden');
     } finally {
       setupFigmaBtn.disabled = false;
     }

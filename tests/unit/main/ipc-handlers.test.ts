@@ -18,7 +18,29 @@ vi.mock('electron', () => ({
 vi.mock('node:fs', () => ({
   existsSync: vi.fn().mockReturnValue(false),
   cpSync: vi.fn(),
+  readFileSync: vi.fn().mockReturnValue('{}'),
+  writeFileSync: vi.fn(),
+  statSync: vi.fn().mockReturnValue({ size: 0, mtimeMs: 0 }),
 }));
+
+vi.mock('node:child_process', () => ({
+  execFile: vi.fn().mockImplementation((_cmd: string, _args: string[], _opts: any, cb?: Function) => {
+    // promisify calls with 3 args (no callback) — return a ChildProcess-like object
+    // When promisified, execFile rejects on non-zero exit (pgrep: no match)
+    if (!cb) {
+      // promisify style: return value is ignored, the promisified wrapper handles it
+    }
+    const err = new Error('no process') as any;
+    err.code = 1;
+    if (cb) cb(err, '', '');
+    return { on: vi.fn(), stdout: null, stderr: null, pid: 0 };
+  }),
+}));
+
+vi.mock('node:os', async () => {
+  const actual = await vi.importActual<typeof import('node:os')>('node:os');
+  return { ...actual, homedir: vi.fn().mockReturnValue('/mock/home') };
+});
 
 vi.mock('node:path', async () => {
   const actual = await vi.importActual<typeof import('node:path')>('node:path');
@@ -96,10 +118,11 @@ vi.mock('../../../src/main/auto-updater.js', () => ({
 
 // ── Imports (after mocks) ─────────────────────────────────────────
 
-import { cpSync, existsSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { cpSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { app, dialog, ipcMain, shell } from 'electron';
 import { exportDiagnosticsZip, formatSystemInfoForClipboard } from '../../../src/main/diagnostics.js';
-import { setupIpcHandlers } from '../../../src/main/ipc-handlers.js';
+import { setupIpcHandlers, syncFigmaPlugin } from '../../../src/main/ipc-handlers.js';
 import { loadDiagnosticsConfig, saveDiagnosticsConfig } from '../../../src/main/remote-logger.js';
 import { createMockSession } from '../../helpers/mock-session.js';
 import { createMockSlotManager } from '../../helpers/mock-slot-manager.js';
@@ -138,6 +161,12 @@ describe('setupIpcHandlers', () => {
     // Restore electron app mocks (clearAllMocks strips return values)
     (app.getPath as any).mockReturnValue('/mock/userData');
     (app.getAppPath as any).mockReturnValue('/mock/appPath');
+    // Restore execFile default: pgrep fails (no Figma running)
+    (execFile as any).mockImplementation((...args: any[]) => {
+      const cb = args[args.length - 1];
+      if (typeof cb === 'function') cb(Object.assign(new Error('no process'), { code: 1 }), '', '');
+      return { on: vi.fn(), stdout: null, stderr: null, pid: 0 };
+    });
     // Electron sets process.resourcesPath at runtime; provide a test value
     (process as any).resourcesPath = '/mock/resources';
     mockSession = createMockSession();
@@ -640,25 +669,40 @@ describe('setupIpcHandlers', () => {
       (existsSync as any)
         .mockReturnValueOnce(false) // packaged path: no manifest
         .mockReturnValueOnce(true); // dev path: manifest found
+      // subsequent existsSync calls (Figma settings check) return default false
 
       const result = await invokeHandler('plugin:install');
 
-      expect(result).toEqual({ success: true, path: expect.stringContaining('figma-plugin') });
+      expect(result).toEqual({
+        success: true,
+        path: expect.stringContaining('figma-plugin'),
+        autoRegistered: false,
+        alreadyRegistered: false,
+        figmaRunning: false,
+      });
       expect(cpSync).toHaveBeenCalledWith(
         expect.stringContaining('appPath/figma-desktop-bridge'),
         expect.stringContaining('figma-plugin'),
         { recursive: true, force: true },
       );
+      // Falls back to showing in Finder when auto-registration unavailable
       expect(shell.showItemInFolder).toHaveBeenCalledWith(expect.stringContaining('manifest.json'));
     });
 
     it('plugin:install uses packaged path when manifest exists there', async () => {
       // getPluginSourcePath: packaged manifest found on first candidate
       (existsSync as any).mockReturnValueOnce(true); // packaged manifest exists
+      // subsequent existsSync calls (Figma settings check) return default false
 
       const result = await invokeHandler('plugin:install');
 
-      expect(result).toEqual({ success: true, path: expect.stringContaining('figma-plugin') });
+      expect(result).toEqual({
+        success: true,
+        path: expect.stringContaining('figma-plugin'),
+        autoRegistered: false,
+        alreadyRegistered: false,
+        figmaRunning: false,
+      });
       expect(cpSync).toHaveBeenCalledWith(
         expect.stringContaining('resources/figma-desktop-bridge'),
         expect.stringContaining('figma-plugin'),
@@ -667,10 +711,11 @@ describe('setupIpcHandlers', () => {
     });
 
     it('plugin:install returns error when no source has manifest', async () => {
-      // getPluginSourcePath: both candidates fail → returns null
+      // getPluginSourcePath: all three candidates fail → returns null
       (existsSync as any)
         .mockReturnValueOnce(false) // packaged: no manifest
-        .mockReturnValueOnce(false); // dev: no manifest
+        .mockReturnValueOnce(false) // dev: no manifest
+        .mockReturnValueOnce(false); // dev-parent (../): no manifest
 
       const result = await invokeHandler('plugin:install');
 
@@ -688,6 +733,100 @@ describe('setupIpcHandlers', () => {
 
       expect(result).toEqual({ success: false, error: 'EACCES: permission denied' });
       expect(shell.showItemInFolder).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── syncFigmaPlugin (direct) ─────────────────────────────────
+
+  describe('syncFigmaPlugin', () => {
+    it('returns synced:false when no plugin source found', async () => {
+      (existsSync as any)
+        .mockReturnValueOnce(false) // packaged
+        .mockReturnValueOnce(false) // dev
+        .mockReturnValueOnce(false); // dev-parent
+
+      const result = await syncFigmaPlugin();
+
+      expect(result.synced).toBe(false);
+      expect(result.error).toBe('Plugin files not found in app bundle.');
+      expect(cpSync).not.toHaveBeenCalled();
+    });
+
+    it('does not auto-register when Figma is not running but settings.json missing', async () => {
+      (existsSync as any).mockReturnValueOnce(true); // source found
+      (existsSync as any).mockReturnValueOnce(false); // dest manifest missing → needs sync
+      // isFigmaRunning: default mock (pgrep fails → not running)
+      // ensurePluginRegistered: settings.json does NOT exist (default false)
+
+      const result = await syncFigmaPlugin();
+
+      expect(result.synced).toBe(true);
+      expect(result.figmaRunning).toBe(false);
+      expect(result.autoRegistered).toBe(false);
+      expect(result.alreadyRegistered).toBe(false);
+    });
+
+    it('detects already registered plugin', async () => {
+      (existsSync as any).mockReturnValueOnce(true); // source found
+      (existsSync as any).mockReturnValueOnce(false); // dest manifest missing → needs sync
+      // isFigmaRunning: pgrep fails → not running (default mock)
+      // ensurePluginRegistered: settings.json exists
+      (existsSync as any).mockReturnValueOnce(true);
+      (readFileSync as any).mockReturnValueOnce(
+        JSON.stringify({
+          localFileExtensions: [
+            {
+              id: 1,
+              manifestPath: '/some/path/manifest.json',
+              lastKnownPluginId: 'bottega-bridge',
+              fileMetadata: { type: 'manifest', codeFileId: 2, uiFileIds: [3] },
+            },
+          ],
+        }),
+      );
+
+      const result = await syncFigmaPlugin();
+
+      expect(result.synced).toBe(true);
+      expect(result.alreadyRegistered).toBe(true);
+      expect(result.autoRegistered).toBe(false);
+      expect(writeFileSync).not.toHaveBeenCalled();
+    });
+
+    it('auto-registers when not registered and Figma closed', async () => {
+      (existsSync as any).mockReturnValueOnce(true); // source found
+      (existsSync as any).mockReturnValueOnce(false); // dest manifest missing → needs sync
+      // isFigmaRunning: pgrep fails → not running (default mock)
+      // ensurePluginRegistered: settings.json exists but no plugin entry
+      (existsSync as any).mockReturnValueOnce(true);
+      (readFileSync as any).mockReturnValueOnce(JSON.stringify({ localFileExtensions: [] }));
+
+      const result = await syncFigmaPlugin();
+
+      expect(result.synced).toBe(true);
+      expect(result.autoRegistered).toBe(true);
+      expect(result.alreadyRegistered).toBe(false);
+      expect(result.figmaRunning).toBe(false);
+      expect(writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('Figma/settings.json'),
+        expect.stringContaining('bottega-bridge'),
+      );
+    });
+
+    it('skips file copy when plugin is up to date', async () => {
+      (existsSync as any).mockReturnValueOnce(true); // source found
+      // pluginNeedsSync: dest exists, sizes match
+      (existsSync as any).mockReturnValueOnce(true); // dest manifest exists
+      (statSync as any)
+        .mockReturnValueOnce({ size: 500 }) // src manifest size
+        .mockReturnValueOnce({ size: 500 }) // dest manifest size
+        .mockReturnValueOnce({ size: 10000 }) // src code.js size
+        .mockReturnValueOnce({ size: 10000 }); // dest code.js size
+
+      const result = await syncFigmaPlugin();
+
+      expect(result.synced).toBe(true);
+      expect(cpSync).not.toHaveBeenCalled();
     });
   });
 

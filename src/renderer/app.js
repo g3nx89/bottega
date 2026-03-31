@@ -1039,12 +1039,7 @@ window.api.onFigmaDisconnected(() => {
 window.api.onFigmaVersionMismatch((info) => {
   const banner = document.getElementById('version-banner');
   const text = document.getElementById('version-banner-text');
-  text.textContent =
-    'Figma plugin outdated (v' +
-    info.pluginVersion +
-    ', required v' +
-    info.requiredVersion +
-    '). Re-import the plugin from Plugins \u2192 Development \u2192 Import plugin from manifest.';
+  text.textContent = info.message;
   banner.style.display = 'flex';
   statusDot.className = 'status-dot version-mismatch';
   statusDot.title = 'Plugin version mismatch';
@@ -1054,6 +1049,30 @@ document.getElementById('version-banner-dismiss')?.addEventListener('click', () 
   document.getElementById('version-banner').style.display = 'none';
   statusDot.className = 'status-dot disconnected';
   statusDot.title = 'Disconnected';
+});
+
+// ── Plugin setup banner ─────────────────
+
+const pluginBanner = document.getElementById('plugin-setup-banner');
+const pluginRetryBtn = document.getElementById('plugin-setup-retry');
+
+window.api.onPluginNeedsSetup(() => {
+  if (pluginBanner) pluginBanner.style.display = 'flex';
+});
+
+pluginRetryBtn?.addEventListener('click', async () => {
+  const result = await window.api.installFigmaPlugin();
+  if (result.success && (result.autoRegistered || result.alreadyRegistered)) {
+    if (pluginBanner) pluginBanner.style.display = 'none';
+  } else if (result.success && result.figmaRunning) {
+    if (pluginRetryBtn) pluginRetryBtn.textContent = 'Figma still running \u2014 try again';
+  } else {
+    if (pluginRetryBtn) pluginRetryBtn.textContent = 'Could not auto-register \u2014 use Settings to install manually';
+  }
+});
+
+document.getElementById('plugin-setup-dismiss')?.addEventListener('click', () => {
+  if (pluginBanner) pluginBanner.style.display = 'none';
 });
 
 // ── Tab lifecycle events ─────────────────

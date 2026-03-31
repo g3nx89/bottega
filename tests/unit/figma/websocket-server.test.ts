@@ -636,7 +636,7 @@ describe('FigmaWebSocketServer', () => {
       const mismatch = messages.find((m) => m.type === 'VERSION_MISMATCH');
       expect(mismatch).toBeDefined();
       expect(mismatch.data.requiredVersion).toBeGreaterThan(0);
-      expect(mismatch.data.message).toContain('Re-import');
+      expect(mismatch.data.message).toContain('re-run');
     });
 
     it('emits versionMismatch event on rejection', async () => {

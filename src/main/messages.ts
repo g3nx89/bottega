@@ -44,6 +44,9 @@ export const MSG_IMAGEGEN_NOT_INITIALIZED = 'Image generation not initialized';
 // ── Figma Plugin ─────────────────────────────
 
 export const MSG_PLUGIN_NOT_FOUND = 'Plugin files not found in app bundle.';
+export const MSG_PLUGIN_UPDATED = (pluginVersion: number, requiredVersion: number) =>
+  `The Figma plugin has been updated (v${pluginVersion} \u2192 v${requiredVersion}). ` +
+  'Close the plugin in Figma and re-run it from Plugins \u2192 Development \u2192 Bottega Bridge.';
 
 // ── Diagnostics ──────────────────────────────
 

@@ -10,8 +10,9 @@ import { cleanOldLogs, collectSystemInfo } from './diagnostics.js';
 import { createFigmaCore } from './figma-core.js';
 import { effectiveApiKey, loadImageGenSettings } from './image-gen/config.js';
 import { ImageGenerator } from './image-gen/image-generator.js';
-import { setupIpcHandlers } from './ipc-handlers.js';
+import { setupIpcHandlers, syncFigmaPlugin } from './ipc-handlers.js';
 import {
+  MSG_PLUGIN_UPDATED,
   MSG_PORT_IN_USE_BODY,
   MSG_PORT_IN_USE_TITLE,
   MSG_STARTUP_ERROR_BODY,
@@ -356,6 +357,38 @@ if (!gotTheLock) {
         currentModel.modelId = config.modelId;
       });
 
+      // ── Auto-sync Figma plugin on startup ──
+      // Copies bundled plugin files to userData and auto-registers in Figma if not already done.
+      try {
+        const pluginSync = await syncFigmaPlugin();
+        log.info(
+          {
+            synced: pluginSync.synced,
+            autoRegistered: pluginSync.autoRegistered,
+            alreadyRegistered: pluginSync.alreadyRegistered,
+            figmaRunning: pluginSync.figmaRunning,
+          },
+          'Figma plugin startup sync',
+        );
+        // If plugin not registered and Figma is blocking, notify the renderer once it's ready
+        if (
+          pluginSync.synced &&
+          !pluginSync.autoRegistered &&
+          !pluginSync.alreadyRegistered &&
+          pluginSync.figmaRunning
+        ) {
+          const wc = mainWindow.webContents;
+          const notify = () => safeSend(wc, 'plugin:needs-setup');
+          if (wc.isLoading()) {
+            wc.once('did-finish-load', notify);
+          } else {
+            notify();
+          }
+        }
+      } catch (err: any) {
+        log.warn({ err }, 'Figma plugin startup sync failed (non-fatal)');
+      }
+
       // ── Agent test oracle: direct Figma code execution ──
       // Only registered when BOTTEGA_AGENT_TEST env var is set (never in production).
       if (process.env.BOTTEGA_AGENT_TEST) {
@@ -437,6 +470,7 @@ if (!gotTheLock) {
             safeSend(mainWindow.webContents, 'figma:version-mismatch', {
               pluginVersion: info.pluginVersion,
               requiredVersion: info.requiredVersion,
+              message: MSG_PLUGIN_UPDATED(info.pluginVersion, info.requiredVersion),
             });
           }
         },

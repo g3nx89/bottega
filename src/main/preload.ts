@@ -103,8 +103,11 @@ contextBridge.exposeInMainWorld('api', {
   onFigmaDisconnected: (cb: () => void) => {
     ipcRenderer.on('figma:disconnected', () => cb());
   },
-  onFigmaVersionMismatch: (cb: (info: { pluginVersion: number; requiredVersion: number }) => void) => {
+  onFigmaVersionMismatch: (cb: (info: { pluginVersion: number; requiredVersion: number; message: string }) => void) => {
     ipcRenderer.on('figma:version-mismatch', (_event, info) => cb(info));
+  },
+  onPluginNeedsSetup: (cb: () => void) => {
+    ipcRenderer.on('plugin:needs-setup', () => cb());
   },
 
   // ── Feedback ─────────────────────────────
@@ -180,7 +183,14 @@ contextBridge.exposeInMainWorld('api', {
   // ── Figma plugin (global) ─────────────────
   checkFigmaPlugin: () => ipcRenderer.invoke('plugin:check') as Promise<{ installed: boolean }>,
   installFigmaPlugin: () =>
-    ipcRenderer.invoke('plugin:install') as Promise<{ success: boolean; path?: string; error?: string }>,
+    ipcRenderer.invoke('plugin:install') as Promise<{
+      success: boolean;
+      path?: string;
+      error?: string;
+      autoRegistered?: boolean;
+      alreadyRegistered?: boolean;
+      figmaRunning?: boolean;
+    }>,
 
   // ── Auto-update (global) ──────────────────
   getAppVersion: () => ipcRenderer.invoke('update:get-version') as Promise<string>,

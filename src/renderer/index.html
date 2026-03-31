@@ -33,6 +33,11 @@
       <button id="version-banner-dismiss" class="version-banner-close">&times;</button>
     </div>
 
+    <div id="plugin-setup-banner" class="version-banner" style="display:none">
+      <span>Figma plugin not yet installed. Close Figma, then <button id="plugin-setup-retry" class="banner-link-btn">click here</button> to install automatically.</span>
+      <button id="plugin-setup-dismiss" class="version-banner-close">&times;</button>
+    </div>
+
     <div id="tab-bar" class="tab-bar">
       <div id="tab-list" class="tab-list"></div>
       <button id="tab-add-btn" class="tab-add" title="New tab">+</button>
@@ -155,12 +160,17 @@
             <span class="setting-hint">Bottega needs a companion plugin running inside Figma Desktop to communicate with your designs.</span>
             <button id="setup-figma-btn" class="setting-btn-small">Install Figma Plugin</button>
             <span id="setup-figma-status" class="key-status"></span>
-            <ol id="figma-plugin-steps" class="setting-steps hidden">
-              <li>A Finder window will open showing the plugin files.</li>
-              <li>In <strong>Figma Desktop</strong>, open any file, then go to the menu:<br><strong>Plugins → Development → Import plugin from manifest…</strong></li>
-              <li>In the file picker, navigate to the folder that just opened and select <strong>manifest.json</strong>.</li>
-              <li>The plugin "Bottega Bridge" will appear under <strong>Plugins → Development</strong>. Run it to connect.</li>
-            </ol>
+            <div id="figma-plugin-result" class="hidden">
+              <p id="figma-msg-auto" class="setting-hint hidden" style="margin-top:6px">&#x2705; Plugin auto-installed. Open Figma and it will appear under <strong>Plugins &rarr; Development</strong>.</p>
+              <p id="figma-msg-running" class="setting-hint hidden" style="margin-top:6px">&#x26A0;&#xFE0F; Figma is currently running &mdash; close it completely, then click <strong>Install</strong> again for automatic setup. Or import manually:</p>
+              <p id="figma-msg-manual" class="setting-hint hidden" style="margin-top:6px">Plugin files copied. Import manually:</p>
+              <ol id="figma-plugin-steps" class="setting-steps hidden">
+                <li>A Finder window opened showing the plugin files.</li>
+                <li>In <strong>Figma Desktop</strong>, go to:<br><strong>Plugins &rarr; Development &rarr; Import plugin from manifest&hellip;</strong></li>
+                <li>Select <strong>manifest.json</strong> from the Finder window.</li>
+              </ol>
+              <p class="setting-hint" style="margin-top:6px">After installing, open a Figma file and run <strong>Plugins &rarr; Development &rarr; Bottega Bridge</strong> to connect.</p>
+            </div>
           </div>
           <div class="setting-divider"></div>
           <div class="setting-group">

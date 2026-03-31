@@ -182,6 +182,18 @@ body {
 .version-banner-close:hover {
   opacity: 1;
 }
+.banner-link-btn {
+  background: none;
+  border: none;
+  color: #1a1a1a;
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+.banner-link-btn:hover {
+  opacity: 0.8;
+}
 
 .app-version {
   font-size: 10px;

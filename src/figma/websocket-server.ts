@@ -340,7 +340,7 @@ export class FigmaWebSocketServer extends EventEmitter {
             data: {
               pluginVersion: effectiveVersion,
               requiredVersion: REQUIRED_PLUGIN_VERSION,
-              message: 'Plugin outdated. Re-import the Bottega Bridge plugin in Figma Desktop.',
+              message: 'Plugin updated. Close and re-run Bottega Bridge from Plugins → Development.',
             },
           }),
         );
