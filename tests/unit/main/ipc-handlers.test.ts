@@ -796,8 +796,11 @@ describe('setupIpcHandlers', () => {
     it('auto-registers when not registered and Figma closed', async () => {
       (existsSync as any).mockReturnValueOnce(true); // source found
       (existsSync as any).mockReturnValueOnce(false); // dest manifest missing → needs sync
+      // isPluginRegistered (read-only check): settings.json exists but no plugin entry
+      (existsSync as any).mockReturnValueOnce(true);
+      (readFileSync as any).mockReturnValueOnce(JSON.stringify({ localFileExtensions: [] }));
       // isFigmaRunning: pgrep fails → not running (default mock)
-      // ensurePluginRegistered: settings.json exists but no plugin entry
+      // ensurePluginRegistered: settings.json exists but no plugin entry (re-reads)
       (existsSync as any).mockReturnValueOnce(true);
       (readFileSync as any).mockReturnValueOnce(JSON.stringify({ localFileExtensions: [] }));
 
@@ -811,6 +814,41 @@ describe('setupIpcHandlers', () => {
         expect.stringContaining('Figma/settings.json'),
         expect.stringContaining('bottega-bridge'),
       );
+    });
+
+    it('reports alreadyRegistered even when Figma is running', async () => {
+      (existsSync as any).mockReturnValueOnce(true); // source found
+      (existsSync as any).mockReturnValueOnce(false); // dest manifest missing → needs sync
+      // isPluginRegistered: settings.json exists with plugin entry
+      (existsSync as any).mockReturnValueOnce(true);
+      (readFileSync as any).mockReturnValueOnce(
+        JSON.stringify({
+          localFileExtensions: [
+            {
+              id: 1,
+              manifestPath: '/mock/userData/figma-plugin/manifest.json',
+              lastKnownPluginId: 'bottega-bridge',
+              fileMetadata: { type: 'manifest', codeFileId: 2, uiFileIds: [3] },
+            },
+          ],
+        }),
+      );
+      // isFigmaRunning: pgrep succeeds → Figma IS running
+      // Generic promisify resolves single-arg callbacks as-is, so pass an object
+      // with { stdout } to match the destructuring in isFigmaRunning.
+      (execFile as any).mockImplementationOnce((...args: any[]) => {
+        const cb = args[args.length - 1];
+        if (typeof cb === 'function') cb(null, { stdout: '12345\n', stderr: '' });
+        return { on: vi.fn(), stdout: null, stderr: null, pid: 0 };
+      });
+
+      const result = await syncFigmaPlugin();
+
+      expect(result.synced).toBe(true);
+      expect(result.alreadyRegistered).toBe(true);
+      expect(result.figmaRunning).toBe(true);
+      // Should NOT attempt to write settings.json when Figma is running
+      expect(writeFileSync).not.toHaveBeenCalled();
     });
 
     it('skips file copy when plugin is up to date', async () => {

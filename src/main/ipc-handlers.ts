@@ -85,6 +85,20 @@ interface FigmaExtEntry {
   };
 }
 
+/** Read-only check: is the plugin already registered in Figma's settings.json? Safe to call anytime. */
+function isPluginRegistered(): boolean {
+  const settingsPath = getFigmaSettingsPath();
+  if (!existsSync(settingsPath)) return false;
+  try {
+    const raw = readFileSync(settingsPath, 'utf-8');
+    const settings = JSON.parse(raw);
+    const extensions: FigmaExtEntry[] = settings.localFileExtensions ?? [];
+    return extensions.some((e) => e.fileMetadata?.type === 'manifest' && e.lastKnownPluginId === PLUGIN_ID);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Check if plugin is registered in Figma's settings.json; if not, append entries.
  * Single file read — avoids double parse. Never removes existing entries.
@@ -197,9 +211,9 @@ export async function syncFigmaPlugin(): Promise<PluginSyncResult> {
 
   const figmaRunning = await isFigmaRunning();
   let autoRegistered = false;
-  let alreadyRegistered = false;
+  let alreadyRegistered = isPluginRegistered();
 
-  if (!figmaRunning) {
+  if (!alreadyRegistered && !figmaRunning) {
     const result = ensurePluginRegistered(dest);
     alreadyRegistered = result === 'already';
     autoRegistered = result === 'registered';

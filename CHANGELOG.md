@@ -6,6 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-03-31
+
+### Fixed
+- Plugin setup banner shown incorrectly when Figma is running — read-only registration check now runs regardless of Figma state
+
 ## [0.8.0] - 2026-03-31
 
 ### Added
@@ -177,7 +182,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 - Settings panel with window transparency slider
 - Graceful shutdown, persistent WS reconnect, pin window, structured logging
 
-[Unreleased]: https://github.com/g3nx89/bottega/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/g3nx89/bottega/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/g3nx89/bottega/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/g3nx89/bottega/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/g3nx89/bottega/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/g3nx89/bottega/compare/v0.5.0...v0.6.0
