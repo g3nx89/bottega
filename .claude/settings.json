@@ -1,0 +1,75 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -qE 'figma-desktop-bridge/(code\\.js|manifest\\.json)'; then echo 'BLOCK: figma-desktop-bridge/ è un fork gestito. Modifica via upstream sync.'; exit 1; fi; exit 0"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=$(echo \"$CLAUDE_TOOL_INPUT\" | grep -o '\"file_path\":\"[^\"]*\"' | cut -d'\"' -f4); if echo \"$FILE\" | grep -qE '\\.(env|pem|key)$'; then echo 'BLOCK: Non modificare file con segreti/certificati.'; exit 1; fi; if echo \"$CLAUDE_TOOL_INPUT\" | grep -qE 'console\\.(log|debug)\\(' 2>/dev/null; then echo 'WARN: Usa pino logger invece di console.log — il progetto usa structured logging.'; fi; exit 0"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_TOOL_INPUT\" | grep -qE 'package-lock\\.json'; then echo 'BLOCK: Non modificare package-lock.json — usa npm install.'; exit 1; fi; exit 0"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=$(echo \"$CLAUDE_TOOL_INPUT\" | grep -o '\"file_path\":\"[^\"]*\"' | cut -d'\"' -f4); if echo \"$FILE\" | grep -qE '/(dist|build)/'; then echo 'BLOCK: Non modificare file generati in dist/ o build/ — vengono sovrascritti dal build.'; exit 1; fi; exit 0"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CMD=$(echo \"$CLAUDE_TOOL_INPUT\" | grep -o '\"command\":\"[^\"]*\"' | cut -d'\"' -f4); if echo \"$CMD\" | grep -qE '(rm -rf|git reset --hard|git push --force|git push -f|npm publish|electron-builder)'; then echo 'BLOCK: Comando distruttivo o di pubblicazione — conferma manualmente.'; exit 1; fi; exit 0"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/claude-post-edit.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/doc-drift-check.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
