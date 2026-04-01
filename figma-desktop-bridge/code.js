@@ -144,6 +144,48 @@ function serializeCollection(c) {
   };
 }
 
+// Send progress update for long-running operations (resets WS timeout)
+var BATCH_PROGRESS_INTERVAL = 5;
+
+function sendProgress(requestId, percent, message, itemsProcessed, totalItems) {
+  figma.ui.postMessage({
+    type: 'OPERATION_PROGRESS',
+    requestId: requestId,
+    percent: percent,
+    message: message,
+    itemsProcessed: itemsProcessed,
+    totalItems: totalItems,
+    timestamp: Date.now()
+  });
+}
+
+// Run a batch operation: loop, try/catch per item, progress every BATCH_PROGRESS_INTERVAL, yield to event loop
+function runBatch(requestId, updates, resultType, verb, processFn) {
+  (async () => {
+    if (!updates || updates.length === 0) {
+      figma.ui.postMessage({ type: resultType, requestId: requestId, success: true, data: { updated: 0, total: 0, results: [] } });
+      return;
+    }
+    var results = [];
+    var total = updates.length;
+    for (var i = 0; i < total; i++) {
+      try {
+        await processFn(updates[i]);
+        results.push({ nodeId: updates[i].nodeId, success: true });
+      } catch (e) {
+        results.push({ nodeId: updates[i].nodeId, success: false, error: e.message });
+      }
+      if ((i + 1) % BATCH_PROGRESS_INTERVAL === 0 || i === total - 1) {
+        sendProgress(requestId, Math.round(((i + 1) / total) * 100), 'Updated ' + (i + 1) + '/' + total + ' ' + verb, i + 1, total);
+      }
+      if ((i + 1) % BATCH_PROGRESS_INTERVAL === 0 && i < total - 1) {
+        await new Promise(function(r) { setTimeout(r, 0); });
+      }
+    }
+    figma.ui.postMessage({ type: resultType, requestId: requestId, success: true, data: { updated: results.filter(function(r) { return r.success; }).length, total: total, results: results } });
+  })();
+}
+
 // Helper to convert hex color to Figma RGB (0-1 range)
 function hexToFigmaRGB(hex) {
   // Remove # if present
@@ -3802,7 +3844,7 @@ figma.ui.onmessage = async (msg) => {
   else if (msg.type === 'CREATE_FROM_JSX') {
     const { tree, x, y, parentId, requestId } = msg;
     try {
-      const parent = parentId ? figma.getNodeById(parentId) : figma.currentPage;
+      const parent = parentId ? await figma.getNodeByIdAsync(parentId) : figma.currentPage;
       const rootNode = await createNodeFromTree(tree, parent);
       if (x !== undefined) rootNode.x = x;
       if (y !== undefined) rootNode.y = y;
@@ -3828,7 +3870,7 @@ figma.ui.onmessage = async (msg) => {
       vectors.forEach(v => {
         v.fills = [{ type: 'SOLID', color: hexToFigmaRGB(color) }];
       });
-      const parent = parentId ? figma.getNodeById(parentId) : figma.currentPage;
+      const parent = parentId ? await figma.getNodeByIdAsync(parentId) : figma.currentPage;
       if (parent && parent !== figma.currentPage) parent.appendChild(node);
       if (x !== undefined) node.x = x;
       if (y !== undefined) node.y = y;
@@ -3844,7 +3886,7 @@ figma.ui.onmessage = async (msg) => {
   else if (msg.type === 'BIND_VARIABLE') {
     const { nodeId, variableName, property, requestId } = msg;
     try {
-      const node = figma.getNodeById(nodeId);
+      const node = await figma.getNodeByIdAsync(nodeId);
       if (!node) throw new Error('Node ' + nodeId + ' not found');
       const variables = await figma.variables.getLocalVariablesAsync('COLOR');
       const variable = variables.find(v => v.name === variableName);
@@ -3869,6 +3911,294 @@ figma.ui.onmessage = async (msg) => {
       figma.ui.postMessage({ type: 'BIND_VARIABLE_RESULT', success: true, requestId });
     } catch (e) {
       figma.ui.postMessage({ type: 'BIND_VARIABLE_RESULT', success: false, requestId, error: e.message });
+    }
+  }
+
+  // ── BATCH OPERATIONS ──────────────────────────────────────────────────────
+
+  // BATCH_SET_TEXT - Update text content on multiple nodes
+  else if (msg.type === 'BATCH_SET_TEXT') {
+    runBatch(msg.requestId, msg.updates, 'BATCH_SET_TEXT_RESULT', 'text nodes', async function(upd) {
+      const node = await figma.getNodeByIdAsync(upd.nodeId);
+      if (!node || node.type !== 'TEXT') throw new Error('Not a text node');
+      // Load all required fonts BEFORE any mutations to avoid partial state on error
+      var currentStyle = (node.fontName !== figma.mixed) ? node.fontName.style : 'Regular';
+      if (upd.fontFamily) {
+        await figma.loadFontAsync({ family: upd.fontFamily, style: currentStyle });
+      }
+      if (node.fontName === figma.mixed) {
+        var len = node.characters.length;
+        for (var fi = 0; fi < len; fi++) { await figma.loadFontAsync(node.getRangeFontName(fi, fi + 1)); }
+      } else {
+        await figma.loadFontAsync(node.fontName);
+      }
+      // All fonts loaded — safe to mutate
+      node.characters = upd.text;
+      if (upd.fontSize) node.fontSize = upd.fontSize;
+      if (upd.fontFamily) {
+        node.fontName = { family: upd.fontFamily, style: currentStyle };
+      }
+    });
+  }
+
+  // BATCH_SET_FILLS - Set fill colors on multiple nodes
+  else if (msg.type === 'BATCH_SET_FILLS') {
+    runBatch(msg.requestId, msg.updates, 'BATCH_SET_FILLS_RESULT', 'fills', async function(upd) {
+      const node = await figma.getNodeByIdAsync(upd.nodeId);
+      if (!node || !('fills' in node)) throw new Error('Node has no fills property');
+      node.fills = upd.fills.map(function(f) {
+        if (f.type === 'SOLID' && typeof f.color === 'string') {
+          const rgb = hexToFigmaRGB(f.color);
+          var opacity = f.opacity !== undefined ? f.opacity : (rgb.a !== undefined ? rgb.a : 1);
+          return { type: 'SOLID', color: { r: rgb.r, g: rgb.g, b: rgb.b }, opacity: opacity };
+        }
+        return f;
+      });
+    });
+  }
+
+  // BATCH_TRANSFORM - Move and/or resize multiple nodes
+  else if (msg.type === 'BATCH_TRANSFORM') {
+    runBatch(msg.requestId, msg.updates, 'BATCH_TRANSFORM_RESULT', 'nodes', async function(upd) {
+      const node = await figma.getNodeByIdAsync(upd.nodeId);
+      if (!node) throw new Error('Node not found');
+      if (upd.x !== undefined) node.x = upd.x;
+      if (upd.y !== undefined) node.y = upd.y;
+      if (upd.width !== undefined && upd.height !== undefined) {
+        node.resize(upd.width, upd.height);
+      } else if (upd.width !== undefined) {
+        node.resize(upd.width, node.height);
+      } else if (upd.height !== undefined) {
+        node.resize(node.width, upd.height);
+      }
+    });
+  }
+
+  // ── SCAN TEXT NODES ────────────────────────────────────────────────────────
+
+  else if (msg.type === 'SCAN_TEXT_NODES') {
+    const { nodeId, maxDepth, maxResults, requestId } = msg;
+    var scanLimit = (maxResults !== undefined && maxResults > 0) ? maxResults : 1000;
+    (async () => {
+      try {
+        const root = nodeId ? await figma.getNodeByIdAsync(nodeId) : figma.currentPage;
+        if (!root) {
+          figma.ui.postMessage({ type: 'SCAN_TEXT_NODES_RESULT', requestId, success: false, error: 'Node not found' });
+          return;
+        }
+        var textNodes = [];
+        var truncated = false;
+        var visited = 0;
+        // Iterative DFS with yielding
+        var stack = [{ node: root, depth: 0, path: root.name }];
+        while (stack.length > 0) {
+          var item = stack.pop();
+          visited++;
+          if (maxDepth !== undefined && item.depth > maxDepth) continue;
+          if (item.node.type === 'TEXT') {
+            textNodes.push({
+              id: item.node.id,
+              name: item.node.name,
+              characters: item.node.characters,
+              fontSize: item.node.fontSize,
+              fontFamily: typeof item.node.fontName === 'object' ? item.node.fontName.family : 'Mixed',
+              x: Math.round(item.node.absoluteTransform[0][2]),
+              y: Math.round(item.node.absoluteTransform[1][2]),
+              width: Math.round(item.node.width),
+              height: Math.round(item.node.height),
+              path: item.path
+            });
+            if (textNodes.length >= scanLimit) { truncated = true; break; }
+            if (textNodes.length % 50 === 0) {
+              sendProgress(requestId, -1, 'Found ' + textNodes.length + ' text nodes...', textNodes.length);
+            }
+          }
+          if ('children' in item.node) {
+            // Push in reverse order so left-to-right traversal is preserved
+            for (var ci = item.node.children.length - 1; ci >= 0; ci--) {
+              stack.push({ node: item.node.children[ci], depth: item.depth + 1, path: item.path + '/' + item.node.children[ci].name });
+            }
+          }
+          // Yield every 100 visited nodes to avoid blocking UI
+          if (visited % 100 === 0) {
+            await new Promise(function(r) { setTimeout(r, 0); });
+          }
+        }
+        figma.ui.postMessage({ type: 'SCAN_TEXT_NODES_RESULT', requestId, success: true, data: { count: textNodes.length, nodes: textNodes, truncated: truncated } });
+      } catch (e) {
+        figma.ui.postMessage({ type: 'SCAN_TEXT_NODES_RESULT', requestId, success: false, error: e.message });
+      }
+    })();
+  }
+
+  // ── AUTO-LAYOUT ────────────────────────────────────────────────────────────
+
+  else if (msg.type === 'SET_AUTO_LAYOUT') {
+    const { nodeId, requestId } = msg;
+    try {
+      const node = await figma.getNodeByIdAsync(nodeId);
+      if (!node || !('layoutMode' in node)) {
+        figma.ui.postMessage({ type: 'SET_AUTO_LAYOUT_RESULT', requestId, success: false, error: 'Node does not support auto-layout' });
+        return;
+      }
+      // CRITICAL ORDER: layoutMode FIRST
+      if (msg.direction !== undefined) node.layoutMode = msg.direction;
+      // Wrap (after layoutMode)
+      if (msg.layoutWrap !== undefined) node.layoutWrap = msg.layoutWrap;
+      // Sizing modes
+      if (msg.primaryAxisSizingMode !== undefined) node.primaryAxisSizingMode = msg.primaryAxisSizingMode;
+      if (msg.counterAxisSizingMode !== undefined) node.counterAxisSizingMode = msg.counterAxisSizingMode;
+      // Padding
+      if (msg.padding !== undefined) {
+        node.paddingTop = node.paddingBottom = node.paddingLeft = node.paddingRight = msg.padding;
+      } else {
+        if (msg.paddingTop !== undefined) node.paddingTop = msg.paddingTop;
+        if (msg.paddingBottom !== undefined) node.paddingBottom = msg.paddingBottom;
+        if (msg.paddingLeft !== undefined) node.paddingLeft = msg.paddingLeft;
+        if (msg.paddingRight !== undefined) node.paddingRight = msg.paddingRight;
+      }
+      // Spacing
+      if (msg.itemSpacing !== undefined) node.itemSpacing = msg.itemSpacing;
+      // Alignment (LAST)
+      if (msg.primaryAxisAlignItems !== undefined) node.primaryAxisAlignItems = msg.primaryAxisAlignItems;
+      if (msg.counterAxisAlignItems !== undefined) node.counterAxisAlignItems = msg.counterAxisAlignItems;
+
+      figma.ui.postMessage({ type: 'SET_AUTO_LAYOUT_RESULT', requestId, success: true, node: { id: node.id, name: node.name, layoutMode: node.layoutMode } });
+    } catch (e) {
+      figma.ui.postMessage({ type: 'SET_AUTO_LAYOUT_RESULT', requestId, success: false, error: e.message });
+    }
+  }
+
+  // ── VARIANT SWITCHING ──────────────────────────────────────────────────────
+
+  else if (msg.type === 'SET_VARIANT') {
+    const { nodeId, variant, requestId } = msg;
+    try {
+      const node = await figma.getNodeByIdAsync(nodeId);
+      if (!node || node.type !== 'INSTANCE') {
+        figma.ui.postMessage({ type: 'SET_VARIANT_RESULT', requestId, success: false, error: 'Node is not a component instance' });
+        return;
+      }
+      const componentProperties = node.componentProperties;
+      const updates = {};
+      for (const [key, value] of Object.entries(variant)) {
+        // Exact match first, then strip hash suffix, then case-insensitive
+        var propKey = Object.keys(componentProperties).find(function(k) { return k === key || k.split('#')[0] === key; });
+        if (!propKey) {
+          propKey = Object.keys(componentProperties).find(function(k) {
+            return k.toLowerCase() === key.toLowerCase() || k.split('#')[0].toLowerCase() === key.toLowerCase();
+          });
+        }
+        if (propKey && componentProperties[propKey].type === 'VARIANT') {
+          updates[propKey] = value;
+        }
+      }
+      if (Object.keys(updates).length > 0) {
+        node.setProperties(updates);
+      }
+      figma.ui.postMessage({ type: 'SET_VARIANT_RESULT', requestId, success: true, instance: { id: node.id, name: node.name, appliedVariants: updates } });
+    } catch (e) {
+      figma.ui.postMessage({ type: 'SET_VARIANT_RESULT', requestId, success: false, error: e.message });
+    }
+  }
+
+  // ── GRANULAR STYLE TOOLS ───────────────────────────────────────────────────
+
+  // SET_TEXT_STYLE - Typography properties
+  else if (msg.type === 'SET_TEXT_STYLE') {
+    const { nodeId, requestId } = msg;
+    (async () => {
+      try {
+        const node = await figma.getNodeByIdAsync(nodeId);
+        if (!node || node.type !== 'TEXT') {
+          figma.ui.postMessage({ type: 'SET_TEXT_STYLE_RESULT', requestId, success: false, error: 'Not a text node' });
+          return;
+        }
+        if (node.fontName === figma.mixed) {
+          var len = node.characters.length;
+          for (var fi = 0; fi < len; fi++) { await figma.loadFontAsync(node.getRangeFontName(fi, fi + 1)); }
+        } else {
+          await figma.loadFontAsync(node.fontName);
+        }
+        if (msg.letterSpacing !== undefined) node.letterSpacing = { value: msg.letterSpacing, unit: 'PIXELS' };
+        if (msg.lineHeight !== undefined) node.lineHeight = { value: msg.lineHeight, unit: 'PIXELS' };
+        if (msg.paragraphSpacing !== undefined) node.paragraphSpacing = msg.paragraphSpacing;
+        if (msg.textCase !== undefined) node.textCase = msg.textCase;
+        if (msg.textDecoration !== undefined) node.textDecoration = msg.textDecoration;
+        if (msg.textAlignHorizontal !== undefined) node.textAlignHorizontal = msg.textAlignHorizontal;
+        if (msg.textAlignVertical !== undefined) node.textAlignVertical = msg.textAlignVertical;
+        figma.ui.postMessage({ type: 'SET_TEXT_STYLE_RESULT', requestId, success: true, node: { id: node.id, name: node.name } });
+      } catch (e) {
+        figma.ui.postMessage({ type: 'SET_TEXT_STYLE_RESULT', requestId, success: false, error: e.message });
+      }
+    })();
+  }
+
+  // SET_EFFECTS - Shadows and blurs
+  else if (msg.type === 'SET_EFFECTS') {
+    const { nodeId, effects, requestId } = msg;
+    try {
+      const node = await figma.getNodeByIdAsync(nodeId);
+      if (!node || !('effects' in node)) {
+        figma.ui.postMessage({ type: 'SET_EFFECTS_RESULT', requestId, success: false, error: 'Node does not support effects' });
+        return;
+      }
+      const mapped = effects.map(function(e) {
+        var effect = { type: e.type, visible: e.visible !== undefined ? e.visible : true };
+        if (e.type === 'DROP_SHADOW' || e.type === 'INNER_SHADOW') {
+          var rgb = e.color ? hexToFigmaRGB(e.color) : { r: 0, g: 0, b: 0, a: 0.25 };
+          effect.color = { r: rgb.r, g: rgb.g, b: rgb.b, a: rgb.a !== undefined ? rgb.a : 0.25 };
+          effect.offset = { x: e.offsetX || 0, y: e.offsetY || 0 };
+          effect.radius = e.radius || 0;
+          effect.spread = e.spread || 0;
+        } else {
+          effect.radius = e.radius || 0;
+        }
+        return effect;
+      });
+      node.effects = mapped;
+      figma.ui.postMessage({ type: 'SET_EFFECTS_RESULT', requestId, success: true, node: { id: node.id, name: node.name } });
+    } catch (e) {
+      figma.ui.postMessage({ type: 'SET_EFFECTS_RESULT', requestId, success: false, error: e.message });
+    }
+  }
+
+  // SET_OPACITY
+  else if (msg.type === 'SET_OPACITY') {
+    const { nodeId, opacity, requestId } = msg;
+    try {
+      const node = await figma.getNodeByIdAsync(nodeId);
+      if (!node || !('opacity' in node)) {
+        figma.ui.postMessage({ type: 'SET_OPACITY_RESULT', requestId, success: false, error: 'Node does not support opacity' });
+        return;
+      }
+      node.opacity = Math.max(0, Math.min(1, opacity));
+      figma.ui.postMessage({ type: 'SET_OPACITY_RESULT', requestId, success: true, node: { id: node.id, name: node.name } });
+    } catch (e) {
+      figma.ui.postMessage({ type: 'SET_OPACITY_RESULT', requestId, success: false, error: e.message });
+    }
+  }
+
+  // SET_CORNER_RADIUS
+  else if (msg.type === 'SET_CORNER_RADIUS') {
+    const { nodeId, requestId } = msg;
+    try {
+      const node = await figma.getNodeByIdAsync(nodeId);
+      if (!node || !('cornerRadius' in node)) {
+        figma.ui.postMessage({ type: 'SET_CORNER_RADIUS_RESULT', requestId, success: false, error: 'Node does not support corner radius' });
+        return;
+      }
+      if (msg.radius !== undefined) {
+        node.cornerRadius = msg.radius;
+      } else {
+        if (msg.topLeft !== undefined) node.topLeftRadius = msg.topLeft;
+        if (msg.topRight !== undefined) node.topRightRadius = msg.topRight;
+        if (msg.bottomLeft !== undefined) node.bottomLeftRadius = msg.bottomLeft;
+        if (msg.bottomRight !== undefined) node.bottomRightRadius = msg.bottomRight;
+      }
+      figma.ui.postMessage({ type: 'SET_CORNER_RADIUS_RESULT', requestId, success: true, node: { id: node.id, name: node.name } });
+    } catch (e) {
+      figma.ui.postMessage({ type: 'SET_CORNER_RADIUS_RESULT', requestId, success: false, error: e.message });
     }
   }
 };

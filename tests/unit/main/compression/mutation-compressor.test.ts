@@ -16,7 +16,7 @@ function nodePayload(id = '123:456', name = 'Button') {
 }
 
 describe('isMutationTool', () => {
-  it('returns true for all 16 mutation tools', () => {
+  it('returns true for all mutation tools', () => {
     const expected = [
       'figma_set_fills',
       'figma_set_strokes',
@@ -35,6 +35,16 @@ describe('isMutationTool', () => {
       'figma_set_instance_properties',
       'figma_arrange_component_set',
       'figma_setup_tokens',
+      'figma_batch_set_text',
+      'figma_batch_set_fills',
+      'figma_batch_transform',
+      'figma_auto_layout',
+      'figma_set_variant',
+      'figma_set_text_style',
+      'figma_set_effects',
+      'figma_set_opacity',
+      'figma_set_corner_radius',
+      'figma_set_annotations',
     ];
     for (const name of expected) {
       expect(isMutationTool(name)).toBe(true);
@@ -48,8 +58,8 @@ describe('isMutationTool', () => {
     expect(isMutationTool('')).toBe(false);
   });
 
-  it('MUTATION_TOOLS Set has 17 entries', () => {
-    expect(MUTATION_TOOLS.size).toBe(17);
+  it('MUTATION_TOOLS Set has 27 entries', () => {
+    expect(MUTATION_TOOLS.size).toBe(27);
   });
 });
 
@@ -234,5 +244,89 @@ describe('compressMutationResult — figma_create_icon', () => {
     const payload = { success: true, nodeId: '700:800' };
     const result = compressMutationResult('figma_create_icon', makeContent(payload), false);
     expect(result!.content[0].text).toBe('OK node=700:800');
+  });
+});
+
+describe('compressMutationResult — batch operations', () => {
+  it('compresses figma_batch_set_text to OK batch=N/M format', () => {
+    const payload = { updated: 5, total: 5, results: [] };
+    const result = compressMutationResult('figma_batch_set_text', makeContent(payload), false);
+    expect(result!.content[0].text).toBe('OK batch=5/5');
+  });
+
+  it('compresses figma_batch_set_fills to OK batch=N/M format', () => {
+    const payload = { updated: 3, total: 3, results: [] };
+    const result = compressMutationResult('figma_batch_set_fills', makeContent(payload), false);
+    expect(result!.content[0].text).toBe('OK batch=3/3');
+  });
+
+  it('compresses figma_batch_transform to OK batch=N/M format', () => {
+    const payload = { updated: 10, total: 10, results: [] };
+    const result = compressMutationResult('figma_batch_transform', makeContent(payload), false);
+    expect(result!.content[0].text).toBe('OK batch=10/10');
+  });
+
+  it('handles partial failures', () => {
+    const payload = {
+      updated: 8,
+      total: 10,
+      results: [
+        { nodeId: '1:1', success: true },
+        { nodeId: '1:2', success: false, error: 'Not a text node' },
+      ],
+    };
+    const result = compressMutationResult('figma_batch_set_text', makeContent(payload), false);
+    expect(result!.content[0].text).toBe('OK batch=8/10');
+  });
+
+  it('falls back to counting results when updated field is missing', () => {
+    const payload = {
+      total: 3,
+      results: [
+        { nodeId: '1:1', success: true },
+        { nodeId: '1:2', success: true },
+        { nodeId: '1:3', success: false },
+      ],
+    };
+    const result = compressMutationResult('figma_batch_set_fills', makeContent(payload), false);
+    expect(result!.content[0].text).toBe('OK batch=2/3');
+  });
+
+  it('returns null for error results (no compression)', () => {
+    const result = compressMutationResult('figma_batch_set_text', makeContent({ error: 'fail' }), true);
+    expect(result).toBeNull();
+  });
+});
+
+describe('compressMutationResult — new standard mutation tools', () => {
+  it('compresses figma_auto_layout', () => {
+    const result = compressMutationResult('figma_auto_layout', makeContent(nodePayload('10:20')), false);
+    expect(result!.content[0].text).toBe('OK node=10:20');
+  });
+
+  it('compresses figma_set_variant via instance.id', () => {
+    const payload = { success: true, instance: { id: '30:40', name: 'Button', appliedVariants: {} } };
+    const result = compressMutationResult('figma_set_variant', makeContent(payload), false);
+    expect(result!.content[0].text).toBe('OK node=30:40');
+  });
+
+  it('compresses figma_set_text_style', () => {
+    const result = compressMutationResult('figma_set_text_style', makeContent(nodePayload('50:60')), false);
+    expect(result!.content[0].text).toBe('OK node=50:60');
+  });
+
+  it('compresses figma_set_effects', () => {
+    const result = compressMutationResult('figma_set_effects', makeContent(nodePayload('70:80')), false);
+    expect(result!.content[0].text).toBe('OK node=70:80');
+  });
+
+  it('compresses figma_set_opacity', () => {
+    const result = compressMutationResult('figma_set_opacity', makeContent(nodePayload('90:100')), false);
+    expect(result!.content[0].text).toBe('OK node=90:100');
+  });
+
+  it('compresses figma_set_corner_radius', () => {
+    const result = compressMutationResult('figma_set_corner_radius', makeContent(nodePayload('110:120')), false);
+    expect(result!.content[0].text).toBe('OK node=110:120');
   });
 });

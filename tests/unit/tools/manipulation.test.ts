@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createManipulationTools } from '../../../src/main/tools/manipulation.js';
 import { createTestToolDeps } from '../../helpers/mock-connector.js';
+import { findTool as _findTool, expectTextResult } from '../../helpers/tool-test-utils.js';
 
 // Mock logger
 vi.mock('../../../src/figma/logger.js', () => ({
@@ -17,14 +18,7 @@ describe('Manipulation Tools', () => {
     tools = createManipulationTools(deps);
   });
 
-  const findTool = (name: string) => tools.find((t) => t.name === name);
-
-  const expectTextResult = (result: any, data: unknown) => {
-    expect(result).toEqual({
-      content: [{ type: 'text', text: JSON.stringify(data) }],
-      details: {},
-    });
-  };
+  const findTool = (name: string) => _findTool(tools, name);
 
   // ── figma_set_fills ────────────────────────────────────────────────
 

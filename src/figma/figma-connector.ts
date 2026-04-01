@@ -97,4 +97,26 @@ export interface IFigmaConnector {
   getAnnotations(nodeId: string, includeChildren?: boolean, depth?: number): Promise<any>;
   setAnnotations(nodeId: string, annotations: any[], mode?: 'replace' | 'append'): Promise<any>;
   getAnnotationCategories(): Promise<any>;
+
+  // Batch operations
+  batchSetText(updates: Array<{ nodeId: string; text: string; fontFamily?: string; fontSize?: number }>): Promise<any>;
+  batchSetFills(updates: Array<{ nodeId: string; fills: any[] }>): Promise<any>;
+  batchTransform(
+    updates: Array<{ nodeId: string; x?: number; y?: number; width?: number; height?: number }>,
+  ): Promise<any>;
+
+  // Scan/discovery
+  scanTextNodes(nodeId?: string, maxDepth?: number, maxResults?: number): Promise<any>;
+
+  // Layout
+  setAutoLayout(nodeId: string, params: any): Promise<any>;
+
+  // Variant switching
+  setVariant(nodeId: string, variant: Record<string, string>): Promise<any>;
+
+  // Granular styles
+  setTextStyle(nodeId: string, params: any): Promise<any>;
+  setEffects(nodeId: string, effects: any[]): Promise<any>;
+  setOpacity(nodeId: string, opacity: number): Promise<any>;
+  setCornerRadius(nodeId: string, params: any): Promise<any>;
 }

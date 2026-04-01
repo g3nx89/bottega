@@ -490,7 +490,18 @@ if (!gotTheLock) {
         if (mainWindow) safeSend(mainWindow.webContents, 'figma:disconnected');
       });
 
-      // 10. Invalidate compression caches on Figma document changes
+      // 10. Log operation progress events for observability
+      figmaCore.wsServer.on('operationProgress', (data: any) => {
+        usageTracker.trackOperationProgress({
+          operationId: data.operationId,
+          percent: data.percent,
+          message: data.message,
+          itemsProcessed: data.itemsProcessed,
+          totalItems: data.totalItems,
+        });
+      });
+
+      // 11. Invalidate compression caches on Figma document changes
       figmaCore.wsServer.on('documentChange', (data: any) => {
         if (data.hasStyleChanges || data.hasNodeChanges) {
           infra.designSystemCache.invalidate(data.fileKey);

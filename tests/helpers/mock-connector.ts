@@ -54,6 +54,16 @@ export function createMockConnector() {
     'getAnnotations',
     'setAnnotations',
     'getAnnotationCategories',
+    'batchSetText',
+    'batchSetFills',
+    'batchTransform',
+    'scanTextNodes',
+    'setAutoLayout',
+    'setVariant',
+    'setTextStyle',
+    'setEffects',
+    'setOpacity',
+    'setCornerRadius',
   ] as const;
 
   const mock: Record<string, any> = {};

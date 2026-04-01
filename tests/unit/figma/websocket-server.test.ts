@@ -806,4 +806,156 @@ describe('FigmaWebSocketServer', () => {
       }
     });
   });
+
+  // ==========================================================================
+  // OPERATION_PROGRESS handling
+  // ==========================================================================
+
+  describe('OPERATION_PROGRESS handling', () => {
+    it('resets timeout on progress message', async () => {
+      await client.connect(port, 'abc123', 'Test File');
+
+      // Send a command with a short 500ms timeout — don't register a handler so it would timeout
+      const commandPromise = server.sendCommand('SLOW_BATCH', { items: 10 }, 500);
+
+      // The server sent the command — get its id from the client's received messages
+      await new Promise((r) => setTimeout(r, 50));
+      const received = client.getReceived();
+      const cmd = received.find((m) => m.method === 'SLOW_BATCH');
+      expect(cmd).toBeDefined();
+
+      // Send a progress update BEFORE the 500ms timeout — this should reset the timeout
+      client.sendEvent('OPERATION_PROGRESS', {
+        operationId: cmd.id,
+        percent: 50,
+        message: 'Halfway done',
+        itemsProcessed: 5,
+        totalItems: 10,
+        timestamp: Date.now(),
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Wait past the original 500ms timeout — should NOT have rejected
+      await new Promise((r) => setTimeout(r, 550));
+
+      // Now send the actual result to resolve the command
+      client.send({ id: cmd.id, result: { done: true } });
+
+      const result = await commandPromise;
+      expect(result).toEqual({ done: true });
+    });
+
+    it('ignores progress for unknown operationId', async () => {
+      await client.connect(port, 'abc123', 'Test File');
+
+      // Send progress for a non-existent request — should not crash
+      client.sendEvent('OPERATION_PROGRESS', {
+        operationId: 'ws_nonexistent_999',
+        percent: 50,
+        message: 'Ghost progress',
+        timestamp: Date.now(),
+      });
+
+      // Wait a tick to ensure message is processed
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Server should still be functional
+      client.onCommand('EXECUTE_CODE', () => ({ ok: true }));
+      const result = await server.sendCommand('EXECUTE_CODE', { code: '1' });
+      expect(result).toEqual({ ok: true });
+    });
+
+    it('emits operationProgress event', async () => {
+      await client.connect(port, 'abc123', 'Test File');
+
+      const progressEvents: any[] = [];
+      server.on('operationProgress', (data) => progressEvents.push(data));
+
+      // Send a command
+      const commandPromise = server.sendCommand('BATCH_CMD', {}, 2000);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const received = client.getReceived();
+      const cmd = received.find((m) => m.method === 'BATCH_CMD');
+
+      // Send progress
+      const progressData = {
+        operationId: cmd.id,
+        percent: 75,
+        message: 'Almost done',
+        itemsProcessed: 15,
+        totalItems: 20,
+        timestamp: Date.now(),
+      };
+      client.sendEvent('OPERATION_PROGRESS', progressData);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(progressEvents).toHaveLength(1);
+      expect(progressEvents[0].operationId).toBe(cmd.id);
+      expect(progressEvents[0].percent).toBe(75);
+      expect(progressEvents[0].message).toBe('Almost done');
+
+      // Clean up — resolve the command
+      client.send({ id: cmd.id, result: { ok: true } });
+      await commandPromise;
+    });
+
+    it('multiple progress messages keep resetting timeout', async () => {
+      await client.connect(port, 'abc123', 'Test File');
+
+      // 300ms timeout — will expire unless we keep sending progress
+      const commandPromise = server.sendCommand('LONG_BATCH', {}, 300);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const received = client.getReceived();
+      const cmd = received.find((m) => m.method === 'LONG_BATCH');
+
+      // Send 3 progress updates, each 200ms apart (total 600ms > original 300ms timeout)
+      for (let i = 1; i <= 3; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        client.sendEvent('OPERATION_PROGRESS', {
+          operationId: cmd.id,
+          percent: i * 25,
+          message: `Step ${i}`,
+          timestamp: Date.now(),
+        });
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      // Now send result — we're past 700ms, well beyond original 300ms timeout
+      client.send({ id: cmd.id, result: { steps: 3 } });
+
+      const result = await commandPromise;
+      expect(result).toEqual({ steps: 3 });
+    });
+
+    it('progress replaces original timeout with inactivity timeout', async () => {
+      await client.connect(port, 'abc123', 'Test File');
+
+      // Very short original timeout — would normally reject with "timed out after 200ms"
+      const commandPromise = server.sendCommand('STALLED_CMD', {}, 200);
+      await new Promise((r) => setTimeout(r, 50));
+
+      const received = client.getReceived();
+      const cmd = received.find((m) => m.method === 'STALLED_CMD');
+
+      // Send progress BEFORE the 200ms timeout fires — replaces it with 30s inactivity timeout
+      client.sendEvent('OPERATION_PROGRESS', {
+        operationId: cmd.id,
+        percent: 10,
+        message: 'Started',
+        timestamp: Date.now(),
+      });
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Wait past the original 200ms timeout — should NOT reject yet (progress extended it)
+      await new Promise((r) => setTimeout(r, 300));
+
+      // The command is still pending (not rejected) — send result to resolve it
+      client.send({ id: cmd.id, result: { completed: true } });
+      const result = await commandPromise;
+      expect(result).toEqual({ completed: true });
+      // If progress didn't replace the timeout, this would have rejected with "timed out after 200ms"
+    });
+  });
 });

@@ -7,12 +7,15 @@ import type { DesignSystemCache } from '../compression/design-system-cache.js';
 import type { ImageGenerator } from '../image-gen/image-generator.js';
 import type { OperationQueue } from '../operation-queue.js';
 import { createAnnotationTools } from './annotations.js';
+import { createBatchTools } from './batch.js';
 import { createComponentTools } from './components.js';
 import { createCoreTools } from './core.js';
 import { createDiscoveryTools } from './discovery.js';
 import { createImageGenTools } from './image-gen.js';
 import { createJsxRenderTools } from './jsx-render.js';
+import { createLayoutTools } from './layout.js';
 import { createManipulationTools } from './manipulation.js';
+import { createStyleTools } from './style.js';
 import { createTokenTools } from './tokens.js';
 
 export interface ToolDeps {
@@ -59,8 +62,11 @@ export function createFigmaTools(deps: ToolDeps): ToolDefinition[] {
     ...createCoreTools(deps),
     ...createDiscoveryTools(deps),
     ...createComponentTools(deps),
+    ...createBatchTools(deps),
     ...createManipulationTools(deps),
     ...createTokenTools(deps),
+    ...createLayoutTools(deps),
+    ...createStyleTools(deps),
     ...createJsxRenderTools(deps),
     ...createAnnotationTools(deps),
     ...(deps.getImageGenerator ? createImageGenTools(deps) : []),

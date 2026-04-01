@@ -87,5 +87,24 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
         });
       },
     },
+    {
+      name: 'figma_set_variant',
+      label: 'Set Component Variant',
+      description:
+        'Switch variant properties on a component instance (e.g. State: Hover, Size: Large). Preserves instance overrides.',
+      promptSnippet: 'figma_set_variant: switch variant on component instance',
+      parameters: Type.Object({
+        nodeId: Type.String({ description: 'Component instance node ID' }),
+        variant: Type.Record(Type.String(), Type.String(), {
+          description: 'Variant properties as key-value pairs, e.g. { "State": "Hover", "Size": "Large" }',
+        }),
+      }),
+      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+        return operationQueue.execute(async () => {
+          const result = await connector.setVariant(params.nodeId, params.variant);
+          return textResult(result);
+        });
+      },
+    },
   ];
 }

@@ -63,7 +63,18 @@ describe('categorizeToolName', () => {
 
   it('returns other for unknown tools', () => {
     expect(categorizeToolName('unknown_tool')).toBe('other');
-    expect(categorizeToolName('figma_status')).toBe('other');
+  });
+
+  it('categorizes newly mapped tools', () => {
+    expect(categorizeToolName('figma_status')).toBe('discovery');
+    expect(categorizeToolName('figma_scan_text_nodes')).toBe('discovery');
+    expect(categorizeToolName('figma_auto_layout')).toBe('mutation');
+    expect(categorizeToolName('figma_set_variant')).toBe('mutation');
+    expect(categorizeToolName('figma_batch_set_text')).toBe('mutation');
+    expect(categorizeToolName('figma_set_text_style')).toBe('mutation');
+    expect(categorizeToolName('figma_set_effects')).toBe('mutation');
+    expect(categorizeToolName('figma_set_opacity')).toBe('mutation');
+    expect(categorizeToolName('figma_set_corner_radius')).toBe('mutation');
   });
 });
 

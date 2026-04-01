@@ -183,5 +183,22 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
         return textResult(shouldCompact ? compact : raw);
       },
     },
+    {
+      name: 'figma_scan_text_nodes',
+      label: 'Scan Text Nodes',
+      description:
+        'Scan all text nodes under a node or the current page. Returns text content, font info, and position for each node.',
+      promptSnippet: 'figma_scan_text_nodes: scan text nodes with font/position info',
+      parameters: Type.Object({
+        nodeId: Type.Optional(Type.String({ description: 'Root node ID (defaults to current page)' })),
+        maxDepth: Type.Optional(Type.Number({ description: 'Max traversal depth (default: unlimited)' })),
+        maxResults: Type.Optional(Type.Number({ description: 'Max text nodes to return (default: 1000)' })),
+      }),
+      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+        // Read-only — no operationQueue needed
+        const result = await connector.scanTextNodes(params.nodeId, params.maxDepth, params.maxResults);
+        return textResult(result);
+      },
+    },
   ];
 }

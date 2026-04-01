@@ -67,6 +67,19 @@ export interface PluginContext {
 }
 
 /**
+ * Progress update from a long-running plugin operation.
+ * Sent as unsolicited messages (no request id) to reset the pending request timeout.
+ */
+export interface OperationProgress {
+  operationId: string;
+  percent: number;
+  message: string;
+  itemsProcessed?: number;
+  totalItems?: number;
+  timestamp: number;
+}
+
+/**
  * JSX tree node — used by figma-use JSX renderer
  */
 export interface TreeNode {

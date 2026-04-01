@@ -355,4 +355,14 @@ export class UsageTracker {
   trackAppStateRestored(slotsCount: number, totalQueuedPrompts: number): void {
     this.emit('usage:app_state_restored', { slotsCount, totalQueuedPrompts });
   }
+
+  trackOperationProgress(data: {
+    operationId: string;
+    percent: number;
+    message: string;
+    itemsProcessed?: number;
+    totalItems?: number;
+  }): void {
+    this.emit('usage:operation_progress', data);
+  }
 }

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestToolDeps } from '../../helpers/mock-connector.js';
+import { findTool as _findTool } from '../../helpers/tool-test-utils.js';
 
 // Mock logger
 vi.mock('../../../src/figma/logger.js', () => ({
@@ -18,11 +19,7 @@ describe('discovery tools', () => {
   let deps: ReturnType<typeof createTestToolDeps>;
   let tools: ToolDefinition[];
 
-  function findTool(name: string) {
-    const t = tools.find((t) => t.name === name);
-    if (!t) throw new Error(`Tool ${name} not found`);
-    return t;
-  }
+  const findTool = (name: string) => _findTool(tools, name);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -269,6 +266,41 @@ describe('discovery tools', () => {
         },
         undefined,
       );
+    });
+  });
+
+  // ── figma_scan_text_nodes ─────────────────────────────────────────
+
+  describe('figma_scan_text_nodes', () => {
+    it('calls connector.scanTextNodes with no args by default', async () => {
+      const tool = findTool('figma_scan_text_nodes');
+      deps.connector.scanTextNodes.mockResolvedValue({ count: 0, nodes: [] });
+
+      await tool.execute('c1', {}, undefined, undefined, undefined);
+
+      expect(deps.connector.scanTextNodes).toHaveBeenCalledWith(undefined, undefined, undefined);
+    });
+
+    it('passes nodeId, maxDepth, and maxResults', async () => {
+      const tool = findTool('figma_scan_text_nodes');
+      deps.connector.scanTextNodes.mockResolvedValue({ count: 5, nodes: [] });
+
+      await tool.execute('c2', { nodeId: '10:1', maxDepth: 3, maxResults: 50 }, undefined, undefined, undefined);
+
+      expect(deps.connector.scanTextNodes).toHaveBeenCalledWith('10:1', 3, 50);
+    });
+
+    it('returns textResult format', async () => {
+      const tool = findTool('figma_scan_text_nodes');
+      const data = { count: 2, nodes: [{ id: '1:1' }, { id: '1:2' }] };
+      deps.connector.scanTextNodes.mockResolvedValue(data);
+
+      const result = await tool.execute('c3', {}, undefined, undefined, undefined);
+
+      expect(result).toEqual({
+        content: [{ type: 'text', text: JSON.stringify(data) }],
+        details: {},
+      });
     });
   });
 });

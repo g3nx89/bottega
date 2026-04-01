@@ -1,7 +1,7 @@
 /**
  * Mutation result compressor.
  *
- * Compresses success results from the 16 mutation tools from ~200 tokens
+ * Compresses success results from mutation tools from ~200 tokens
  * down to ~10 tokens (e.g. "OK node=123:456").
  *
  * Returns null for non-mutation tools, error results, and parse failures
@@ -41,6 +41,13 @@ export function compressMutationResult(toolName: string, content: any[], isError
     return null;
   }
 
+  // Batch operations — special shape: updated/total counts, no single nodeId
+  if (toolName.startsWith('figma_batch_')) {
+    const updated = data?.updated ?? data?.results?.filter((r: any) => r.success).length ?? 0;
+    const total = data?.total ?? 0;
+    return { content: [{ type: 'text', text: `OK batch=${updated}/${total}` }] };
+  }
+
   // figma_setup_tokens — special shape: no nodeId, has collectionId + variables
   if (toolName === 'figma_setup_tokens') {
     const collectionId: string | undefined = data?.collectionId;
@@ -66,7 +73,8 @@ export function compressMutationResult(toolName: string, content: any[], isError
   }
 
   // All other standard mutations
-  const nodeId: string | undefined = data?.node?.id ?? data?.nodeId ?? data?.deleted?.id ?? data?.success?.nodeId;
+  const nodeId: string | undefined =
+    data?.node?.id ?? data?.nodeId ?? data?.instance?.id ?? data?.deleted?.id ?? data?.success?.nodeId;
   if (!nodeId) return null;
 
   return { content: [{ type: 'text', text: `OK node=${nodeId}` }] };

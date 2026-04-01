@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createImageGenTools } from '../../../src/main/tools/image-gen.js';
 import { createTestToolDeps } from '../../helpers/mock-connector.js';
+import { findTool as _findTool } from '../../helpers/tool-test-utils.js';
 
 // Mock logger
 vi.mock('../../../src/figma/logger.js', () => ({
@@ -37,11 +38,7 @@ describe('Image Gen Tools', () => {
     tools = createImageGenTools(deps);
   });
 
-  function findTool(name: string) {
-    const tool = tools.find((t) => t.name === name);
-    if (!tool) throw new Error(`Tool ${name} not found`);
-    return tool;
-  }
+  const findTool = (name: string) => _findTool(tools, name);
 
   function run(tool: any, params: any, signal?: AbortSignal) {
     return tool.execute('call-id', params, signal, undefined, undefined);

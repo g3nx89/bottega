@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestToolDeps } from '../../helpers/mock-connector.js';
+import { findTool as _findTool } from '../../helpers/tool-test-utils.js';
 
 // Mock logger
 vi.mock('../../../src/figma/logger.js', () => ({
@@ -13,11 +14,7 @@ describe('component tools', () => {
   let deps: ReturnType<typeof createTestToolDeps>;
   let tools: ToolDefinition[];
 
-  function findTool(name: string) {
-    const t = tools.find((t) => t.name === name);
-    if (!t) throw new Error(`Tool ${name} not found`);
-    return t;
-  }
+  const findTool = (name: string) => _findTool(tools, name);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -162,6 +159,47 @@ describe('component tools', () => {
       const parsed = JSON.parse(result.content[0].text);
       // executeCodeViaUI returns a JSON string, textResult wraps it
       expect(parsed).toBeDefined();
+    });
+  });
+
+  // ── figma_set_variant ─────────────────────────────────────────────
+
+  describe('figma_set_variant', () => {
+    it('calls connector.setVariant with nodeId and variant map', async () => {
+      const tool = findTool('figma_set_variant');
+      const variant = { State: 'Hover', Size: 'Large' };
+
+      await tool.execute('c1', { nodeId: '1:2', variant }, undefined, undefined, undefined);
+
+      expect(deps.connector.setVariant).toHaveBeenCalledWith('1:2', variant);
+    });
+
+    it('returns textResult format', async () => {
+      const tool = findTool('figma_set_variant');
+      const data = { instance: { id: '1:2', name: 'Button', appliedVariants: { State: 'Hover' } } };
+      deps.connector.setVariant.mockResolvedValue(data);
+
+      const result = await tool.execute(
+        'c2',
+        { nodeId: '1:2', variant: { State: 'Hover' } },
+        undefined,
+        undefined,
+        undefined,
+      );
+
+      expect(result).toEqual({
+        content: [{ type: 'text', text: JSON.stringify(data) }],
+        details: {},
+      });
+    });
+
+    it('propagates connector errors', async () => {
+      const tool = findTool('figma_set_variant');
+      deps.connector.setVariant.mockRejectedValue(new Error('Not an instance'));
+
+      await expect(
+        tool.execute('c3', { nodeId: '1:2', variant: { State: 'Hover' } }, undefined, undefined, undefined),
+      ).rejects.toThrow('Not an instance');
     });
   });
 });

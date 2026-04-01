@@ -617,3 +617,250 @@ describe('Realistic tool chaining', () => {
     expect(connector.captureScreenshot).toHaveBeenCalledWith('400:1', expect.anything());
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 7. Batch Operations
+// ═══════════════════════════════════════════════════════════
+
+describe('Batch operations', () => {
+  it('batch text update compresses to OK batch=N/M', async () => {
+    const connector = createMockConnector();
+    connector.batchSetText.mockResolvedValue({ updated: 5, total: 5, results: [] });
+
+    t = await createBottegaTestSession({
+      toolDeps: { connector },
+      compressionProfile: 'balanced',
+    });
+
+    await t.run(
+      when('Update all button labels', [
+        calls('figma_batch_set_text', {
+          updates: [
+            { nodeId: '1:1', text: 'Save' },
+            { nodeId: '1:2', text: 'Cancel' },
+          ],
+        }),
+        says('Updated all button labels.'),
+      ]),
+    );
+
+    const results = t.events.toolResultsFor('figma_batch_set_text');
+    expect(results).toHaveLength(1);
+    expect(results[0].text).toBe('OK batch=5/5');
+  });
+
+  it('batch with partial failures compresses correctly', async () => {
+    const connector = createMockConnector();
+    connector.batchSetFills.mockResolvedValue({
+      updated: 3,
+      total: 5,
+      results: [
+        { nodeId: '1:1', success: true },
+        { nodeId: '1:2', success: true },
+        { nodeId: '1:3', success: true },
+        { nodeId: '1:4', success: false, error: 'Not found' },
+        { nodeId: '1:5', success: false, error: 'Not found' },
+      ],
+    });
+
+    t = await createBottegaTestSession({
+      toolDeps: { connector },
+      compressionProfile: 'balanced',
+    });
+
+    await t.run(
+      when('Set all backgrounds to blue', [
+        calls('figma_batch_set_fills', {
+          updates: [{ nodeId: '1:1', fills: [{ type: 'SOLID', color: '#0000FF' }] }],
+        }),
+        says('Done, some nodes failed.'),
+      ]),
+    );
+
+    const results = t.events.toolResultsFor('figma_batch_set_fills');
+    expect(results).toHaveLength(1);
+    expect(results[0].text).toBe('OK batch=3/5');
+  });
+
+  it('batch transform works end-to-end', async () => {
+    const connector = createMockConnector();
+    connector.batchTransform.mockResolvedValue({ updated: 2, total: 2, results: [] });
+
+    t = await createBottegaTestSession({
+      toolDeps: { connector },
+      compressionProfile: 'balanced',
+    });
+
+    await t.run(
+      when('Align the cards', [
+        calls('figma_batch_transform', {
+          updates: [
+            { nodeId: '1:1', x: 0, y: 0 },
+            { nodeId: '1:2', x: 200, y: 0 },
+          ],
+        }),
+        says('Cards aligned.'),
+      ]),
+    );
+
+    expect(t.events.toolSequence()).toEqual(['figma_batch_transform']);
+    const results = t.events.toolResultsFor('figma_batch_transform');
+    expect(results[0].text).toBe('OK batch=2/2');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 8. Scan → Batch Pipeline
+// ═══════════════════════════════════════════════════════════
+
+describe('Scan then batch pipeline', () => {
+  it('multi-turn: scan text nodes → batch update', async () => {
+    const connector = createMockConnector();
+    connector.scanTextNodes.mockResolvedValue({
+      count: 3,
+      nodes: [
+        { id: '10:1', name: 'Title', characters: 'Old Title', fontSize: 24, fontFamily: 'Inter' },
+        { id: '10:2', name: 'Subtitle', characters: 'Old Sub', fontSize: 16, fontFamily: 'Inter' },
+        { id: '10:3', name: 'Body', characters: 'Old Body', fontSize: 14, fontFamily: 'Inter' },
+      ],
+    });
+    connector.batchSetText.mockResolvedValue({ updated: 3, total: 3, results: [] });
+
+    t = await createBottegaTestSession({
+      toolDeps: { connector },
+      compressionProfile: 'minimal',
+    });
+
+    await t.run(
+      when('Find all text nodes', [calls('figma_scan_text_nodes'), says('Found 3 text nodes.')]),
+      when('Update them all', [
+        calls('figma_batch_set_text', {
+          updates: [
+            { nodeId: '10:1', text: 'New Title' },
+            { nodeId: '10:2', text: 'New Sub' },
+            { nodeId: '10:3', text: 'New Body' },
+          ],
+        }),
+        says('All text updated.'),
+      ]),
+    );
+
+    expect(t.events.toolSequence()).toEqual(['figma_scan_text_nodes', 'figma_batch_set_text']);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 9. Auto-Layout Tool
+// ═══════════════════════════════════════════════════════════
+
+describe('Auto-layout tool', () => {
+  it('auto-layout compresses to OK node=X', async () => {
+    const connector = createMockConnector();
+    connector.setAutoLayout.mockResolvedValue({
+      node: { id: '50:1', name: 'Container', layoutMode: 'VERTICAL' },
+    });
+
+    t = await createBottegaTestSession({
+      toolDeps: { connector },
+      compressionProfile: 'balanced',
+    });
+
+    await t.run(
+      when('Set vertical auto-layout on the container', [
+        calls('figma_auto_layout', { nodeId: '50:1', direction: 'VERTICAL', padding: 16, itemSpacing: 8 }),
+        says('Auto-layout configured.'),
+      ]),
+    );
+
+    const results = t.events.toolResultsFor('figma_auto_layout');
+    expect(results).toHaveLength(1);
+    expect(results[0].text).toBe('OK node=50:1');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 10. Variant Switching
+// ═══════════════════════════════════════════════════════════
+
+describe('Variant switching', () => {
+  it('set variant calls connector correctly', async () => {
+    const connector = createMockConnector();
+    connector.setVariant.mockResolvedValue({
+      instance: { id: '60:1', name: 'Button', appliedVariants: { State: 'Hover' } },
+    });
+
+    t = await createBottegaTestSession({
+      toolDeps: { connector },
+      compressionProfile: 'minimal',
+    });
+
+    await t.run(
+      when('Switch button to hover state', [
+        calls('figma_set_variant', { nodeId: '60:1', variant: { State: 'Hover' } }),
+        says('Variant switched.'),
+      ]),
+    );
+
+    expect(connector.setVariant).toHaveBeenCalledWith('60:1', { State: 'Hover' });
+    expect(t.events.toolSequence()).toEqual(['figma_set_variant']);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 11. Granular Styles Pipeline
+// ═══════════════════════════════════════════════════════════
+
+describe('Granular styles pipeline', () => {
+  it('text style + effects chain compresses all results', async () => {
+    const connector = createMockConnector();
+    connector.setTextStyle.mockResolvedValue({ node: { id: '70:1', name: 'Heading' } });
+    connector.setEffects.mockResolvedValue({ node: { id: '70:1', name: 'Heading' } });
+
+    t = await createBottegaTestSession({
+      toolDeps: { connector },
+      compressionProfile: 'balanced',
+    });
+
+    await t.run(
+      when('Style the heading with shadow', [
+        calls('figma_set_text_style', { nodeId: '70:1', lineHeight: 32, textCase: 'UPPER' }),
+        calls('figma_set_effects', {
+          nodeId: '70:1',
+          effects: [{ type: 'DROP_SHADOW', radius: 4, offsetX: 0, offsetY: 2, color: '#000000' }],
+        }),
+        says('Heading styled with shadow.'),
+      ]),
+    );
+
+    expect(t.events.toolSequence()).toEqual(['figma_set_text_style', 'figma_set_effects']);
+
+    const textStyleResults = t.events.toolResultsFor('figma_set_text_style');
+    expect(textStyleResults[0].text).toBe('OK node=70:1');
+
+    const effectResults = t.events.toolResultsFor('figma_set_effects');
+    expect(effectResults[0].text).toBe('OK node=70:1');
+  });
+
+  it('opacity + corner radius in single turn', async () => {
+    const connector = createMockConnector();
+    connector.setOpacity.mockResolvedValue({ node: { id: '80:1', name: 'Card' } });
+    connector.setCornerRadius.mockResolvedValue({ node: { id: '80:1', name: 'Card' } });
+
+    t = await createBottegaTestSession({
+      toolDeps: { connector },
+      compressionProfile: 'balanced',
+    });
+
+    await t.run(
+      when('Make the card semi-transparent with rounded corners', [
+        calls('figma_set_opacity', { nodeId: '80:1', opacity: 0.8 }),
+        calls('figma_set_corner_radius', { nodeId: '80:1', radius: 12 }),
+        says('Card styled.'),
+      ]),
+    );
+
+    expect(t.events.toolSequence()).toEqual(['figma_set_opacity', 'figma_set_corner_radius']);
+    expect(t.events.toolResultsFor('figma_set_opacity')[0].text).toBe('OK node=80:1');
+    expect(t.events.toolResultsFor('figma_set_corner_radius')[0].text).toBe('OK node=80:1');
+  });
+});

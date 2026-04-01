@@ -145,12 +145,15 @@ node tests/electron-smoke.mjs
 - **Image generation**: `image-gen/` wraps Gemini API (`@google/genai`). Tools can generate, edit, and restore images on Figma nodes. Requires a Gemini API key configured in Settings.
 - **Prompt suggester**: After each agent turn, `prompt-suggester.ts` generates follow-up suggestions via a lightweight LLM call, forwarded as clickable chips in the renderer.
 
-## Tool Categories (39 tools)
+## Tool Categories (49 tools)
 
 - **Core** (4): `figma_execute`, `figma_screenshot`, `figma_status`, `figma_get_selection`
-- **Discovery** (7): `figma_get_file_data`, `figma_search_components`, `figma_get_library_components`, `figma_get_component_details`, `figma_get_component_deep`, `figma_analyze_component_set`, `figma_design_system`
-- **Components** (3): `figma_instantiate`, `figma_set_instance_properties`, `figma_arrange_component_set`
+- **Discovery** (8): `figma_get_file_data`, `figma_search_components`, `figma_get_library_components`, `figma_get_component_details`, `figma_get_component_deep`, `figma_analyze_component_set`, `figma_design_system`, `figma_scan_text_nodes`
+- **Batch** (3): `figma_batch_set_text`, `figma_batch_set_fills`, `figma_batch_transform`
+- **Components** (4): `figma_instantiate`, `figma_set_instance_properties`, `figma_arrange_component_set`, `figma_set_variant`
 - **Manipulation** (10): `figma_set_fills`, `figma_set_strokes`, `figma_set_text`, `figma_set_image_fill`, `figma_resize`, `figma_move`, `figma_create_child`, `figma_clone`, `figma_delete`, `figma_rename`
+- **Layout** (1): `figma_auto_layout`
+- **Style** (4): `figma_set_text_style`, `figma_set_effects`, `figma_set_opacity`, `figma_set_corner_radius`
 - **Tokens** (2): `figma_setup_tokens`, `figma_lint`
 - **Annotations** (3): `figma_get_annotations`, `figma_set_annotations`, `figma_get_annotation_categories`
 - **JSX Render** (3): `figma_render_jsx`, `figma_create_icon`, `figma_bind_variable`

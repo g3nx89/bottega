@@ -236,6 +236,23 @@ export class FigmaWebSocketServer extends EventEmitter {
 
     // Unsolicited data from plugin (FILE_INFO, events, forwarded data)
     if (message.type) {
+      // Progress updates from long-running operations — reset timeout without resolving
+      if (message.type === 'OPERATION_PROGRESS' && message.data) {
+        const { operationId } = message.data;
+        if (operationId && this.pendingRequests.has(operationId)) {
+          const pending = this.pendingRequests.get(operationId)!;
+          clearTimeout(pending.timeoutId);
+          pending.timeoutId = setTimeout(() => {
+            if (this.pendingRequests.has(operationId)) {
+              this.pendingRequests.delete(operationId);
+              pending.reject(new Error(`Operation ${pending.method} timed out (no progress for 30s)`));
+            }
+          }, 30000);
+          this.emit('operationProgress', message.data);
+        }
+        return;
+      }
+
       // FILE_INFO promotes pending clients to named clients
       if (message.type === 'FILE_INFO' && message.data) {
         this.handleFileInfo(message.data, ws);

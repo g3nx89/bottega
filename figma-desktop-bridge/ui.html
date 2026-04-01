@@ -120,6 +120,8 @@
     window.__figmaComponentData = null;
     window.__figmaComponentRequests = new Map();
     window.__figmaPendingRequests = new Map();
+    window.__pluginToWsId = new Map(); // Maps plugin-side requestId → WS-side message.id
+    window.__currentWsId = null; // Set by WS handler before calling methodMap, read by sendPluginCommand
 
     let requestIdCounter = 0;
 
@@ -137,17 +139,20 @@
     // ============================================================================
     window.sendPluginCommand = (type, params, timeoutMs) => {
       timeoutMs = timeoutMs || 15000;
+      var wsId = window.__currentWsId; // Capture WS-side ID if called from WS handler
       return new Promise((resolve, reject) => {
         const requestId = type.toLowerCase() + '_' + (++requestIdCounter) + '_' + Date.now();
 
         const timeoutId = setTimeout(() => {
           if (window.__figmaPendingRequests.has(requestId)) {
             window.__figmaPendingRequests.delete(requestId);
+            if (wsId) window.__pluginToWsId.delete(requestId);
             reject(new Error(type + ' request timed out after ' + timeoutMs + 'ms'));
           }
         }, timeoutMs);
 
         window.__figmaPendingRequests.set(requestId, { resolve: resolve, reject: reject, type: type, timeoutId: timeoutId });
+        if (wsId) window.__pluginToWsId.set(requestId, wsId);
 
         var message = { type: type, requestId: requestId };
         for (var key in params) {
@@ -583,7 +588,17 @@
         },
         'RELOAD_UI': function() {
           return window.sendPluginCommand('RELOAD_UI', {});
-        }
+        },
+        'BATCH_SET_TEXT': function(params) { return window.sendPluginCommand('BATCH_SET_TEXT', { updates: params.updates }, 60000); },
+        'BATCH_SET_FILLS': function(params) { return window.sendPluginCommand('BATCH_SET_FILLS', { updates: params.updates }, 60000); },
+        'BATCH_TRANSFORM': function(params) { return window.sendPluginCommand('BATCH_TRANSFORM', { updates: params.updates }, 60000); },
+        'SCAN_TEXT_NODES': function(params) { return window.sendPluginCommand('SCAN_TEXT_NODES', params, 60000); },
+        'SET_AUTO_LAYOUT': function(params) { return window.sendPluginCommand('SET_AUTO_LAYOUT', params, 10000); },
+        'SET_VARIANT': function(params) { return window.sendPluginCommand('SET_VARIANT', { nodeId: params.nodeId, variant: params.variant }, 10000); },
+        'SET_TEXT_STYLE': function(params) { return window.sendPluginCommand('SET_TEXT_STYLE', params, 10000); },
+        'SET_EFFECTS': function(params) { return window.sendPluginCommand('SET_EFFECTS', { nodeId: params.nodeId, effects: params.effects }, 10000); },
+        'SET_OPACITY': function(params) { return window.sendPluginCommand('SET_OPACITY', { nodeId: params.nodeId, opacity: params.opacity }, 5000); },
+        'SET_CORNER_RADIUS': function(params) { return window.sendPluginCommand('SET_CORNER_RADIUS', params, 5000); }
       };
 
       /**
@@ -790,13 +805,16 @@
             }
 
             // Call the handler (returns a Promise) and send back the result
+            window.__currentWsId = message.id;
             Promise.resolve(handler(message.params || {}))
               .then(function(result) {
+                window.__currentWsId = null;
                 if (activeWs.readyState === 1) {
                   activeWs.send(JSON.stringify({ id: message.id, result: result }));
                 }
               })
               .catch(function(err) {
+                window.__currentWsId = null;
                 if (activeWs.readyState === 1) {
                   activeWs.send(JSON.stringify({ id: message.id, error: err.message || String(err) }));
                 }
@@ -889,6 +907,13 @@
         }
       };
 
+      // Forward OPERATION_PROGRESS for long-running operation timeout reset
+      window.__wsForwardProgress = function(data) {
+        if (wsConnected) {
+          sendToServer({ type: 'OPERATION_PROGRESS', data: data });
+        }
+      };
+
       // Connect on load. If server not found, retries up to MAX_INITIAL_SCANS times.
       // On disconnect, retries indefinitely with exponential backoff (1s → 30s cap).
       wsScanAndConnect();
@@ -919,6 +944,7 @@
             request.resolve({ success: false, error: msg.error || 'Unknown error' });
           }
           window.__figmaPendingRequests.delete(msg.requestId);
+          window.__pluginToWsId.delete(msg.requestId);
         }
       };
 
@@ -1100,6 +1126,46 @@
           handleResult('RELOAD_UI', null);
           break;
 
+        // Scan/discovery results
+        case 'SCAN_TEXT_NODES_RESULT':
+          handleResult('SCAN_TEXT_NODES', 'data');
+          break;
+
+        // Layout results
+        case 'SET_AUTO_LAYOUT_RESULT':
+          handleResult('SET_AUTO_LAYOUT', 'node');
+          break;
+
+        // Variant results
+        case 'SET_VARIANT_RESULT':
+          handleResult('SET_VARIANT', 'instance');
+          break;
+
+        // Style results
+        case 'SET_TEXT_STYLE_RESULT':
+          handleResult('SET_TEXT_STYLE', 'node');
+          break;
+        case 'SET_EFFECTS_RESULT':
+          handleResult('SET_EFFECTS', 'node');
+          break;
+        case 'SET_OPACITY_RESULT':
+          handleResult('SET_OPACITY', 'node');
+          break;
+        case 'SET_CORNER_RADIUS_RESULT':
+          handleResult('SET_CORNER_RADIUS', 'node');
+          break;
+
+        // Batch operation results
+        case 'BATCH_SET_TEXT_RESULT':
+          handleResult('BATCH_SET_TEXT', 'data');
+          break;
+        case 'BATCH_SET_FILLS_RESULT':
+          handleResult('BATCH_SET_FILLS', 'data');
+          break;
+        case 'BATCH_TRANSFORM_RESULT':
+          handleResult('BATCH_TRANSFORM', 'data');
+          break;
+
         // Document change events (for cache invalidation via WebSocket)
         case 'DOCUMENT_CHANGE':
           if (window.__wsForwardDocumentChange) window.__wsForwardDocumentChange(msg.data);
@@ -1118,6 +1184,31 @@
         // Page change events (for page tracking via WebSocket)
         case 'PAGE_CHANGE':
           if (window.__wsForwardPageChange) window.__wsForwardPageChange(msg.data);
+          break;
+
+        // Operation progress (long-running ops reset both plugin and WS timeouts)
+        case 'OPERATION_PROGRESS':
+          var progressReq = window.__figmaPendingRequests.get(msg.requestId);
+          if (progressReq && progressReq.timeoutId) {
+            clearTimeout(progressReq.timeoutId);
+            progressReq.timeoutId = setTimeout(function() {
+              if (window.__figmaPendingRequests.has(msg.requestId)) {
+                window.__figmaPendingRequests.delete(msg.requestId);
+                window.__pluginToWsId.delete(msg.requestId);
+                progressReq.reject(new Error(progressReq.type + ' timed out (no progress for 60s)'));
+              }
+            }, 60000);
+          }
+          // Forward with WS-side ID so the WS server can match its pendingRequests
+          var wsOpId = window.__pluginToWsId.get(msg.requestId) || msg.requestId;
+          if (window.__wsForwardProgress) window.__wsForwardProgress({
+            operationId: wsOpId,
+            percent: msg.percent,
+            message: msg.message,
+            itemsProcessed: msg.itemsProcessed,
+            totalItems: msg.totalItems,
+            timestamp: msg.timestamp
+          });
           break;
       }
     };

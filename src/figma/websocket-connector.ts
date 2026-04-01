@@ -344,4 +344,62 @@ export class WebSocketConnector implements IFigmaConnector {
   async getAnnotationCategories(): Promise<any> {
     return this.wsServer.sendCommand('GET_ANNOTATION_CATEGORIES', {}, 5000);
   }
+
+  // Batch operations (60s timeout — progress streaming resets if needed)
+
+  async batchSetText(
+    updates: Array<{ nodeId: string; text: string; fontFamily?: string; fontSize?: number }>,
+  ): Promise<any> {
+    return this.wsServer.sendCommand('BATCH_SET_TEXT', { updates }, 60000);
+  }
+
+  async batchSetFills(updates: Array<{ nodeId: string; fills: any[] }>): Promise<any> {
+    return this.wsServer.sendCommand('BATCH_SET_FILLS', { updates }, 60000);
+  }
+
+  async batchTransform(
+    updates: Array<{ nodeId: string; x?: number; y?: number; width?: number; height?: number }>,
+  ): Promise<any> {
+    return this.wsServer.sendCommand('BATCH_TRANSFORM', { updates }, 60000);
+  }
+
+  // Scan/discovery (60s — progress streaming resets if needed)
+
+  async scanTextNodes(nodeId?: string, maxDepth?: number, maxResults?: number): Promise<any> {
+    const params: any = {};
+    if (nodeId !== undefined) params.nodeId = nodeId;
+    if (maxDepth !== undefined) params.maxDepth = maxDepth;
+    if (maxResults !== undefined) params.maxResults = maxResults;
+    return this.wsServer.sendCommand('SCAN_TEXT_NODES', params, 60000);
+  }
+
+  // Layout
+
+  async setAutoLayout(nodeId: string, params: any): Promise<any> {
+    return this.wsServer.sendCommand('SET_AUTO_LAYOUT', { nodeId, ...params }, 10000);
+  }
+
+  // Variant switching
+
+  async setVariant(nodeId: string, variant: Record<string, string>): Promise<any> {
+    return this.wsServer.sendCommand('SET_VARIANT', { nodeId, variant }, 10000);
+  }
+
+  // Granular styles
+
+  async setTextStyle(nodeId: string, params: any): Promise<any> {
+    return this.wsServer.sendCommand('SET_TEXT_STYLE', { nodeId, ...params }, 10000);
+  }
+
+  async setEffects(nodeId: string, effects: any[]): Promise<any> {
+    return this.wsServer.sendCommand('SET_EFFECTS', { nodeId, effects }, 10000);
+  }
+
+  async setOpacity(nodeId: string, opacity: number): Promise<any> {
+    return this.wsServer.sendCommand('SET_OPACITY', { nodeId, opacity }, 5000);
+  }
+
+  async setCornerRadius(nodeId: string, params: any): Promise<any> {
+    return this.wsServer.sendCommand('SET_CORNER_RADIUS', { nodeId, ...params }, 5000);
+  }
 }
