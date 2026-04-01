@@ -40,6 +40,7 @@ Electron Main Process (src/main/)
 ├── fs-utils.ts           — File system helpers
 ├── compression/          — Context compression (config, extension-factory, design-system-cache, mutation-compressor, metrics, color-utils, execute-enricher, project-tree)
 ├── image-gen/            — Gemini-based image generation (config, generator, prompt builders)
+├── subagent/             — Read-only parallel subagents (types, config, read-only-tools, system-prompts, session-factory, context-prefetch, orchestrator, judge-harness, session-logger)
 └── tools/                — 39 ToolDefinition[] for Pi SDK (TypeBox schemas)
     ├── index.ts          — Aggregator, ToolDeps interface, textResult helper, abort-check wrapper
     ├── core.ts           — execute, screenshot, status, get_selection
@@ -144,6 +145,7 @@ node tests/electron-smoke.mjs
 - **Context compression**: `compression/` profiles tune how verbose tool results are. Active profile switchable at runtime via IPC; the extension factory reads live config on every `tool_result`.
 - **Image generation**: `image-gen/` wraps Gemini API (`@google/genai`). Tools can generate, edit, and restore images on Figma nodes. Requires a Gemini API key configured in Settings.
 - **Prompt suggester**: After each agent turn, `prompt-suggester.ts` generates follow-up suggestions via a lightweight LLM call, forwarded as clickable chips in the renderer.
+- **Read-only subagents**: `subagent/` provides parallel read-only agent sessions (scout, analyst, auditor, judge). They share a `ScopedConnector` with the parent but only get discovery/screenshot tools. The orchestrator pre-fetches common context once and runs subagents via `Promise.allSettled`. Results are structurally aggregated — no semantic deduplication. The judge harness auto-triggers after mutating turns (configurable: off/auto/ask) with optional retry loop.
 
 ## Tool Categories (49 tools)
 

@@ -44,7 +44,7 @@ export function textResult(data: unknown) {
 }
 
 /** Wrap tool execute to check abort signal before running. */
-function withAbortCheck(tool: ToolDefinition): ToolDefinition {
+export function withAbortCheck(tool: ToolDefinition): ToolDefinition {
   const original = tool.execute;
   return {
     ...tool,

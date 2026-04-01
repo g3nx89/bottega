@@ -12,6 +12,7 @@ import path from 'node:path';
 import archiver from 'archiver';
 import { app } from 'electron';
 import { createChildLogger } from '../figma/logger.js';
+import { SUBAGENT_RUNS_DIR } from './subagent/session-logger.js';
 import { getDiskStats } from './vitals.js';
 
 const log = createChildLogger({ component: 'diagnostics' });
@@ -25,6 +26,7 @@ const METRICS_DIR = path.join(BOTTEGA_DIR, 'metrics');
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB — skip oversized files
 const RETENTION_DAYS = 30;
+const SUBAGENT_RECENT_DAYS = 7;
 
 // ── System info ──────────────────────────────────
 
@@ -144,6 +146,9 @@ export function exportDiagnosticsZip(destPath: string): Promise<void> {
     const info = collectSystemInfo();
     archive.append(JSON.stringify(info, null, 2), { name: 'system-info.json' });
 
+    // 5. Recent subagent runs (last 7 days, nested batch → role.jsonl)
+    appendRecentSubdirs(archive, SUBAGENT_RUNS_DIR, 'subagent-runs', SUBAGENT_RECENT_DAYS);
+
     void archive.finalize();
   });
 }
@@ -186,6 +191,32 @@ function safeSize(filePath: string): number {
   }
 }
 
+/** Append files from subdirectories that were modified within `days` days. */
+function appendRecentSubdirs(archive: archiver.Archiver, dirPath: string, prefix: string, days: number): void {
+  if (!existsSync(dirPath)) return;
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  try {
+    for (const subDir of readdirSync(dirPath)) {
+      const subPath = path.join(dirPath, subDir);
+      const stat = lstatSync(subPath);
+      if (!stat.isDirectory() || stat.mtimeMs < cutoff) continue;
+      // Include all files within the subdirectory
+      try {
+        for (const file of readdirSync(subPath)) {
+          const filePath = path.join(subPath, file);
+          if (lstatSync(filePath).isFile() && safeSize(filePath) < MAX_FILE_BYTES) {
+            archive.file(filePath, { name: `${prefix}/${subDir}/${file}` });
+          }
+        }
+      } catch {
+        // ignore individual subdir read errors
+      }
+    }
+  } catch (err: unknown) {
+    log.warn({ err, dirPath }, 'Failed to read subagent runs for diagnostics');
+  }
+}
+
 // ── Log retention cleanup ────────────────────────
 
 /**
@@ -203,7 +234,11 @@ async function cleanDirectory(dir: string, cutoffMs: number): Promise<number> {
         const fullPath = path.join(dir, file);
         const stat = await fs.stat(fullPath);
         if (stat.mtimeMs < cutoffMs) {
-          await fs.unlink(fullPath);
+          if (stat.isDirectory()) {
+            await fs.rm(fullPath, { recursive: true, force: true });
+          } else {
+            await fs.unlink(fullPath);
+          }
           cleaned++;
         }
       } catch {
@@ -218,7 +253,9 @@ async function cleanDirectory(dir: string, cutoffMs: number): Promise<number> {
 
 export async function cleanOldLogs(): Promise<void> {
   const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  const results = await Promise.all([LOG_DIR, CRASHES_DIR, METRICS_DIR].map((dir) => cleanDirectory(dir, cutoff)));
+  const results = await Promise.all(
+    [LOG_DIR, CRASHES_DIR, METRICS_DIR, SUBAGENT_RUNS_DIR].map((dir) => cleanDirectory(dir, cutoff)),
+  );
   const cleaned = results.reduce((a, b) => a + b, 0);
   if (cleaned > 0) {
     log.info({ cleaned, retentionDays: RETENTION_DAYS }, 'Old log files cleaned up');

@@ -187,6 +187,53 @@ describe('extractRenderableMessages', () => {
     expect(extractRenderableMessages(messages)).toEqual([]);
   });
 
+  it('should skip ALL assistant messages from a multi-step judge retry', () => {
+    const messages = [
+      // Normal turn
+      { role: 'user', content: [{ type: 'text', text: 'Make a button' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Done!' }] },
+      // Judge retry (multi-step: text + tool + text)
+      { role: 'user', content: [{ type: 'text', text: '[JUDGE_RETRY]\nFix alignment' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Fixing...' },
+          { type: 'toolCall', name: 'figma_set_fills', toolCallId: 'tc-retry-1', input: {} },
+        ],
+      },
+      {
+        role: 'tool_result',
+        toolCallId: 'tc-retry-1',
+        isError: false,
+        content: [{ type: 'text', text: 'ok' }],
+      },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Now taking a screenshot...' },
+          { type: 'toolCall', name: 'figma_screenshot', toolCallId: 'tc-retry-2', input: {} },
+        ],
+      },
+      {
+        role: 'tool_result',
+        toolCallId: 'tc-retry-2',
+        isError: false,
+        content: [{ type: 'image', data: 'retry-img' }],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'Fixed the alignment.' }] },
+      // Next real user message — should NOT be skipped
+      { role: 'user', content: [{ type: 'text', text: 'Looks great!' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Thanks!' }] },
+    ];
+    const turns = extractRenderableMessages(messages);
+    // Should only have: user "Make a button", assistant "Done!", user "Looks great!", assistant "Thanks!"
+    expect(turns).toHaveLength(4);
+    expect(turns[0].text).toBe('Make a button');
+    expect(turns[1].text).toBe('Done!');
+    expect(turns[2].text).toBe('Looks great!');
+    expect(turns[3].text).toBe('Thanks!');
+  });
+
   it('should handle a realistic multi-turn conversation', () => {
     const messages = [
       { role: 'user', content: [{ type: 'text', text: 'Create a button' }] },

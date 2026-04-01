@@ -35,6 +35,8 @@ function extractText(content: any[] | undefined): string {
  * Extract renderable chat turns from Pi SDK AgentMessage[].
  * Two-pass: first collect tool results (success + screenshots), then build turns.
  */
+const JUDGE_RETRY_MARKER = '[JUDGE_RETRY]';
+
 export function extractRenderableMessages(messages: any[]): RenderableTurn[] {
   const turns: RenderableTurn[] = [];
   const toolResults = new Map<string, { success: boolean; screenshots: string[] }>();
@@ -55,6 +57,7 @@ export function extractRenderableMessages(messages: any[]): RenderableTurn[] {
   // Pass 2: build turns
   let currentAssistant: AssistantTurn | null = null;
 
+  let inRetryZone = false;
   for (const msg of messages) {
     if (msg.role === 'user') {
       if (currentAssistant && hasContent(currentAssistant)) {
@@ -62,9 +65,21 @@ export function extractRenderableMessages(messages: any[]): RenderableTurn[] {
       }
       currentAssistant = null;
       const text = extractText(msg.content);
+      // Skip judge retry prompts and their assistant responses
+      if (text.startsWith(JUDGE_RETRY_MARKER)) {
+        inRetryZone = true;
+        continue;
+      }
+      // Non-retry user message ends the retry zone
+      inRetryZone = false;
       const images = msg.content?.filter((c: any) => c.type === 'image' && c.data).map((c: any) => c.data) || [];
       if (text || images.length) turns.push({ role: 'user', text, ...(images.length ? { images } : {}) });
     } else if (msg.role === 'assistant') {
+      // Skip all assistant messages within a judge retry zone
+      if (inRetryZone) {
+        currentAssistant = null;
+        continue;
+      }
       if (currentAssistant && hasContent(currentAssistant)) {
         turns.push(currentAssistant);
       }
