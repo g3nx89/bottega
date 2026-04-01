@@ -6,6 +6,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-01
+
+### Added
+- 10 new Figma tools: batch operations (batch_set_text, batch_set_fills, batch_transform), text scanning (scan_text_nodes), auto-layout, variant switching, and granular styles (text_style, effects, opacity, corner_radius)
+- Operation progress infrastructure for long-running batch operations with WS timeout reset
+- Shared test helpers (findTool, expectTextResult) in tool-test-utils
+
+### Fixed
+- Use getNodeByIdAsync for dynamic-page document access in all new plugin handlers
+- Mixed-font text nodes no longer crash batch text and text style operations
+- Font validation before text content mutation prevents partial state on error
+- Batch fills now preserve explicit opacity from callers
+- Auto-layout sizing uses correct Figma API enum (AUTO not HUG)
+- SET_OPACITY clamps values to [0,1] matching existing handler behavior
+- Progress ID namespace mapping between plugin and WS layers
+- SCAN_TEXT_NODES yields based on visited nodes, not just results found
+- Mutation compressor now handles instance.id for variant tool compression
+
 ## [0.10.0] - 2026-03-31
 
 ### Added
