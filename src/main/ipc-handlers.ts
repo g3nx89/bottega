@@ -608,10 +608,12 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     activeBatchControllers.set(slotId, controller);
 
     try {
+      const { randomUUID } = await import('node:crypto');
+      const batchId = randomUUID();
       const wc = mainWindow.webContents;
-      safeSend(wc, 'subagent:batch-start', slotId, { batchId: '', roles: requests.map((r: any) => r.role) });
+      safeSend(wc, 'subagent:batch-start', slotId, { batchId, roles: requests.map((r: any) => r.role) });
       const { runSubagentBatch } = await import('./subagent/orchestrator.js');
-      const result = await runSubagentBatch(infra, connector, requests, settings, controller.signal, (event) =>
+      const result = await runSubagentBatch(infra, connector, requests, settings, batchId, controller.signal, (event) =>
         safeSend(wc, 'subagent:status', slotId, event),
       );
       safeSend(wc, 'subagent:batch-end', slotId, result);

@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
   dialog: {
     showSaveDialog: vi.fn().mockResolvedValue({ filePath: '/tmp/test.zip', canceled: false }),
   },
-  ipcMain: { handle: vi.fn() },
+  ipcMain: { handle: vi.fn(), on: vi.fn() },
   shell: { openExternal: vi.fn(), showItemInFolder: vi.fn() },
 }));
 
@@ -94,6 +94,7 @@ vi.mock('../../../src/main/remote-logger.js', () => ({
   loadDiagnosticsConfig: vi.fn().mockReturnValue({ sendDiagnostics: false, anonymousId: 'test-id' }),
   reloadDiagnosticsConfig: vi.fn().mockReturnValue({ sendDiagnostics: true, anonymousId: 'test-id' }),
   saveDiagnosticsConfig: vi.fn().mockResolvedValue(undefined),
+  deriveSupportCode: vi.fn().mockReturnValue('BTG-TEST-CODE'),
 }));
 
 vi.mock('../../../src/main/prompt-suggester.js', () => ({
@@ -188,6 +189,7 @@ describe('setupIpcHandlers', () => {
       },
       designSystemCache: { invalidate: vi.fn() },
       metricsCollector: { finalize: vi.fn() },
+      wsServer: { sendCommand: vi.fn() },
     };
     const mock = createMockSlotManager(mockSession);
     slotId = mock.slotId;
@@ -260,11 +262,13 @@ describe('setupIpcHandlers', () => {
       expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
     });
 
-    it('should send agent:end when agent_end event fires', () => {
+    it('should send agent:end when agent_end event fires', async () => {
       slot.isStreaming = true; // agent_end only fires while streaming
       mockSession.emitEvent({ type: 'agent_end' });
 
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
+      await vi.waitFor(() => {
+        expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
+      });
     });
 
     it('should enqueue prompts while streaming', async () => {
@@ -993,13 +997,15 @@ describe('setupIpcHandlers', () => {
       return subscribers[subscribers.length - 1];
     }
 
-    it('agent_end with empty queue sends agent:end to renderer', () => {
+    it('agent_end with empty queue sends agent:end to renderer', async () => {
       slot.isStreaming = true; // agent_end only fires while streaming
       const subscriberCb = getSubscriberCb();
 
       subscriberCb({ type: 'agent_end' });
 
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
+      await vi.waitFor(() => {
+        expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
+      });
       expect(slot.isStreaming).toBe(false);
     });
 
@@ -1010,10 +1016,9 @@ describe('setupIpcHandlers', () => {
 
       subscriberCb({ type: 'agent_end' });
 
-      // Flush the microtask queue so the .catch handler in handleAgentEnd settles
-      await Promise.resolve();
-
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:queued-prompt-start', slotId, 'next prompt');
+      await vi.waitFor(() => {
+        expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:queued-prompt-start', slotId, 'next prompt');
+      });
       expect(mockSession._promptFn).toHaveBeenCalledWith('next prompt');
       const endCalls = (mockWindow.webContents.send as any).mock.calls.filter((c: any[]) => c[0] === 'agent:end');
       expect(endCalls).toHaveLength(0);
@@ -1026,9 +1031,9 @@ describe('setupIpcHandlers', () => {
 
       subscriberCb({ type: 'agent_end' });
 
-      await Promise.resolve();
-
-      expect(mockWindow.webContents.send).toHaveBeenCalledWith('queue:updated', slotId, expect.any(Array));
+      await vi.waitFor(() => {
+        expect(mockWindow.webContents.send).toHaveBeenCalledWith('queue:updated', slotId, expect.any(Array));
+      });
     });
 
     it('agent:prompt while streaming enqueues prompt', async () => {

@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
     getAppPath: vi.fn().mockReturnValue('/mock/appPath'),
     isPackaged: false,
   },
-  ipcMain: { handle: vi.fn() },
+  ipcMain: { handle: vi.fn(), on: vi.fn() },
   shell: { openExternal: vi.fn(), showItemInFolder: vi.fn() },
 }));
 

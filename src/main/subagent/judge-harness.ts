@@ -101,6 +101,7 @@ export async function runJudgeHarness(
           },
         ],
         settings,
+        `judge-${slot.id}`,
         signal,
         callbacks.onProgress,
       );

@@ -43,10 +43,10 @@ export async function runSubagentBatch(
   connector: ScopedConnector,
   requests: SubagentRequest[],
   settings: SubagentSettings,
+  batchId: string,
   signal: AbortSignal,
   onProgress: (event: SubagentProgressEvent) => void,
 ): Promise<BatchResult> {
-  const batchId = randomUUID();
   const batchStart = Date.now();
 
   if (requests.length === 0) {

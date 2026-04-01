@@ -107,6 +107,7 @@ describe('Orchestrator Integration', () => {
         mockConnector,
         [{ role: 'scout', context: { task: 'Scan file structure' } }],
         defaultSettings,
+        'integ-batch-1',
         new AbortController().signal,
         (event) => progress.push(event),
       );
@@ -138,6 +139,7 @@ describe('Orchestrator Integration', () => {
           { role: 'auditor', context: { task: 'Audit' } },
         ],
         defaultSettings,
+        'integ-batch-2',
         new AbortController().signal,
         vi.fn(),
       );
@@ -160,6 +162,7 @@ describe('Orchestrator Integration', () => {
         mockConnector,
         [{ role: 'scout', context: { task: 'Scan' } }],
         defaultSettings,
+        'integ-batch-3',
         new AbortController().signal,
         vi.fn(),
       );
@@ -176,6 +179,7 @@ describe('Orchestrator Integration', () => {
           { role: 'auditor', context: { task: 'Count components' } },
         ],
         defaultSettings,
+        'integ-batch-4',
         new AbortController().signal,
         vi.fn(),
       );
@@ -202,6 +206,7 @@ describe('Orchestrator Integration', () => {
           { role: 'analyst', context: { task: 'Analyze' } },
         ],
         defaultSettings,
+        'integ-batch-5',
         controller.signal,
         vi.fn(),
       );
@@ -220,6 +225,7 @@ describe('Orchestrator Integration', () => {
         mockConnector,
         [{ role: 'scout', context: { task: 'Scan' } }],
         defaultSettings,
+        'integ-batch-6',
         controller.signal,
         vi.fn(),
       );
@@ -236,6 +242,7 @@ describe('Orchestrator Integration', () => {
         mockConnector,
         [],
         defaultSettings,
+        'integ-batch-7',
         new AbortController().signal,
         vi.fn(),
       );
@@ -256,6 +263,7 @@ describe('Orchestrator Integration', () => {
         mockConnector,
         [{ role: 'scout', context: { task: 'Scan' } }],
         defaultSettings,
+        'integ-batch-8',
         new AbortController().signal,
         badProgress,
       );

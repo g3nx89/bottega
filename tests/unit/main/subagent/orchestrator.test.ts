@@ -76,6 +76,7 @@ describe('Orchestrator', () => {
         mockConnector,
         [],
         defaultSettings,
+        'test-batch-1',
         new AbortController().signal,
         vi.fn(),
       );
@@ -90,6 +91,7 @@ describe('Orchestrator', () => {
         mockConnector,
         [],
         defaultSettings,
+        'test-batch-2',
         new AbortController().signal,
         vi.fn(),
       );
@@ -105,6 +107,7 @@ describe('Orchestrator', () => {
         mockConnector,
         [{ role: 'scout', context: { task: 'test' } }],
         defaultSettings,
+        'test-batch-abort',
         controller.signal,
         vi.fn(),
       );
@@ -118,6 +121,7 @@ describe('Orchestrator', () => {
         mockConnector,
         [{ role: 'scout', context: { task: 'test' } }],
         defaultSettings,
+        'test-batch-progress',
         new AbortController().signal,
         onProgress,
       );

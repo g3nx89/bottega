@@ -32,7 +32,7 @@ export async function writeSubagentLog(batchId: string, role: string, events: un
 
     if (lines.length === 0) return;
 
-    await fs.writeFile(path.join(dir, `${role}.jsonl`), lines.join('\n') + '\n', { mode: 0o600 });
+    await fs.writeFile(path.join(dir, `${role}.jsonl`), lines.join('\n') + '\n', { mode: 0o600, flag: 'a' });
   } catch (err) {
     log.warn({ err, batchId, role }, 'Failed to write subagent log');
   }

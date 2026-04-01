@@ -15,6 +15,7 @@ export function createMockIpc() {
     handle: vi.fn((channel: string, handler: (...args: any[]) => any) => {
       handlers.set(channel, handler);
     }),
+    on: vi.fn(),
   };
 
   return {

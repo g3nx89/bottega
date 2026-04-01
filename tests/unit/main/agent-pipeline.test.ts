@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 // Mock electron
 vi.mock('electron', () => ({
-  ipcMain: { handle: vi.fn() },
+  ipcMain: { handle: vi.fn(), on: vi.fn() },
   shell: { openExternal: vi.fn() },
 }));
 
@@ -108,6 +108,7 @@ describe('Agent pipeline with ScriptedSession', () => {
       },
       designSystemCache: { invalidate: vi.fn() },
       metricsCollector: { finalize: vi.fn() },
+      wsServer: { sendCommand: vi.fn() },
     };
     const { slotManager, slot, slotId: id } = createMockSlotManager(session);
     slotId = id;

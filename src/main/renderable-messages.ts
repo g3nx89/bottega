@@ -70,8 +70,11 @@ export function extractRenderableMessages(messages: any[]): RenderableTurn[] {
         inRetryZone = true;
         continue;
       }
-      // Non-retry user message ends the retry zone
-      inRetryZone = false;
+      // Non-retry user message ends the retry zone, but ignore tool results
+      const isToolResult = msg.content?.some((c: any) => c.type === 'tool_result');
+      if (!isToolResult) {
+        inRetryZone = false;
+      }
       const images = msg.content?.filter((c: any) => c.type === 'image' && c.data).map((c: any) => c.data) || [];
       if (text || images.length) turns.push({ role: 'user', text, ...(images.length ? { images } : {}) });
     } else if (msg.role === 'assistant') {
