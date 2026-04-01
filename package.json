@@ -44,13 +44,13 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.8",
+    "@biomejs/biome": "^2.4.10",
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
     "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.58.2",
+    "@playwright/test": "^1.59.1",
     "@types/archiver": "^7.0.0",
-    "@types/node": "^22.0.0",
+    "@types/node": "^25.5.0",
     "@types/ws": "^8.18.0",
     "@vitest/coverage-v8": "^4.1.2",
     "concurrently": "^9.2.1",
@@ -58,10 +58,10 @@
     "electron-builder": "^26.0.0",
     "eslint": "^10.1.0",
     "husky": "^9.1.7",
-    "knip": "^6.0.6",
+    "knip": "^6.2.0",
     "lint-staged": "^16.4.0",
-    "typescript": "^5.8.0",
-    "typescript-eslint": "^8.57.2",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.58.0",
     "vitest": "^4.1.0"
   },
   "lint-staged": {
