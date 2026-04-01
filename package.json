@@ -24,7 +24,7 @@
     "benchmark:extraction": "tsx scripts/benchmark-extraction.ts",
     "check": "npm run validate",
     "validate": "concurrently -g npm:typecheck npm:lint npm:lint:types && concurrently -g npm:test npm:lint:dead npm:audit:deps",
-    "audit:deps": "npm audit --audit-level=high",
+    "audit:deps": "npm audit --audit-level=critical",
     "package": "npm run build && npx electron-builder --mac",
     "prepare": "husky"
   },

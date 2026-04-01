@@ -129,12 +129,10 @@ export async function createBottegaTestSession(options: BottegaTestSessionOption
   await resourceLoader.reload();
 
   // 5. Create a real Pi SDK model reference (never actually called — playbook replaces streamFn)
-  // Set dummy API key if missing — the model is never invoked (playbook replaces streamFn),
-  // but getModel() validates the key exists at construction time.
-  const hadKey = !!process.env.ANTHROPIC_API_KEY;
-  if (!hadKey) process.env.ANTHROPIC_API_KEY = 'test-key-not-used';
+  // Set dummy API key if missing — the model/session validate the key at construction AND
+  // at prompt() time, but the playbook replaces streamFn so no real API call is made.
+  if (!process.env.ANTHROPIC_API_KEY) process.env.ANTHROPIC_API_KEY = 'test-key-not-used';
   const model = getModel('anthropic', 'claude-sonnet-4-6');
-  if (!hadKey) delete process.env.ANTHROPIC_API_KEY;
 
   // 6. Create real agent session
   const sessionManager = SessionManager.inMemory();
