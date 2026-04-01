@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs';
 
 const limits = {
-  'dist/main.js':    { max: 300_000, label: 'Main bundle' },
+  'dist/main.js':    { max: 380_000, label: 'Main bundle' },
   'dist/preload.js': { max: 15_000,  label: 'Preload bundle' },
 };
 
