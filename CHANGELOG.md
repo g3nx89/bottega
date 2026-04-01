@@ -6,6 +6,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-04-02
+
+### Added
+- Semantic extraction pipeline with composable extractors and YAML output
+- Read-only parallel subagents with judge harness (scout, analyst, auditor, judge)
+- Support code, auth telemetry, session tracking, and empty turn warning
+
+### Fixed
+- Missing batchId parameter in runSubagentBatch callers
+- CI: playbook tests no longer require Anthropic API key
+- CI: biome lint error in orchestrator-abort test
+
 ## [0.11.0] - 2026-04-01
 
 ### Added
@@ -212,7 +224,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 - Settings panel with window transparency slider
 - Graceful shutdown, persistent WS reconnect, pin window, structured logging
 
-[Unreleased]: https://github.com/g3nx89/bottega/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/g3nx89/bottega/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/g3nx89/bottega/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/g3nx89/bottega/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/g3nx89/bottega/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/g3nx89/bottega/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/g3nx89/bottega/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/g3nx89/bottega/compare/v0.6.0...v0.7.0

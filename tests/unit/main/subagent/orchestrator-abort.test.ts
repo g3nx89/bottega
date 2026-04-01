@@ -36,7 +36,7 @@ vi.mock('../../../../src/main/subagent/session-factory.js', () => ({
 }));
 
 vi.mock('../../../../src/main/subagent/context-prefetch.js', () => ({
-  prefetchCommonContext: vi.fn().mockImplementation(async (tools, signal) => {
+  prefetchCommonContext: vi.fn().mockImplementation(async (_tools, signal) => {
     // Simulate that prefetch respects abort signal
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {

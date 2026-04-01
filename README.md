@@ -6,13 +6,13 @@ A macOS desktop app for **design pair-programming**. Describe what you want in n
 [![CI](https://github.com/g3nx89/bottega/actions/workflows/ci.yml/badge.svg)](https://github.com/g3nx89/bottega/actions/workflows/ci.yml)
 ![Electron](https://img.shields.io/badge/Electron-33-47848F?logo=electron)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript)
-![Pi SDK](https://img.shields.io/badge/Pi%20SDK-0.61-blue)
+![Pi SDK](https://img.shields.io/badge/Pi%20SDK-0.64-blue)
 ![License](https://img.shields.io/badge/license-private-lightgrey)
 
 ## How It Works
 
 1. **You chat** — type a natural-language request in the Bottega window.
-2. **The agent plans** — powered by [Pi SDK](https://github.com/nicolevanderhoeven/pi-coding-agent), it picks from 39 Figma tools to fulfill your request.
+2. **The agent plans** — powered by [Pi SDK](https://github.com/nicolevanderhoeven/pi-coding-agent), it picks from 49 Figma tools to fulfill your request.
 3. **Figma updates live** — a WebSocket bridge plugin relays commands to Figma Desktop in real time.
 4. **Visual verification** — the agent takes screenshots, checks its own work, and iterates if needed.
 
@@ -26,7 +26,7 @@ A macOS desktop app for **design pair-programming**. Describe what you want in n
 ## Features
 
 - **Multi-model support** — Claude (Anthropic), GPT (OpenAI), and Gemini (Google) via Pi SDK OAuth
-- **39 design tools** — create, modify, discover, and lint design elements without leaving the chat
+- **49 design tools** — create, modify, discover, and lint design elements without leaving the chat
 - **JSX rendering** — describe complex layouts in JSX; they're parsed and created in Figma in a single roundtrip
 - **Component discovery** — search local and library components, instantiate them, override properties
 - **Design tokens** — set up variable collections, lint for token compliance
@@ -94,7 +94,7 @@ src/
 │   ├── prompt-suggester.ts  # Follow-up suggestion chips
 │   ├── compression/         # Context compression profiles & metrics
 │   ├── image-gen/           # Gemini-based image generation
-│   └── tools/               # 39 ToolDefinition[] for Pi SDK
+│   └── tools/               # 49 ToolDefinition[] for Pi SDK
 │       ├── core.ts          # execute, screenshot, status, get_selection
 │       ├── discovery.ts     # file data, components, design system
 │       ├── components.ts    # instantiate, properties, arrange
@@ -130,11 +130,14 @@ figma-desktop-bridge/        # Figma plugin (forked from figma-console-mcp)
 | Category | Count | Examples |
 |----------|-------|---------|
 | Core | 4 | `figma_execute`, `figma_screenshot`, `figma_status`, `figma_get_selection` |
-| Discovery | 6 | `figma_search_components`, `figma_get_library_components`, `figma_design_system` |
-| Components | 4 | `figma_instantiate`, `figma_set_instance_properties`, `figma_arrange_component_set` |
-| Annotations | 3 | `figma_get_annotations`, `figma_set_annotations`, `figma_get_annotation_categories` |
+| Discovery | 8 | `figma_search_components`, `figma_get_library_components`, `figma_design_system`, `figma_scan_text_nodes` |
+| Batch | 3 | `figma_batch_set_text`, `figma_batch_set_fills`, `figma_batch_transform` |
+| Components | 4 | `figma_instantiate`, `figma_set_instance_properties`, `figma_arrange_component_set`, `figma_set_variant` |
 | Manipulation | 10 | `figma_set_fills`, `figma_set_text`, `figma_resize`, `figma_move`, `figma_create_child` |
+| Layout | 1 | `figma_auto_layout` |
+| Style | 4 | `figma_set_text_style`, `figma_set_effects`, `figma_set_opacity`, `figma_set_corner_radius` |
 | Tokens | 2 | `figma_setup_tokens`, `figma_lint` |
+| Annotations | 3 | `figma_get_annotations`, `figma_set_annotations`, `figma_get_annotation_categories` |
 | JSX Render | 3 | `figma_render_jsx`, `figma_create_icon`, `figma_bind_variable` |
 | Image Gen | 7 | `figma_generate_image`, `figma_edit_image`, `figma_generate_pattern` |
 
