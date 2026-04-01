@@ -13,6 +13,7 @@
 export {
   createAxiomTransport,
   type DiagnosticsConfig,
+  deriveSupportCode,
   generateSessionUid,
   loadDiagnosticsConfig,
   REDACT_PATHS,

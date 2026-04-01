@@ -62,6 +62,19 @@ function saveDiagnosticsConfigSync(config: DiagnosticsConfig): void {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config), { encoding: 'utf8', mode: 0o600 });
 }
 
+// ── Support code ────────────────────────────────
+
+/**
+ * Derive a short, human-readable support code from the anonymousId UUID.
+ * Format: BTG-XXXX-XXXX (8 hex chars from the UUID, uppercase).
+ * Users share this via chat/email for support; we search Axiom with
+ * `anonymousId startswith "xxxx"` + confirm with the second segment.
+ */
+export function deriveSupportCode(anonymousId: string): string {
+  const hex = anonymousId.replace(/-/g, '').toUpperCase();
+  return `BTG-${hex.slice(0, 4)}-${hex.slice(4, 8)}`;
+}
+
 // ── Session UID ──────────────────────────────────
 
 /** Short session ID generated per app launch for log correlation. */

@@ -63,12 +63,16 @@ export function captureVitals(eld?: ReturnType<typeof monitorEventLoopDelay>): V
 
 // ── Settings snapshot ────────────────────────────
 
+export interface AuthStatusEntry {
+  type: 'oauth' | 'api_key' | 'none';
+}
+
 export interface SettingsSnapshotData {
   model: { provider: string; modelId: string };
   thinkingLevel: string;
   compressionProfile: string;
   contextSize: number;
-  auth: Record<string, string>;
+  auth: Record<string, AuthStatusEntry>;
   imageGen: { hasKey: boolean; model: string };
   windowPinned: boolean;
   windowOpacity: number;
@@ -84,7 +88,7 @@ export interface SettingsRefs {
   getThinkingLevel?: () => string;
   getCompressionProfile?: () => string;
   getContextSize?: () => number;
-  getAuthStatus?: () => Record<string, string>;
+  getAuthStatus?: () => Record<string, AuthStatusEntry>;
   getImageGenInfo?: () => { hasKey: boolean; model: string };
   getWindowPinned?: () => boolean;
   getWindowOpacity?: () => number;
@@ -102,7 +106,7 @@ export function captureSettings(refs: SettingsRefs): SettingsSnapshotData {
     thinkingLevel: getOr(refs.getThinkingLevel, 'unknown'),
     compressionProfile: getOr(refs.getCompressionProfile, 'unknown'),
     contextSize: getOr(refs.getContextSize, 0),
-    auth: getOr(refs.getAuthStatus, {}),
+    auth: getOr(refs.getAuthStatus, {} as Record<string, AuthStatusEntry>),
     imageGen: getOr(refs.getImageGenInfo, { hasKey: false, model: 'unknown' }),
     windowPinned: getOr(refs.getWindowPinned, false),
     windowOpacity: getOr(refs.getWindowOpacity, 1.0),

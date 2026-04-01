@@ -4,12 +4,15 @@
  */
 import { randomUUID } from 'node:crypto';
 import { createChildLogger } from '../figma/logger.js';
+import type { AgentInfra } from './agent.js';
 import { categorizeToolName } from './compression/metrics.js';
 import type { AgentSessionLike } from './ipc-handlers.js';
-import { MSG_REQUEST_FAILED_FALLBACK } from './messages.js';
+import { MSG_EMPTY_TURN_WARNING, MSG_REQUEST_FAILED_FALLBACK } from './messages.js';
 import type { UsageTracker } from './remote-logger.js';
 import { safeSend } from './safe-send.js';
 import type { SessionSlot, SlotManager } from './slot-manager.js';
+import { loadSubagentSettings } from './subagent/config.js';
+import { abortActiveJudge, runJudgeHarness } from './subagent/judge-harness.js';
 
 const log = createChildLogger({ component: 'session-events' });
 
@@ -19,6 +22,10 @@ export interface EventRouterDeps {
   usageTracker?: UsageTracker;
   persistSlotSession: (slot: SessionSlot) => void;
   contextSizes: Record<string, number>;
+  /** Agent infrastructure — needed to spawn judge subagents. */
+  infra?: AgentInfra;
+  /** Get ScopedConnector for a slot — needed for judge subagent tools. */
+  getConnectorForSlot?: (slot: SessionSlot) => import('./scoped-connector.js').ScopedConnector | null;
 }
 
 /** Initialize a new turn on the slot: assign promptId, increment turnIndex, track prompt. */
@@ -39,6 +46,9 @@ export function createEventRouter(deps: EventRouterDeps) {
   const { slotManager, mainWindow, usageTracker, persistSlotSession, contextSizes } = deps;
   const toolStartTimes = new Map<string, number>();
   const subscribedSessions = new WeakSet<AgentSessionLike>();
+  // Re-entrancy guard: prevents recursive handleAgentEnd when judge retry fires agent_end.
+  // Also suppresses streaming events (text_delta, tool_start, etc.) during judge retry.
+  const judgeInProgress = new Set<string>();
 
   // ── Per-turn accumulators (keyed by slotId) ──
   const turnToolNames = new Map<string, string[]>();
@@ -54,6 +64,8 @@ export function createEventRouter(deps: EventRouterDeps) {
   }
 
   function handleMessageUpdate(wc: Electron.WebContents, slot: SessionSlot, event: any) {
+    // Suppress streaming during judge retry — internal repair should not leak into chat
+    if (judgeInProgress.has(slot.id)) return;
     if (event.assistantMessageEvent?.type === 'text_delta') {
       safeSend(wc, 'agent:text-delta', slot.id, event.assistantMessageEvent.delta);
       slot.suggester.appendAssistantText(event.assistantMessageEvent.delta);
@@ -69,6 +81,7 @@ export function createEventRouter(deps: EventRouterDeps) {
   const toolInputs = new Map<string, any>();
 
   function handleToolStart(wc: Electron.WebContents, slot: SessionSlot, event: any) {
+    if (judgeInProgress.has(slot.id)) return;
     log.info({ tool: event.toolName, callId: event.toolCallId, slotId: slot.id }, 'Tool start');
     safeSend(wc, 'agent:tool-start', slot.id, event.toolName, event.toolCallId);
     toolStartTimes.set(event.toolCallId, Date.now());
@@ -82,6 +95,7 @@ export function createEventRouter(deps: EventRouterDeps) {
   }
 
   function handleToolEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
+    if (judgeInProgress.has(slot.id)) return;
     const resultPreview = event.result?.content
       ? event.result.content.map((c: any) => ({
           type: c.type,
@@ -130,6 +144,7 @@ export function createEventRouter(deps: EventRouterDeps) {
   }
 
   function handleMessageEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
+    if (judgeInProgress.has(slot.id)) return;
     const msg = event.message;
     if (msg?.role === 'assistant' && msg.usage) {
       // input = non-cached tokens, cacheRead/cacheWrite = cached tokens
@@ -199,8 +214,70 @@ export function createEventRouter(deps: EventRouterDeps) {
     slot.promptStartTime = null;
   }
 
-  function handleAgentEnd(wc: Electron.WebContents, slot: SessionSlot) {
+  async function handleAgentEnd(wc: Electron.WebContents, slot: SessionSlot) {
     if (!slot.isStreaming) return;
+    // Re-entrancy guard: judge retry fires agent_end recursively — skip nested calls
+    if (judgeInProgress.has(slot.id)) return;
+
+    const toolNames = turnToolNames.get(slot.id) ?? [];
+
+    // Auto-judge: run BEFORE finalizeTurn so retry turns get proper turn tracking
+    if (deps.infra && deps.getConnectorForSlot) {
+      const settings = loadSubagentSettings();
+      if (settings.judgeMode === 'auto') {
+        const connector = deps.getConnectorForSlot(slot);
+        // Check mutation precondition before emitting judge:running to avoid bogus UI state
+        const hasMutations = toolNames.some((n) => {
+          const cat = categorizeToolName(n);
+          return cat === 'mutation';
+        });
+        if (connector && hasMutations) {
+          judgeInProgress.add(slot.id);
+          const judgeStart = Date.now();
+          try {
+            safeSend(wc, 'judge:running', slot.id);
+            const verdict = await runJudgeHarness(
+              deps.infra,
+              connector,
+              slot,
+              settings,
+              toolNames,
+              new AbortController().signal,
+              {
+                onProgress: (event) => safeSend(wc, 'subagent:status', slot.id, event),
+                onVerdict: (v, attempt, max) => safeSend(wc, 'judge:verdict', slot.id, v, attempt, max),
+                onRetryStart: (attempt, max) => safeSend(wc, 'judge:retry-start', slot.id, attempt, max),
+              },
+            );
+            if (verdict) {
+              usageTracker?.trackJudgeVerdict({
+                batchId: slot.id,
+                verdict: verdict.verdict,
+                attempt: 1,
+                maxAttempts: settings.autoRetry ? settings.maxRetries + 1 : 1,
+                failedCriteria: verdict.criteria.filter((c) => !c.pass).map((c) => c.name),
+                durationMs: Date.now() - judgeStart,
+              });
+            }
+          } catch (err) {
+            log.warn({ err, slotId: slot.id }, 'Judge harness error in agent_end');
+          } finally {
+            judgeInProgress.delete(slot.id);
+          }
+        }
+      }
+    }
+
+    // Re-check after async judge await: user may have aborted while judge was running
+    if (!slot.isStreaming) return;
+
+    // Empty-turn detection: no text and no tool calls means the API call likely failed silently
+    const responseLength = turnResponseLength.get(slot.id) ?? 0;
+    const toolNamesForCheck = turnToolNames.get(slot.id) ?? [];
+    if (responseLength === 0 && toolNamesForCheck.length === 0) {
+      safeSend(wc, 'agent:text-delta', slot.id, MSG_EMPTY_TURN_WARNING);
+    }
+
     finalizeTurn(slot);
     const next = slot.promptQueue.dequeue();
     if (next) {
@@ -245,7 +322,9 @@ export function createEventRouter(deps: EventRouterDeps) {
     tool_execution_start: handleToolStart,
     tool_execution_end: handleToolEnd,
     message_end: handleMessageEnd,
-    agent_end: (wc, slot) => handleAgentEnd(wc, slot),
+    agent_end: (wc, slot) => {
+      handleAgentEnd(wc, slot).catch((err) => log.error({ err, slotId: slot.id }, 'agent_end handler error'));
+    },
     auto_compaction_start: (wc, slot) => safeSend(wc, 'agent:compaction', slot.id, true),
     auto_compaction_end: (wc, slot) => {
       safeSend(wc, 'agent:compaction', slot.id, false);
@@ -275,5 +354,9 @@ export function createEventRouter(deps: EventRouterDeps) {
     },
     /** Clean up per-turn accumulators for a slot (e.g. after a failed prompt). */
     finalizeTurn,
+    /** Abort any running judge for a slot (called from user abort). Delegates to judge-harness. */
+    abortJudge(slotId: string): void {
+      abortActiveJudge(slotId);
+    },
   };
 }

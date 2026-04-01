@@ -144,6 +144,29 @@ export class UsageTracker {
     this.emit('usage:session_start', { model, contextSize });
   }
 
+  trackSessionCreated(data: {
+    slotId: string;
+    provider: string;
+    modelId: string;
+    toolCount: number;
+    fileKeyHash?: string;
+  }): void {
+    this.emit('usage:session_created', data);
+  }
+
+  trackSessionCreationFailed(data: {
+    slotId?: string;
+    provider: string;
+    modelId: string;
+    errorMessage: string;
+    fileKeyHash?: string;
+  }): void {
+    this.emit('usage:session_creation_failed', {
+      ...data,
+      errorMessage: redactMessage(data.errorMessage),
+    });
+  }
+
   trackSessionEnd(data: {
     durationMs: number;
     totalToolCalls: number;
@@ -364,5 +387,103 @@ export class UsageTracker {
     totalItems?: number;
   }): void {
     this.emit('usage:operation_progress', data);
+  }
+
+  // ── Subagent events ──────────────────
+
+  trackSubagentBatchStart(data: {
+    batchId: string;
+    batchSize: number;
+    roles: string[];
+    context?: { promptId?: string; slotId?: string; turnIndex?: number };
+  }): void {
+    this.emit('usage:subagent_batch_start', {
+      batchId: data.batchId,
+      batchSize: data.batchSize,
+      roles: data.roles,
+      ...spreadTurnContext(data.context),
+    });
+  }
+
+  trackSubagentCompleted(data: {
+    batchId: string;
+    subagentId: string;
+    role: string;
+    model: string;
+    durationMs: number;
+    tokenUsage: { input: number; output: number };
+    status: 'completed' | 'error' | 'aborted';
+    toolCallCount: number;
+    errorMessage?: string;
+    context?: { promptId?: string; slotId?: string; turnIndex?: number };
+  }): void {
+    this.emit('usage:subagent_completed', {
+      batchId: data.batchId,
+      subagentId: data.subagentId,
+      role: data.role,
+      model: data.model,
+      durationMs: data.durationMs,
+      tokenUsage: data.tokenUsage,
+      status: data.status,
+      toolCallCount: data.toolCallCount,
+      ...(data.errorMessage && { errorMessage: redactMessage(data.errorMessage) }),
+      ...spreadTurnContext(data.context),
+    });
+  }
+
+  trackSubagentBatchEnd(data: {
+    batchId: string;
+    totalDurationMs: number;
+    totalTokens: number;
+    completedCount: number;
+    errorCount: number;
+    abortedCount: number;
+    context?: { promptId?: string; slotId?: string; turnIndex?: number };
+  }): void {
+    this.emit('usage:subagent_batch_end', {
+      batchId: data.batchId,
+      totalDurationMs: data.totalDurationMs,
+      totalTokens: data.totalTokens,
+      completedCount: data.completedCount,
+      errorCount: data.errorCount,
+      abortedCount: data.abortedCount,
+      ...spreadTurnContext(data.context),
+    });
+  }
+
+  trackJudgeVerdict(data: {
+    batchId: string;
+    verdict: 'PASS' | 'FAIL';
+    attempt: number;
+    maxAttempts: number;
+    failedCriteria: string[];
+    durationMs: number;
+    context?: { promptId?: string; slotId?: string; turnIndex?: number };
+  }): void {
+    this.emit('usage:judge_verdict', {
+      batchId: data.batchId,
+      verdict: data.verdict,
+      attempt: data.attempt,
+      maxAttempts: data.maxAttempts,
+      failedCriteria: data.failedCriteria,
+      durationMs: data.durationMs,
+      ...spreadTurnContext(data.context),
+    });
+  }
+
+  trackSubagentAborted(data: {
+    batchId: string;
+    reason: 'user_stop' | 'timeout' | 'slot_removed' | 'model_switch' | 'app_quit';
+    completedCount: number;
+    totalCount: number;
+    context?: { promptId?: string; slotId?: string; turnIndex?: number };
+  }): void {
+    this.emit('usage:subagent_aborted', {
+      batchId: data.batchId,
+      reason: data.reason,
+      completedCount: data.completedCount,
+      totalCount: data.totalCount,
+      ...spreadTurnContext(data.context),
+    });
   }
 }

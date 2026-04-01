@@ -520,6 +520,112 @@ if (compressionRefreshBtn) {
   });
 }
 
+// ── Subagent settings ────────────────────
+
+const judgeModeSelect = document.getElementById('judge-mode-select');
+const autoRetryToggle = document.getElementById('auto-retry-toggle');
+const maxRetriesInput = document.getElementById('max-retries-input');
+const maxRetriesRow = document.getElementById('max-retries-row');
+
+function updateMaxRetriesVisibility() {
+  if (maxRetriesRow && autoRetryToggle) {
+    maxRetriesRow.style.display = autoRetryToggle.checked ? '' : 'none';
+  }
+}
+
+async function loadSubagentSettings() {
+  if (!judgeModeSelect) return;
+  try {
+    const config = await window.api.getSubagentConfig();
+    judgeModeSelect.value = config.judgeMode || 'ask';
+    if (autoRetryToggle) autoRetryToggle.checked = config.autoRetry || false;
+    if (maxRetriesInput) maxRetriesInput.value = config.maxRetries || 2;
+    updateMaxRetriesVisibility();
+    // Set per-role model selects
+    if (config.models) {
+      for (const [role, mc] of Object.entries(config.models)) {
+        const select = roleModelSelects[role];
+        if (select && mc) select.value = `${mc.provider}:${mc.modelId}`;
+      }
+    }
+  } catch (err) {
+    // biome-ignore lint/suspicious/noConsole: renderer has no structured logger
+    console.warn('Failed to load subagent config:', err);
+  }
+}
+
+async function saveSubagentSettings() {
+  if (!judgeModeSelect) return;
+  try {
+    // Merge with current config to preserve models and other fields
+    const current = await window.api.getSubagentConfig();
+    // Collect per-role model configs from dropdowns
+    const models = { ...(current.models || {}) };
+    for (const [role, select] of Object.entries(roleModelSelects)) {
+      if (select && select.value) {
+        const [provider, modelId] = select.value.split(':');
+        if (provider && modelId) models[role] = { provider, modelId };
+      }
+    }
+    await window.api.setSubagentConfig({
+      ...current,
+      models,
+      judgeMode: judgeModeSelect.value,
+      autoRetry: autoRetryToggle?.checked || false,
+      maxRetries: Number.parseInt(maxRetriesInput?.value || '2', 10),
+    });
+  } catch (err) {
+    // biome-ignore lint/suspicious/noConsole: renderer has no structured logger
+    console.warn('Failed to save subagent config:', err);
+  }
+}
+
+// Per-role model selects
+const roleModelSelects = {
+  scout: document.getElementById('model-scout'),
+  analyst: document.getElementById('model-analyst'),
+  auditor: document.getElementById('model-auditor'),
+  judge: document.getElementById('model-judge'),
+};
+
+async function populateRoleModelSelects() {
+  try {
+    const modelsData = await window.api.getModels();
+    for (const select of Object.values(roleModelSelects)) {
+      if (!select) continue;
+      clearChildren(select);
+      for (const models of Object.values(modelsData)) {
+        for (const m of models) {
+          const opt = document.createElement('option');
+          opt.value = `${m.sdkProvider}:${m.id}`;
+          opt.textContent = m.label;
+          select.appendChild(opt);
+        }
+      }
+    }
+  } catch (err) {
+    // biome-ignore lint/suspicious/noConsole: renderer has no structured logger
+    console.warn('Failed to populate role model selects:', err);
+  }
+}
+
+if (judgeModeSelect) {
+  populateRoleModelSelects().then(() => loadSubagentSettings());
+  judgeModeSelect.addEventListener('change', saveSubagentSettings);
+}
+if (autoRetryToggle) {
+  autoRetryToggle.addEventListener('change', () => {
+    updateMaxRetriesVisibility();
+    saveSubagentSettings();
+  });
+}
+if (maxRetriesInput) {
+  maxRetriesInput.addEventListener('change', saveSubagentSettings);
+}
+for (const select of Object.values(roleModelSelects)) {
+  if (select) select.addEventListener('change', saveSubagentSettings);
+}
+
 // ── Figma Plugin setup ──────────────────
 
 const setupFigmaBtn = document.getElementById('setup-figma-btn');
@@ -582,6 +688,35 @@ if (setupFigmaBtn) {
       }
     })
     .catch(() => {});
+}
+
+// ── Support Code ───────────────────────
+
+const supportCodeValue = document.getElementById('support-code-value');
+const copySupportCodeBtn = document.getElementById('copy-support-code-btn');
+
+if (supportCodeValue) {
+  window.api
+    .getSupportCode()
+    .then((code) => {
+      supportCodeValue.textContent = code;
+    })
+    .catch(() => {
+      supportCodeValue.textContent = '---';
+    });
+}
+
+if (copySupportCodeBtn) {
+  copySupportCodeBtn.addEventListener('click', async () => {
+    const code = supportCodeValue?.textContent;
+    if (code && code !== '---') {
+      await navigator.clipboard.writeText(code);
+      copySupportCodeBtn.textContent = '\u2713';
+      setTimeout(() => {
+        copySupportCodeBtn.textContent = '\u2398';
+      }, 1500);
+    }
+  });
 }
 
 // ── Diagnostics ─────────────────────────

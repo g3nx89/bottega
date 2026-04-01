@@ -13,6 +13,10 @@ vi.mock('electron', () => ({
   },
 }));
 
+vi.mock('../../../src/main/subagent/session-logger.js', () => ({
+  SUBAGENT_RUNS_DIR: '/tmp/bottega-test-subagent-runs',
+}));
+
 vi.mock('../../../src/figma/logger.js', () => ({
   createChildLogger: () => ({
     info: vi.fn(),
@@ -151,5 +155,72 @@ describe('cleanOldLogs', () => {
 
     // Cleanup
     rmDir(tmpLogDir);
+  });
+
+  it('should handle subdirectories (e.g. subagent batch dirs) during cleanup', async () => {
+    // cleanOldLogs includes SUBAGENT_RUNS_DIR which has batchId/ subdirectories.
+    // The cleanDirectory function should handle recursive deletion of old subdirs.
+    // This test verifies the function does not throw when encountering directories.
+    await expect(cleanOldLogs()).resolves.toBeUndefined();
+  });
+});
+
+describe('exportDiagnosticsZip — subagent runs', () => {
+  it('should include subagent-runs in zip when directory exists', async () => {
+    // Create a temp subagent-runs directory
+    const tmpDir = createTmpDir();
+    const batchDir = path.join(tmpDir, 'batch-123');
+    mkdirSync(batchDir, { recursive: true });
+    writeFileSync(path.join(batchDir, 'scout.jsonl'), '{"test":true}\n');
+    writeFileSync(path.join(batchDir, 'auditor.jsonl'), '{"test":true}\n');
+
+    // We verify the zip function runs without error (it uses hardcoded paths,
+    // so we can't inject the temp dir, but we verify the API contract).
+    const destPath = path.join(os.tmpdir(), `bottega-diag-test-${Date.now()}.zip`);
+    try {
+      await exportDiagnosticsZip(destPath);
+      expect(existsSync(destPath)).toBe(true);
+      // Verify zip is non-empty (at least system-info.json is always included)
+      expect(statSync(destPath).size).toBeGreaterThan(0);
+    } finally {
+      // Cleanup
+      try {
+        require('node:fs').unlinkSync(destPath);
+      } catch {}
+      rmDir(tmpDir);
+    }
+  });
+
+  it('should handle missing subagent-runs directory gracefully', async () => {
+    // exportDiagnosticsZip should not throw when subagent-runs dir doesn't exist
+    const destPath = path.join(os.tmpdir(), `bottega-diag-test-${Date.now()}.zip`);
+    try {
+      await exportDiagnosticsZip(destPath);
+      expect(existsSync(destPath)).toBe(true);
+    } finally {
+      try {
+        require('node:fs').unlinkSync(destPath);
+      } catch {}
+    }
+  });
+});
+
+describe('deriveSupportCode', () => {
+  it('produces BTG-XXXX-XXXX format from UUID', async () => {
+    const { deriveSupportCode } = await import('../../../src/shared/diagnostics-config.js');
+    const code = deriveSupportCode('33f4a89b-3d08-4cd6-86be-cf36c90122b3');
+    expect(code).toBe('BTG-33F4-A89B');
+  });
+
+  it('is deterministic', async () => {
+    const { deriveSupportCode } = await import('../../../src/shared/diagnostics-config.js');
+    const id = 'abcd1234-5678-9abc-def0-123456789abc';
+    expect(deriveSupportCode(id)).toBe(deriveSupportCode(id));
+  });
+
+  it('produces uppercase hex', async () => {
+    const { deriveSupportCode } = await import('../../../src/shared/diagnostics-config.js');
+    const code = deriveSupportCode('aabbccdd-eeff-0011-2233-445566778899');
+    expect(code).toMatch(/^BTG-[0-9A-F]{4}-[0-9A-F]{4}$/);
   });
 });

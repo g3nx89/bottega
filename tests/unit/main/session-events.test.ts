@@ -6,12 +6,25 @@ vi.mock('../../../src/figma/logger.js', () => ({
   createChildLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), fatal: vi.fn() }),
 }));
 
-vi.mock('../../../src/main/compression/metrics.js', () => ({
-  categorizeToolName: (name: string) => (name.includes('screenshot') ? 'screenshot' : 'core'),
+vi.mock('../../../src/main/compression/metrics.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/main/compression/metrics.js')>();
+  return {
+    ...actual,
+    categorizeToolName: vi.fn((name: string) => (name.includes('screenshot') ? 'screenshot' : 'core')),
+  };
+});
+
+vi.mock('../../../src/main/subagent/config.js', () => ({
+  loadSubagentSettings: vi.fn(() => ({ judgeMode: 'off', autoRetry: false, maxRetries: 2, models: {} })),
+}));
+
+vi.mock('../../../src/main/subagent/judge-harness.js', () => ({
+  runJudgeHarness: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock('../../../src/main/messages.js', () => ({
   MSG_REQUEST_FAILED_FALLBACK: 'Request failed',
+  MSG_EMPTY_TURN_WARNING: 'Empty turn warning',
 }));
 
 vi.mock('../../../src/main/safe-send.js', () => ({
@@ -282,6 +295,104 @@ describe('createEventRouter', () => {
       expect(secondCall.promptId).toBe('prompt-def');
       expect(secondCall.responseCharLength).toBe('second turn'.length);
       expect(secondCall.toolCallCount).toBe(0);
+    });
+
+    it('does not emit agent:end if user aborted during judge harness', async () => {
+      const { loadSubagentSettings } = await import('../../../src/main/subagent/config.js');
+      const { runJudgeHarness } = await import('../../../src/main/subagent/judge-harness.js');
+      const { categorizeToolName } = await import('../../../src/main/compression/metrics.js');
+      const { safeSend } = await import('../../../src/main/safe-send.js');
+
+      (loadSubagentSettings as any).mockReturnValue({ judgeMode: 'auto', autoRetry: false, maxRetries: 0, models: {} });
+      (categorizeToolName as any).mockReturnValue('mutation');
+
+      const judgeSlot = makeSlot();
+      let capturedSlot: any = null;
+
+      // Simulate: judge resolves, but during the await user has aborted (slot.isStreaming = false)
+      (runJudgeHarness as any).mockImplementation(async () => {
+        capturedSlot.isStreaming = false;
+        return null;
+      });
+
+      const mockConnector = {};
+      const judgeDeps = makeDeps({
+        infra: {},
+        getConnectorForSlot: () => mockConnector,
+      });
+      judgeDeps.slotManager.getSlot.mockReturnValue(judgeSlot);
+      capturedSlot = judgeSlot;
+
+      const { subscribeToSlot } = createEventRouter(judgeDeps as any);
+      subscribeToSlot(judgeSlot);
+      const judgeEventHandler = judgeSlot.session.subscribe.mock.calls[0][0];
+
+      // Clear accumulated calls from previous tests
+      (safeSend as any).mockClear();
+
+      // Fire a mutation tool then agent_end
+      judgeEventHandler({ type: 'tool_execution_start', toolName: 'figma_set_fills', toolCallId: 'tc-judge-1' });
+      judgeEventHandler({ type: 'agent_end' });
+
+      // Give the async handleAgentEnd time to complete
+      await new Promise((r) => setTimeout(r, 50));
+
+      // agent:end should NOT have been sent
+      const safeSendCalls = (safeSend as any).mock.calls;
+      const agentEndCalls = safeSendCalls.filter((c: any) => c[1] === 'agent:end');
+      expect(agentEndCalls).toHaveLength(0);
+
+      // trackTurnEnd should NOT have been called
+      expect(judgeDeps.usageTracker.trackTurnEnd).not.toHaveBeenCalled();
+    });
+
+    it('suppresses agent:usage during judge retry (message_end)', async () => {
+      const { loadSubagentSettings } = await import('../../../src/main/subagent/config.js');
+      const { runJudgeHarness } = await import('../../../src/main/subagent/judge-harness.js');
+      const { categorizeToolName } = await import('../../../src/main/compression/metrics.js');
+      const { safeSend } = await import('../../../src/main/safe-send.js');
+
+      (loadSubagentSettings as any).mockReturnValue({ judgeMode: 'auto', autoRetry: false, maxRetries: 0, models: {} });
+      (categorizeToolName as any).mockReturnValue('mutation');
+
+      let capturedEventHandler: (event: any) => void;
+
+      // During judge execution, fire a message_end event (simulating retry turn usage)
+      (runJudgeHarness as any).mockImplementation(async () => {
+        // While judge is in progress, simulate a message_end event
+        capturedEventHandler({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            usage: { input: 100, cacheRead: 50, cacheWrite: 0, output: 200, totalTokens: 350 },
+          },
+        });
+        return null;
+      });
+
+      const judgeSlot = makeSlot();
+      const judgeDeps = makeDeps({
+        infra: {},
+        getConnectorForSlot: () => ({}),
+      });
+      judgeDeps.slotManager.getSlot.mockReturnValue(judgeSlot);
+
+      const { subscribeToSlot } = createEventRouter(judgeDeps as any);
+      subscribeToSlot(judgeSlot);
+      capturedEventHandler = judgeSlot.session.subscribe.mock.calls[0][0];
+
+      // Clear safeSend calls from setup
+      (safeSend as any).mockClear();
+
+      // Fire a mutation tool start, then agent_end (triggers judge)
+      capturedEventHandler({ type: 'tool_execution_start', toolName: 'figma_set_fills', toolCallId: 'tc-1' });
+      capturedEventHandler({ type: 'agent_end' });
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      // agent:usage should NOT have been sent during judge
+      const usageCalls = (safeSend as any).mock.calls.filter((c: any) => c[1] === 'agent:usage');
+      expect(usageCalls).toHaveLength(0);
     });
 
     it('does not subscribe to same session twice with same router', () => {

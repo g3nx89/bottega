@@ -146,6 +146,32 @@ contextBridge.exposeInMainWorld('api', {
   getImageGenConfig: () => ipcRenderer.invoke('imagegen:get-config'),
   setImageGenConfig: (config: { apiKey?: string; model?: string }) => ipcRenderer.invoke('imagegen:set-config', config),
 
+  // ── Subagent config & control (global) ────
+  getSubagentConfig: () => ipcRenderer.invoke('subagent:get-config'),
+  setSubagentConfig: (config: any) => ipcRenderer.invoke('subagent:set-config', config),
+  runSubagentBatch: (slotId: string, requests: any[]) => ipcRenderer.invoke('subagent:run', slotId, requests),
+  abortSubagentBatch: (slotId: string) => ipcRenderer.invoke('subagent:abort', slotId),
+
+  // ── Subagent events (per-slot) ───────────
+  onSubagentBatchStart: (cb: (slotId: string, data: any) => void) => {
+    ipcRenderer.on('subagent:batch-start', (_event, slotId, data) => cb(slotId, data));
+  },
+  onSubagentStatus: (cb: (slotId: string, data: any) => void) => {
+    ipcRenderer.on('subagent:status', (_event, slotId, data) => cb(slotId, data));
+  },
+  onSubagentBatchEnd: (cb: (slotId: string, data: any) => void) => {
+    ipcRenderer.on('subagent:batch-end', (_event, slotId, data) => cb(slotId, data));
+  },
+  onJudgeRunning: (cb: (slotId: string) => void) => {
+    ipcRenderer.on('judge:running', (_event, slotId) => cb(slotId));
+  },
+  onJudgeVerdict: (cb: (slotId: string, verdict: any, attempt: number, max: number) => void) => {
+    ipcRenderer.on('judge:verdict', (_event, slotId, verdict, attempt, max) => cb(slotId, verdict, attempt, max));
+  },
+  onJudgeRetryStart: (cb: (slotId: string, attempt: number, max: number) => void) => {
+    ipcRenderer.on('judge:retry-start', (_event, slotId, attempt, max) => cb(slotId, attempt, max));
+  },
+
   // ── Compression profiles & cache (global) ─
   compressionGetProfiles: () => ipcRenderer.invoke('compression:get-profiles'),
   compressionGetProfile: () => ipcRenderer.invoke('compression:get-profile'),
@@ -168,6 +194,7 @@ contextBridge.exposeInMainWorld('api', {
   trackSuggestionClicked: (index: number) => ipcRenderer.invoke('usage:suggestion-clicked', index),
 
   // ── Diagnostics (global) ──────────────────
+  getSupportCode: () => ipcRenderer.invoke('diagnostics:get-support-code') as Promise<string>,
   exportDiagnostics: () =>
     ipcRenderer.invoke('diagnostics:export') as Promise<{
       success: boolean;

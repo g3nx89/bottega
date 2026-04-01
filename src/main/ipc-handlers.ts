@@ -20,6 +20,7 @@ import {
   MSG_REQUEST_FAILED_FALLBACK,
 } from './messages.js';
 import {
+  deriveSupportCode,
   loadDiagnosticsConfig,
   reloadDiagnosticsConfig,
   saveDiagnosticsConfig,
@@ -27,9 +28,11 @@ import {
 } from './remote-logger.js';
 import { extractRenderableMessages, type RenderableTurn } from './renderable-messages.js';
 import { safeSend } from './safe-send.js';
+import { ScopedConnector } from './scoped-connector.js';
 import { beginTurn, createEventRouter } from './session-events.js';
 import type { SessionStore } from './session-store.js';
 import type { SessionSlot, SlotManager } from './slot-manager.js';
+import { loadSubagentSettings, saveSubagentSettings } from './subagent/config.js';
 
 export { extractRenderableMessages, type RenderableTurn };
 
@@ -283,6 +286,9 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     usageTracker,
     persistSlotSession,
     contextSizes: CONTEXT_SIZES,
+    infra,
+    getConnectorForSlot: (slot: SessionSlot) =>
+      slot.fileKey ? new ScopedConnector(infra.wsServer, slot.fileKey) : null,
   });
   const { subscribeToSlot } = eventRouter;
 
@@ -336,6 +342,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
 
   ipcMain.handle('agent:abort', async (_event, slotId: string) => {
     const slot = requireSlot(slotId);
+    eventRouter.abortJudge(slotId);
     await slot.session.abort();
     eventRouter.finalizeTurn(slot);
     slot.promptQueue.clear();
@@ -410,6 +417,12 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
 
   ipcMain.handle('tab:close', async (_event, slotId: string) => {
     try {
+      // Abort any running subagent batch for this slot
+      const batchCtrl = activeBatchControllers.get(slotId);
+      if (batchCtrl) {
+        batchCtrl.abort();
+        activeBatchControllers.delete(slotId);
+      }
       await slotManager.removeSlot(slotId);
       safeSend(mainWindow.webContents, 'tab:removed', slotId);
       return { success: true };
@@ -568,6 +581,60 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     return { success: true };
   });
 
+  // ── Subagent config (global) ──────────────────────
+
+  ipcMain.handle('subagent:get-config', () => {
+    return loadSubagentSettings();
+  });
+
+  ipcMain.handle('subagent:set-config', async (_event: any, config: any) => {
+    if (!config || typeof config !== 'object') return { success: false, error: 'Invalid config' };
+    await saveSubagentSettings(config);
+    log.info('Subagent config updated');
+    return { success: true };
+  });
+
+  // Active subagent batch controllers — keyed by slotId for external abort
+  const activeBatchControllers = new Map<string, AbortController>();
+
+  ipcMain.handle('subagent:run', async (_event: any, slotId: string, requests: any[]) => {
+    const slot = requireSlot(slotId);
+    if (!slot.fileKey) return { success: false, error: 'Slot has no Figma file connected' };
+    if (activeBatchControllers.has(slotId)) return { success: false, error: 'Batch already running' };
+
+    const connector = new ScopedConnector(infra.wsServer, slot.fileKey);
+    const settings = loadSubagentSettings();
+    const controller = new AbortController();
+    activeBatchControllers.set(slotId, controller);
+
+    try {
+      const wc = mainWindow.webContents;
+      safeSend(wc, 'subagent:batch-start', slotId, { batchId: '', roles: requests.map((r: any) => r.role) });
+      const { runSubagentBatch } = await import('./subagent/orchestrator.js');
+      const result = await runSubagentBatch(infra, connector, requests, settings, controller.signal, (event) =>
+        safeSend(wc, 'subagent:status', slotId, event),
+      );
+      safeSend(wc, 'subagent:batch-end', slotId, result);
+      // Diagnostic logs already written by orchestrator — no duplicate here
+      return { success: true, result };
+    } catch (err: any) {
+      log.error({ err, slotId }, 'Subagent batch failed');
+      return { success: false, error: err.message };
+    } finally {
+      activeBatchControllers.delete(slotId);
+    }
+  });
+
+  ipcMain.handle('subagent:abort', (_event: any, slotId: string) => {
+    const ctrl = activeBatchControllers.get(slotId);
+    if (ctrl) {
+      ctrl.abort();
+      activeBatchControllers.delete(slotId);
+      return { success: true };
+    }
+    return { success: false, error: 'No active batch' };
+  });
+
   // ── Figma plugin setup (global) ──────────────────
 
   ipcMain.handle('plugin:check', () => {
@@ -620,6 +687,11 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
 
   ipcMain.handle('diagnostics:copy-info', () => {
     return formatSystemInfoForClipboard();
+  });
+
+  ipcMain.handle('diagnostics:get-support-code', () => {
+    const config = loadDiagnosticsConfig();
+    return deriveSupportCode(config.anonymousId);
   });
 
   ipcMain.handle('diagnostics:get-config', () => {

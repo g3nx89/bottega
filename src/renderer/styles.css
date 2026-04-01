@@ -1026,6 +1026,201 @@ body {
 }
 
 /* ──────────────────────────────────────────
+   Subagent batch card
+────────────────────────────────────────── */
+
+.subagent-batch-card {
+  background: var(--surface-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin: 6px 0;
+  font-size: 13px;
+  animation: fadeSlideIn 0.2s ease;
+}
+
+.batch-header {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+}
+
+.batch-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.batch-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.batch-dot {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+}
+
+.batch-row:not(.completed):not(.error) .batch-dot::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--accent, #a259ff);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.batch-row.completed .batch-dot { color: #34c759; }
+.batch-row.error .batch-dot { color: #ff3b30; }
+
+.batch-role {
+  font-weight: 500;
+  min-width: 60px;
+  color: var(--text-primary);
+}
+
+.batch-status {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.batch-duration {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.batch-footer {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* ──────────────────────────────────────────
+   Judge verdict card
+────────────────────────────────────────── */
+
+.judge-verdict-card {
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin: 6px 0;
+  font-size: 13px;
+  animation: fadeSlideIn 0.2s ease;
+}
+
+.judge-verdict-card[data-verdict="PASS"] {
+  background: rgba(52, 199, 89, 0.1);
+  border: 1px solid rgba(52, 199, 89, 0.3);
+}
+
+.judge-verdict-card[data-verdict="FAIL"] {
+  background: rgba(255, 59, 48, 0.1);
+  border: 1px solid rgba(255, 59, 48, 0.25);
+}
+
+.verdict-header {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.judge-verdict-card[data-verdict="PASS"] .verdict-header { color: #34c759; }
+.judge-verdict-card[data-verdict="FAIL"] .verdict-header { color: #ff3b30; }
+
+.verdict-criteria {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.criterion {
+  padding: 2px 0;
+}
+
+.criterion.pass { color: #34c759; }
+.criterion.fail { color: #ff3b30; }
+
+.verdict-actions {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: rgba(255, 59, 48, 0.05);
+  border-radius: var(--radius-sm);
+}
+
+.verdict-actions ol {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-primary);
+}
+
+.verdict-actions li {
+  margin-bottom: 2px;
+}
+
+.verdict-footer {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.judge-running-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin: 6px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  animation: fadeSlideIn 0.2s ease;
+}
+
+.judge-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--accent, #a259ff);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Settings sublabel/row for subagent section */
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.setting-sublabel {
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.setting-select-sm {
+  max-width: 180px;
+  font-size: 12px;
+}
+
+.setting-input-small {
+  width: 60px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+/* ──────────────────────────────────────────
    Response action bar
 ────────────────────────────────────────── */
 
@@ -1485,6 +1680,44 @@ body {
 
 .reset-chip {
   margin-left: auto;
+}
+
+.support-code-row {
+  margin-bottom: 4px;
+}
+
+.support-code-display {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+
+.support-code-display code {
+  font-family: var(--font-mono, 'SF Mono', 'Menlo', monospace);
+  font-size: 13px;
+  letter-spacing: 1px;
+  padding: 3px 8px;
+  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  user-select: all;
+}
+
+.setting-btn-icon {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  transition: background 0.15s;
+}
+
+.setting-btn-icon:hover {
+  background: var(--surface-hover, var(--border));
 }
 
 .diagnostics-row {

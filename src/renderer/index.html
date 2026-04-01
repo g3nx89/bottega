@@ -156,6 +156,44 @@
           </div>
           <div class="setting-divider"></div>
           <div class="setting-group">
+            <label class="setting-label">Subagents</label>
+            <span class="setting-hint">Parallel read-only agents for research, audit, and quality checks.</span>
+            <div class="setting-row">
+              <label class="setting-sublabel" for="judge-mode-select">Judge mode</label>
+              <select id="judge-mode-select" class="setting-select">
+                <option value="off">Off</option>
+                <option value="auto">Auto (after mutations)</option>
+                <option value="ask">On request</option>
+              </select>
+            </div>
+            <div class="setting-row" id="auto-retry-row">
+              <label class="setting-sublabel">
+                <input type="checkbox" id="auto-retry-toggle"> Auto-retry on FAIL
+              </label>
+            </div>
+            <div class="setting-row" id="max-retries-row" style="display:none">
+              <label class="setting-sublabel" for="max-retries-input">Max retries</label>
+              <input type="number" id="max-retries-input" class="setting-input-small" min="1" max="5" value="2">
+            </div>
+            <div class="setting-row">
+              <label class="setting-sublabel" for="model-scout">Scout</label>
+              <select id="model-scout" class="setting-select setting-select-sm" data-role="scout"></select>
+            </div>
+            <div class="setting-row">
+              <label class="setting-sublabel" for="model-analyst">Analyst</label>
+              <select id="model-analyst" class="setting-select setting-select-sm" data-role="analyst"></select>
+            </div>
+            <div class="setting-row">
+              <label class="setting-sublabel" for="model-auditor">Auditor</label>
+              <select id="model-auditor" class="setting-select setting-select-sm" data-role="auditor"></select>
+            </div>
+            <div class="setting-row">
+              <label class="setting-sublabel" for="model-judge">Judge</label>
+              <select id="model-judge" class="setting-select setting-select-sm" data-role="judge"></select>
+            </div>
+          </div>
+          <div class="setting-divider"></div>
+          <div class="setting-group">
             <label class="setting-label">Figma Plugin</label>
             <span class="setting-hint">Bottega needs a companion plugin running inside Figma Desktop to communicate with your designs.</span>
             <button id="setup-figma-btn" class="setting-btn-small">Install Figma Plugin</button>
@@ -176,6 +214,15 @@
           <div class="setting-group">
             <label class="setting-label">Diagnostics</label>
             <span class="setting-hint">Export logs and crash reports for troubleshooting.</span>
+            <div class="support-code-row">
+              <span class="setting-sublabel">Support Code</span>
+              <div class="support-code-display">
+                <code id="support-code-value">---</code>
+                <button id="copy-support-code-btn" class="setting-btn-icon" title="Copy support code">&#x2398;</button>
+              </div>
+              <span class="setting-hint">Share this code when contacting support.</span>
+            </div>
+            <div class="setting-divider-inner"></div>
             <div class="diagnostics-row">
               <button id="export-logs-btn" class="setting-btn-small">Export Logs</button>
               <button id="copy-sysinfo-btn" class="setting-btn-small">Copy System Info</button>

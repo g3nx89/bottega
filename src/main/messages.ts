@@ -27,6 +27,9 @@ export const MSG_NO_CREDENTIALS =
 
 export const MSG_REQUEST_FAILED_FALLBACK = 'Request failed. Check your credentials in Settings.';
 
+export const MSG_EMPTY_TURN_WARNING =
+  "I wasn't able to generate a response. This usually means your API key or login session has expired. Please check your credentials in Settings.";
+
 // ── Auth / Login ─────────────────────────────
 
 export const MSG_UNKNOWN_PROVIDER = (provider: string) => `Unknown provider: ${provider}`;

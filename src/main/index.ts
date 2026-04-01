@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, crashReporter, dialog, ipcMain } from 'electron';
 import { createChildLogger, logFilePath, logger, sessionUid } from '../figma/logger.js';
 import { DEFAULT_WS_PORT } from '../figma/port-discovery.js';
-import { createAgentInfra } from './agent.js';
+import { createAgentInfra, OAUTH_PROVIDER_MAP } from './agent.js';
 import { AppStatePersistence } from './app-state-persistence.js';
 import { initAutoUpdater } from './auto-updater.js';
 import { cleanOldLogs, collectSystemInfo } from './diagnostics.js';
@@ -19,7 +19,7 @@ import {
   MSG_STARTUP_ERROR_TITLE,
 } from './messages.js';
 import { loadDiagnosticsConfig, UsageTracker } from './remote-logger.js';
-import { safeSend } from './safe-send.js';
+import { safeSend, safeWc } from './safe-send.js';
 import { SessionStore } from './session-store.js';
 import { SlotManager } from './slot-manager.js';
 import { handleSecondInstance, isPortConflict } from './startup-guards.js';
@@ -310,6 +310,21 @@ if (!gotTheLock) {
         getModelConfig: () => currentModel,
         getCompressionProfile: () => infra.configManager.getActiveProfile(),
         getDiagnosticsEnabled: () => diagConfig.sendDiagnostics,
+        getAuthStatus: () => {
+          const status: Record<string, { type: 'oauth' | 'api_key' | 'none' }> = {};
+          for (const [displayGroup, oauthId] of Object.entries(OAUTH_PROVIDER_MAP) as [string, string][]) {
+            const oauthCred = infra.authStorage.get(oauthId);
+            const apiKeyCred = infra.authStorage.get(displayGroup);
+            if (oauthCred?.type === 'oauth') {
+              status[displayGroup] = { type: 'oauth' };
+            } else if (apiKeyCred?.type === 'api_key' || oauthCred?.type === 'api_key') {
+              status[displayGroup] = { type: 'api_key' };
+            } else {
+              status[displayGroup] = { type: 'none' };
+            }
+          }
+          return status;
+        },
         getImageGenInfo: () => ({
           hasKey: !!imageGenState.generator,
           model: imageGenState.generator?.model || 'unknown',
@@ -434,13 +449,15 @@ if (!gotTheLock) {
         usageTracker.setFigmaConnected(true);
         usageTracker.trackFigmaConnected(info.fileKey, 0);
         // Emit global figma:connected for status dot in renderer
-        if (mainWindow) safeSend(mainWindow.webContents, 'figma:connected', info.fileName);
+        const wc1 = safeWc(mainWindow);
+        if (wc1) safeSend(wc1, 'figma:connected', info.fileName);
 
         // Auto-create tab if not already open for this file
         const existing = slotManager.getSlotByFileKey(info.fileKey);
         if (existing) {
           const slotInfo = slotManager.getSlotInfo(existing.id);
-          if (slotInfo && mainWindow) safeSend(mainWindow.webContents, 'tab:updated', slotInfo);
+          const wc2 = safeWc(mainWindow);
+          if (slotInfo && wc2) safeSend(wc2, 'tab:updated', slotInfo);
         } else if (!pendingCreations.has(info.fileKey)) {
           pendingCreations.add(info.fileKey);
           slotManager
@@ -448,7 +465,8 @@ if (!gotTheLock) {
             .then((slot) => {
               ipcController.subscribeSlot(slot);
               const slotInfo = slotManager.getSlotInfo(slot.id);
-              if (slotInfo && mainWindow) safeSend(mainWindow.webContents, 'tab:created', slotInfo);
+              const wc3 = safeWc(mainWindow);
+              if (slotInfo && wc3) safeSend(wc3, 'tab:created', slotInfo);
               // Warmup: fire a low-res screenshot to prime Figma's rendering pipeline.
               // Fire-and-forget — failure is harmless.
               figmaCore?.wsServer
@@ -466,8 +484,9 @@ if (!gotTheLock) {
         'versionMismatch',
         (info: { fileKey: string; pluginVersion: number; requiredVersion: number }) => {
           log.warn(info, 'Figma plugin version mismatch');
-          if (mainWindow) {
-            safeSend(mainWindow.webContents, 'figma:version-mismatch', {
+          const wc5 = safeWc(mainWindow);
+          if (wc5) {
+            safeSend(wc5, 'figma:version-mismatch', {
               pluginVersion: info.pluginVersion,
               requiredVersion: info.requiredVersion,
               message: MSG_PLUGIN_UPDATED(info.pluginVersion, info.requiredVersion),
@@ -479,15 +498,17 @@ if (!gotTheLock) {
         log.info({ fileKey: info.fileKey }, 'Figma file disconnected');
         // Notify renderer that this specific tab lost connection
         const slot = slotManager.getSlotByFileKey(info.fileKey);
-        if (slot && mainWindow) {
-          safeSend(mainWindow.webContents, 'tab:updated', slotManager.getSlotInfo(slot.id));
+        const wc6 = safeWc(mainWindow);
+        if (slot && wc6) {
+          safeSend(wc6, 'tab:updated', slotManager.getSlotInfo(slot.id));
         }
       });
       figmaCore.wsServer.on('disconnected', () => {
         log.info('Figma disconnected');
         usageTracker.setFigmaConnected(false);
         usageTracker.trackFigmaDisconnected();
-        if (mainWindow) safeSend(mainWindow.webContents, 'figma:disconnected');
+        const wc4 = safeWc(mainWindow);
+        if (wc4) safeSend(wc4, 'figma:disconnected');
       });
 
       // 10. Log operation progress events for observability

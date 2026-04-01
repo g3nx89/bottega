@@ -16,7 +16,8 @@ import type { AgentSessionLike } from './ipc-handlers.js';
 import { PromptQueue } from './prompt-queue.js';
 import { PromptSuggester } from './prompt-suggester.js';
 import type { SessionStore } from './session-store.js';
-import type { UsageTracker } from './usage-tracker.js';
+import { abortActiveJudge } from './subagent/judge-harness.js';
+import { hashFileKey, type UsageTracker } from './usage-tracker.js';
 
 const log = createChildLogger({ component: 'slot-manager' });
 
@@ -141,6 +142,13 @@ export class SlotManager {
     if (!this._restoring) this.persistState();
     log.info({ slotId: slot.id, fileKey, fileName }, 'Slot created');
     this.usageTracker?.trackSlotCreated(fileKey || '', !!fileKey);
+    this.usageTracker?.trackSessionCreated({
+      slotId: slot.id,
+      provider: effectiveModel.provider,
+      modelId: effectiveModel.modelId,
+      toolCount: tools.length,
+      ...(fileKey && { fileKeyHash: hashFileKey(fileKey) }),
+    });
 
     return slot;
   }
@@ -177,6 +185,8 @@ export class SlotManager {
       throw new Error(`Slot not found: ${slotId}`);
     }
 
+    abortActiveJudge(slotId);
+
     if (slot.isStreaming) {
       await slot.session.abort();
       slot.promptQueue.clear();
@@ -201,6 +211,7 @@ export class SlotManager {
     if (!slot) {
       throw new Error(`Slot not found: ${slotId}`);
     }
+    abortActiveJudge(slotId);
     // Prevent concurrent recreateSession calls on the same slot (replaces removed switchQueue)
     if (this._recreateLocks.has(slotId)) {
       log.warn({ slotId }, 'recreateSession already in progress — skipping');
@@ -230,6 +241,13 @@ export class SlotManager {
 
       this.persistState();
       log.info({ slotId, modelConfig }, 'Session recreated');
+      this.usageTracker?.trackSessionCreated({
+        slotId,
+        provider: modelConfig.provider,
+        modelId: modelConfig.modelId,
+        toolCount: slot.scopedTools.length,
+        ...(slot.fileKey && { fileKeyHash: hashFileKey(slot.fileKey) }),
+      });
     } finally {
       this._recreateLocks.delete(slotId);
     }
