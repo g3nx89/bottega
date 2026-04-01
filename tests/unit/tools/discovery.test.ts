@@ -7,9 +7,9 @@ vi.mock('../../../src/figma/logger.js', () => ({
   createChildLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-// Mock projectTree
+// Mock extractTree
 vi.mock('../../../src/main/compression/project-tree.js', () => ({
-  projectTree: vi.fn((data: any) => ({ projected: true, ...data })),
+  extractTree: vi.fn((data: any) => ({ nodes: [{ id: data.id, name: data.name, type: data.type }] })),
 }));
 
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
@@ -50,8 +50,8 @@ describe('discovery tools', () => {
       const result = await tool.execute('c1', {}, undefined, undefined, undefined);
 
       const parsed = JSON.parse(result.content[0].text);
-      expect(parsed.projected).toBe(true);
-      expect(parsed.id).toBe('0:1');
+      expect(parsed.nodes).toBeDefined();
+      expect(parsed.nodes[0].id).toBe('0:1');
     });
 
     it('returns error as-is when result has error field', async () => {
@@ -236,7 +236,8 @@ describe('discovery tools', () => {
 
     it('returns compact form when compactDesignSystem config is true', async () => {
       deps.configManager.getActiveConfig.mockReturnValue({
-        treeProjectionDetail: 'standard',
+        defaultSemanticMode: 'full',
+        outputFormat: 'json',
         compactDesignSystem: true,
         designSystemCacheTtlMs: 60000,
       });

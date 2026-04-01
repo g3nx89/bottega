@@ -1,11 +1,58 @@
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
-import { type ProjectionDetail, projectTree } from '../compression/project-tree.js';
+import { extractTree } from '../compression/project-tree.js';
+import { MODE_EXTRACTORS, MODE_WALK, type SemanticMode } from '../compression/semantic-modes.js';
 import { type ToolDeps, textResult } from './index.js';
 
-/** Plugin code that walks the Figma document tree and returns serialized node data. */
-function buildGetFileDataCode(nodeId?: string, depth?: number): string {
+/**
+ * Plugin code that walks the Figma document tree.
+ * Two modes: 'fast' (core fields only) and 'rich' (adds visual/layout detail).
+ */
+function buildGetFileDataCode(nodeId?: string, depth?: number, walkMode: 'fast' | 'rich' = 'fast'): string {
   const maxDepth = typeof depth === 'number' && depth >= 0 ? depth : 100;
+
+  // Extra fields collected in 'rich' mode for semantic extraction
+  const richFields =
+    walkMode === 'rich'
+      ? `
+          if (node.fills && node.fills !== figma.mixed) n.fills = node.fills;
+          if (node.strokes && node.strokes.length > 0) { n.strokes = node.strokes; n.strokeWeight = node.strokeWeight; n.strokeDashes = node.strokeDashes; }
+          if (node.effects && node.effects.length > 0) n.effects = node.effects;
+          if (node.layoutSizingHorizontal) n.layoutSizingHorizontal = node.layoutSizingHorizontal;
+          if (node.layoutSizingVertical) n.layoutSizingVertical = node.layoutSizingVertical;
+          if (node.primaryAxisAlignItems) n.primaryAxisAlignItems = node.primaryAxisAlignItems;
+          if (node.counterAxisAlignItems) n.counterAxisAlignItems = node.counterAxisAlignItems;
+          if (node.layoutPositioning) n.layoutPositioning = node.layoutPositioning;
+          if (node.layoutAlign) n.layoutAlign = node.layoutAlign;
+          if (node.layoutGrow !== undefined) n.layoutGrow = node.layoutGrow;
+          if (node.overflowDirection) n.overflowDirection = node.overflowDirection;
+          if (node.cornerRadius !== undefined && node.cornerRadius !== 0) n.cornerRadius = node.cornerRadius;
+          if (node.rectangleCornerRadii) n.rectangleCornerRadii = node.rectangleCornerRadii;
+          if (node.clipsContent !== undefined) n.clipsContent = node.clipsContent;
+          if (node.absoluteBoundingBox) n.absoluteBoundingBox = node.absoluteBoundingBox;
+          if (node.styles) n.styles = node.styles;
+          if (node.type === 'TEXT') {
+            n.characters = node.characters; n.fontSize = node.fontSize;
+            try {
+              n.style = { fontFamily: node.fontName?.family, fontStyle: node.fontName?.style,
+                lineHeightPx: node.lineHeight?.value, letterSpacing: node.letterSpacing?.value,
+                textCase: node.textCase, textAlignHorizontal: node.textAlignHorizontal,
+                textAlignVertical: node.textAlignVertical };
+            } catch(e) { n.characters = node.characters; n.fontSize = node.fontSize; }
+          }
+          if (node.type === 'INSTANCE') {
+            if (node.mainComponent) n.componentId = node.mainComponent.key;
+            if (node.componentProperties) n.componentProperties = node.componentProperties;
+          }
+          if (node.type === 'COMPONENT') n.key = node.key;`
+      : `
+          if (node.fills && node.fills !== figma.mixed) n.fills = node.fills;
+          if (node.strokes && node.strokes.length > 0) { n.strokes = node.strokes; n.strokeWeight = node.strokeWeight; }
+          if (node.effects && node.effects.length > 0) n.effects = node.effects;
+          if (node.type === 'TEXT') { n.characters = node.characters; n.fontSize = node.fontSize; }
+          if (node.type === 'INSTANCE' && node.mainComponent) n.componentId = node.mainComponent.key;
+          if (node.type === 'COMPONENT') n.key = node.key;`;
+
   // nosemgrep: missing-template-string-indicator — code generation: builds plugin code sent to Figma
   return `return (async () => {
     try {
@@ -21,13 +68,7 @@ function buildGetFileDataCode(nodeId?: string, depth?: number): string {
           itemSpacing: node.itemSpacing,
           paddingTop: node.paddingTop, paddingRight: node.paddingRight,
           paddingBottom: node.paddingBottom, paddingLeft: node.paddingLeft,
-        };
-        if (node.fills && node.fills !== figma.mixed) n.fills = node.fills;
-        if (node.strokes && node.strokes.length > 0) { n.strokes = node.strokes; n.strokeWeight = node.strokeWeight; }
-        if (node.effects && node.effects.length > 0) n.effects = node.effects;
-        if (node.type === 'TEXT') { n.characters = node.characters; n.fontSize = node.fontSize; }
-        if (node.type === 'INSTANCE' && node.mainComponent) n.componentId = node.mainComponent.key;
-        if (node.type === 'COMPONENT') n.key = node.key;
+        };${richFields}
         if (node.children) n.children = node.children.map(c => walk(c, d + 1)).filter(Boolean);
         return n;
       }
@@ -44,23 +85,35 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       name: 'figma_get_file_data',
       label: 'Get File Data',
       description:
-        'Get the node tree structure of the current page or a specific subtree. Returns a compact projected view with node IDs, types, names, layout, fills, and component references.',
-      promptSnippet: 'figma_get_file_data: get page/node tree structure (compact projected view)',
+        'Get the node tree structure of the current page or a specific subtree. Returns a semantic view with layout (CSS flexbox), visual styles (CSS values), and component info. Use the mode parameter to control detail level.',
+      promptSnippet:
+        'figma_get_file_data: get page/node tree (modes: structure, content, styling, component, full, briefing)',
       parameters: Type.Object({
         nodeId: Type.Optional(Type.String({ description: 'Root node ID. If omitted, returns current page.' })),
         depth: Type.Optional(
           Type.Number({ description: 'Max traversal depth. -1 for unlimited (default).', default: -1 }),
         ),
+        mode: Type.Optional(
+          Type.String({
+            description:
+              'Extraction mode: structure (layout only), content (text only), styling (visual props), component (component info), full (everything), briefing (minimal). Default from compression profile.',
+          }),
+        ),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
-        const code = buildGetFileDataCode(params.nodeId, params.depth);
+        const rawMode = params.mode ?? configManager.getActiveConfig().defaultSemanticMode;
+        if (!(rawMode in MODE_EXTRACTORS))
+          return textResult({ error: `Invalid mode: ${rawMode}. Valid: ${Object.keys(MODE_EXTRACTORS).join(', ')}` });
+        const mode = rawMode as SemanticMode;
+        const walkMode = MODE_WALK[mode];
+        const code = buildGetFileDataCode(params.nodeId, params.depth, walkMode);
         const rawResult = await connector.executeCodeViaUI(code, 30000);
         try {
           const parsed = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult;
           if (parsed?.error) return textResult({ error: parsed.error });
-          const detail: ProjectionDetail = configManager.getActiveConfig().treeProjectionDetail;
-          const projected = projectTree(parsed, detail);
-          return textResult(projected);
+          const result = extractTree(parsed, mode, { maxDepth: params.depth });
+          const format = configManager.getActiveConfig().outputFormat;
+          return textResult(result, format);
         } catch {
           return textResult(rawResult);
         }
@@ -78,15 +131,16 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
         ),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+        const format = configManager.getActiveConfig().outputFormat;
         if (params.libraryFileKey) {
           const result = await figmaAPI.searchComponents(params.libraryFileKey, params.query);
-          return textResult(result);
+          return textResult(result, format);
         }
         const components = await connector.getLocalComponents();
         const filtered = Array.isArray(components)
           ? components.filter((c: any) => c.name?.toLowerCase().includes(params.query.toLowerCase()))
           : components;
-        return textResult(filtered);
+        return textResult(filtered, format);
       },
     },
     {
@@ -100,11 +154,12 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
         fileKey: Type.String({ description: 'File key of the library' }),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+        const format = configManager.getActiveConfig().outputFormat;
         const [components, componentSets] = await Promise.all([
           figmaAPI.getComponents(params.fileKey),
           figmaAPI.getComponentSets(params.fileKey),
         ]);
-        return textResult({ components, componentSets });
+        return textResult({ components, componentSets }, format);
       },
     },
     {
@@ -166,12 +221,14 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
         ),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
-        const shouldCompact = configManager.getActiveConfig().compactDesignSystem;
+        const config = configManager.getActiveConfig();
+        const shouldCompact = config.compactDesignSystem;
+        const format = config.outputFormat;
 
         // Check cache (unless forceRefresh requested)
         if (!params.forceRefresh) {
           const cached = designSystemCache.get(shouldCompact, fileKey);
-          if (cached) return textResult(cached);
+          if (cached) return textResult(cached, format);
         }
 
         // Fetch fresh from Figma
@@ -180,7 +237,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
 
         // Store in cache and return appropriate form
         const { compact } = designSystemCache.set(raw, fileKey);
-        return textResult(shouldCompact ? compact : raw);
+        return textResult(shouldCompact ? compact : raw, format);
       },
     },
     {

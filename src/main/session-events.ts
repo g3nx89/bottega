@@ -144,13 +144,30 @@ export function createEventRouter(deps: EventRouterDeps) {
   }
 
   function handleMessageEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
-    if (judgeInProgress.has(slot.id)) return;
     const msg = event.message;
     if (msg?.role === 'assistant' && msg.usage) {
       // input = non-cached tokens, cacheRead/cacheWrite = cached tokens
       // contextTokens = total input context (what fills the context window)
       const u = msg.usage;
       const contextTokens = (u.input || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0);
+
+      // Always track tokens and context level — even during judge retries
+      const contextWindow = contextSizes[slot.modelConfig.modelId] || 200_000;
+      const fillPercent = Math.min(100, (contextTokens / contextWindow) * 100);
+      usageTracker?.trackContextLevel({
+        inputTokens: contextTokens,
+        outputTokens: u.output,
+        totalTokens: u.totalTokens,
+        contextWindow,
+        fillPercent,
+        slotId: slot.id,
+        turnIndex: slot.turnIndex,
+        modelId: slot.modelConfig.modelId,
+      });
+
+      // Skip UI updates during judge retries — hidden turns should not update the chat
+      if (judgeInProgress.has(slot.id)) return;
+
       const usage = { input: contextTokens, output: u.output, total: u.totalTokens };
       log.info(
         {
@@ -168,20 +185,6 @@ export function createEventRouter(deps: EventRouterDeps) {
         'Context usage update',
       );
       safeSend(wc, 'agent:usage', slot.id, usage);
-
-      // Track context fill level on Axiom
-      const contextWindow = contextSizes[slot.modelConfig.modelId] || 200_000;
-      const fillPercent = Math.min(100, (contextTokens / contextWindow) * 100);
-      usageTracker?.trackContextLevel({
-        inputTokens: contextTokens,
-        outputTokens: u.output,
-        totalTokens: u.totalTokens,
-        contextWindow,
-        fillPercent,
-        slotId: slot.id,
-        turnIndex: slot.turnIndex,
-        modelId: slot.modelConfig.modelId,
-      });
     }
   }
 
@@ -236,29 +239,21 @@ export function createEventRouter(deps: EventRouterDeps) {
           const judgeStart = Date.now();
           try {
             safeSend(wc, 'judge:running', slot.id);
-            const verdict = await runJudgeHarness(
-              deps.infra,
-              connector,
-              slot,
-              settings,
-              toolNames,
-              new AbortController().signal,
-              {
-                onProgress: (event) => safeSend(wc, 'subagent:status', slot.id, event),
-                onVerdict: (v, attempt, max) => safeSend(wc, 'judge:verdict', slot.id, v, attempt, max),
-                onRetryStart: (attempt, max) => safeSend(wc, 'judge:retry-start', slot.id, attempt, max),
+            await runJudgeHarness(deps.infra, connector, slot, settings, toolNames, new AbortController().signal, {
+              onProgress: (event) => safeSend(wc, 'subagent:status', slot.id, event),
+              onVerdict: (v, attempt, max) => {
+                safeSend(wc, 'judge:verdict', slot.id, v, attempt, max);
+                usageTracker?.trackJudgeVerdict({
+                  batchId: slot.id,
+                  verdict: v.verdict,
+                  attempt,
+                  maxAttempts: max,
+                  failedCriteria: v.criteria.filter((c) => !c.pass).map((c) => c.name),
+                  durationMs: Date.now() - judgeStart,
+                });
               },
-            );
-            if (verdict) {
-              usageTracker?.trackJudgeVerdict({
-                batchId: slot.id,
-                verdict: verdict.verdict,
-                attempt: 1,
-                maxAttempts: settings.autoRetry ? settings.maxRetries + 1 : 1,
-                failedCriteria: verdict.criteria.filter((c) => !c.pass).map((c) => c.name),
-                durationMs: Date.now() - judgeStart,
-              });
-            }
+              onRetryStart: (attempt, max) => safeSend(wc, 'judge:retry-start', slot.id, attempt, max),
+            });
           } catch (err) {
             log.warn({ err, slotId: slot.id }, 'Judge harness error in agent_end');
           } finally {

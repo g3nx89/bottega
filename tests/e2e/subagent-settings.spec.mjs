@@ -106,3 +106,21 @@ test('changing judge mode persists via IPC', async () => {
   // Reset to default
   await window.selectOption('#judge-mode-select', 'ask');
 });
+
+// ── Subagent IPC channels after semantic refactor ──
+
+test('subagent IPC channels still available after semantic refactor', async () => {
+  const channels = await window.evaluate(() => ({
+    getSubagentConfig: typeof window.api.getSubagentConfig === 'function',
+    runSubagentBatch: typeof window.api.runSubagentBatch === 'function',
+  }));
+  expect(channels.getSubagentConfig).toBe(true);
+  expect(channels.runSubagentBatch).toBe(true);
+});
+
+test('subagent config returns valid structure', async () => {
+  const config = await window.evaluate(async () => await window.api.getSubagentConfig());
+  expect(config).toBeDefined();
+  expect(config).toHaveProperty('judgeMode');
+  expect(config).toHaveProperty('autoRetry');
+});

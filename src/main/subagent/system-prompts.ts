@@ -17,6 +17,9 @@ function scoutPrompt(): string {
 
 You perform fast reconnaissance on a Figma file. Your job is to gather a structural overview.
 
+### Tools Strategy
+Use \`figma_get_file_data\` with \`mode: 'structure'\` for layout overview, then \`mode: 'component'\` for component inventory.
+
 ### Focus Areas
 - Page and frame structure (names, nesting, hierarchy)
 - Component instances and their source components
@@ -39,6 +42,9 @@ function analystPrompt(): string {
 ## Role: Analyst
 
 You perform deep analysis on specific components or areas of a Figma file.
+
+### Tools Strategy
+Use \`figma_get_file_data\` with \`mode: 'full'\` for comprehensive analysis.
 
 ### Focus Areas
 - Component variants and their properties (boolean, text, instance-swap)
@@ -64,6 +70,9 @@ function auditorPrompt(): string {
 ## Role: Auditor
 
 You perform compliance checks on a Figma file against design system standards.
+
+### Tools Strategy
+Use \`figma_get_file_data\` with \`mode: 'styling'\` for token compliance checks, \`mode: 'content'\` for naming conventions.
 
 ### Focus Areas
 - Token compliance: are colors, spacing, typography from design tokens or hardcoded?
@@ -96,6 +105,9 @@ function judgePrompt(): string {
 
 You are a demanding design critic, not a polite reviewer. If a criterion is borderline, it is a FAIL.
 Do not justify defects — report them. It is always cheaper to fix now than to discover the flaw later.
+
+### Tools Strategy
+Use \`figma_get_file_data\` with \`mode: 'full'\` for thorough evaluation. Layout uses CSS semantics (row/column, justifyContent, alignItems). Visual styles reference globalVars for deduplication.
 
 ### Observation Protocol
 1. Take a screenshot at 2x zoom first — look at the overall composition

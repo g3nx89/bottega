@@ -220,3 +220,63 @@ describe('tool_result handler — profile switching', () => {
     expect(config.executeIdExtraction).toBe(true);
   });
 });
+
+describe('tool_result handler — semantic extraction compatibility', () => {
+  it('mutation compression works regardless of outputFormat (balanced=yaml)', async () => {
+    const { handler, configManager } = setup('balanced');
+    expect(configManager.getActiveConfig().outputFormat).toBe('yaml');
+    const result = await handler(makeToolResultEvent());
+    expect(result).not.toBeNull();
+    expect(result.content[0].text).toBe('OK node=42:15');
+  });
+
+  it('mutation compression works regardless of outputFormat (exploration=json)', async () => {
+    const { handler, configManager } = setup('exploration');
+    expect(configManager.getActiveConfig().outputFormat).toBe('json');
+    const result = await handler(makeToolResultEvent());
+    expect(result).not.toBeNull();
+    expect(result.content[0].text).toBe('OK node=42:15');
+  });
+
+  it('metrics record charsBefore/charsAfter correctly for any format', async () => {
+    const { handler, metrics } = setup('balanced');
+    const spy = vi.spyOn(metrics, 'recordToolCompression');
+
+    await handler(makeToolResultEvent());
+
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        charsBefore: expect.any(Number),
+        charsAfter: expect.any(Number),
+      }),
+    );
+    const call = spy.mock.calls[0][0] as any;
+    expect(call.charsBefore).toBeGreaterThan(0);
+    expect(call.charsAfter).toBeGreaterThan(0);
+    expect(call.charsAfter).toBeLessThan(call.charsBefore);
+  });
+
+  it('all profiles have defaultSemanticMode and outputFormat fields', () => {
+    for (const profile of ['balanced', 'creative', 'exploration', 'minimal'] as const) {
+      const { configManager } = setup(profile);
+      const config = configManager.getActiveConfig();
+      expect(config.defaultSemanticMode).toBeDefined();
+      expect(config.outputFormat).toBeDefined();
+      expect(['json', 'yaml']).toContain(config.outputFormat);
+    }
+  });
+
+  it('execute enrichment unaffected by outputFormat setting', async () => {
+    const { handler, configManager } = setup('balanced');
+    expect(configManager.getActiveConfig().outputFormat).toBe('yaml');
+
+    const result = await handler(
+      makeToolResultEvent({
+        toolName: 'figma_execute',
+        content: [{ type: 'text', text: '{"nodeId":"99:10","name":"Frame"}' }],
+      }),
+    );
+    expect(result).not.toBeNull();
+    expect(result.content[0].text).toContain('Returned IDs: 99:10');
+  });
+});

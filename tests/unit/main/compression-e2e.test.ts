@@ -12,7 +12,7 @@ import { enrichExecuteResult } from '../../../src/main/compression/execute-enric
 import { createCompressionExtensionFactory } from '../../../src/main/compression/extension-factory.js';
 import { CompressionMetricsCollector } from '../../../src/main/compression/metrics.js';
 import { compressMutationResult } from '../../../src/main/compression/mutation-compressor.js';
-import { projectTree } from '../../../src/main/compression/project-tree.js';
+import { extractTree } from '../../../src/main/compression/project-tree.js';
 
 // Mock logger
 vi.mock('../../../src/figma/logger.js', () => ({
@@ -212,8 +212,8 @@ describe('Compression E2E — design system cache', () => {
   });
 });
 
-describe('Compression E2E — tree projection', () => {
-  it('projects a realistic Figma node tree', () => {
+describe('Compression E2E — tree extraction', () => {
+  it('extracts a realistic Figma node tree', () => {
     const rawTree = {
       id: '0:1',
       type: 'FRAME',
@@ -264,37 +264,30 @@ describe('Compression E2E — tree projection', () => {
       ],
     };
 
-    const projected = projectTree(rawTree, 'standard');
+    const result = extractTree(rawTree, 'full');
+    const page = result.nodes[0];
 
-    expect(projected.id).toBe('0:1');
-    expect(projected.type).toBe('FRAME');
-    expect(projected.name).toBe('Page');
-    expect(projected.box).toBe('1440x900');
-    expect(projected.layout).toBe('V');
-    expect(projected.gap).toBe(16);
-    expect(projected.padding).toBe('24,24,24,24');
-    expect(projected.fill).toBe('#FFFFFF');
+    expect(page.id).toBe('0:1');
+    expect(page.type).toBe('FRAME');
+    expect(page.name).toBe('Page');
+    expect(page.layout?.mode).toBe('column');
+    expect(page.layout?.gap).toBe('16px');
+    expect(page.layout?.padding).toBe('24px');
 
-    // Children
-    expect(projected.children).toHaveLength(2);
+    // Children — the INSTANCE with visible:false is filtered out by extractTree
+    expect(page.children).toHaveLength(1);
 
-    const title = projected.children![0];
+    const title = page.children![0];
     expect(title.type).toBe('TEXT');
     expect(title.text).toBe('Hello World');
-    expect(title.fontSize).toBeUndefined(); // standard mode omits fontSize
 
-    const btn = projected.children![1];
-    expect(btn.hidden).toBe(true);
-    expect(btn.componentKey).toBe('comp:btn');
-    expect(btn.hasEffects).toBe(true);
-
-    // Verify compression: projected JSON should be much smaller
+    // Verify compression: extracted JSON should be much smaller
     const rawSize = JSON.stringify(rawTree).length;
-    const projectedSize = JSON.stringify(projected).length;
-    expect(projectedSize).toBeLessThan(rawSize * 0.5);
+    const extractedSize = JSON.stringify(result).length;
+    expect(extractedSize).toBeLessThan(rawSize * 0.5);
   });
 
-  it('detailed mode includes fontSize and opacity', () => {
+  it('full mode includes text and opacity', () => {
     const rawNode = {
       id: '1:1',
       type: 'TEXT',
@@ -310,9 +303,10 @@ describe('Compression E2E — tree projection', () => {
       effects: [],
     };
 
-    const projected = projectTree(rawNode, 'detailed');
-    expect(projected.fontSize).toBe(14);
-    expect(projected.opacity).toBe(0.8);
+    const result = extractTree(rawNode, 'full');
+    const node = result.nodes[0];
+    expect(node.text).toBe('Test');
+    expect(node.opacity).toBe(0.8);
   });
 });
 

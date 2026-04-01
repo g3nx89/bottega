@@ -144,9 +144,10 @@ export function createMockDesignSystemCache() {
 export function createMockConfigManager() {
   return {
     getActiveConfig: vi.fn().mockReturnValue({
-      treeProjectionDetail: 'standard' as const,
+      defaultSemanticMode: 'full' as const,
       compactDesignSystem: false,
       designSystemCacheTtlMs: 60000,
+      outputFormat: 'json' as const,
     }),
     getActiveProfile: vi.fn().mockReturnValue('balanced'),
     getProfiles: vi.fn().mockReturnValue([]),

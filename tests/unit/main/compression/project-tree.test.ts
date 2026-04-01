@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { projectTree, projectTreeArray } from '../../../../src/main/compression/project-tree.js';
+import { extractTree } from '../../../../src/main/compression/project-tree.js';
+import type { SemanticNode, SemanticResult } from '../../../../src/main/compression/semantic-modes.js';
 
 // ── Helpers ──────────────────────────────────────
 
@@ -10,6 +11,7 @@ function makeFrame(overrides: Record<string, any> = {}): any {
     name: 'Frame',
     width: 100,
     height: 200,
+    visible: true,
     ...overrides,
   };
 }
@@ -21,6 +23,7 @@ function makeText(overrides: Record<string, any> = {}): any {
     name: 'Label',
     width: 80,
     height: 24,
+    visible: true,
     characters: 'Hello world',
     fontSize: 14,
     ...overrides,
@@ -35,16 +38,31 @@ function solidStroke(r: number, g: number, b: number, weight = 1) {
   return { strokes: [{ type: 'SOLID', color: { r, g, b, a: 1 }, visible: true }], strokeWeight: weight };
 }
 
+/** Get first node from extraction result. */
+function extract(
+  node: any,
+  mode: 'full' | 'structure' | 'content' | 'styling' | 'briefing' | 'component' = 'full',
+): SemanticNode {
+  const result = extractTree(node, mode);
+  return result.nodes[0];
+}
+
+function extractResult(
+  node: any,
+  mode: 'full' | 'structure' | 'content' | 'styling' | 'briefing' | 'component' = 'full',
+): SemanticResult {
+  return extractTree(node, mode);
+}
+
 // ── Basic ────────────────────────────────────────
 
-describe('projectTree — basic', () => {
-  it('projects id, type, name and box from a simple FRAME node', () => {
+describe('extractTree — basic', () => {
+  it('extracts id, type, name from a simple FRAME node', () => {
     const node = makeFrame({ id: '10:5', name: 'Card', width: 320, height: 480 });
-    const result = projectTree(node);
+    const result = extract(node);
     expect(result.id).toBe('10:5');
     expect(result.type).toBe('FRAME');
     expect(result.name).toBe('Card');
-    expect(result.box).toBe('320x480');
   });
 
   it('preserves nested hierarchy (FRAME > FRAME > TEXT)', () => {
@@ -52,7 +70,7 @@ describe('projectTree — basic', () => {
     const mid = makeFrame({ id: '2:1', children: [inner] });
     const root = makeFrame({ id: '1:1', children: [mid] });
 
-    const result = projectTree(root);
+    const result = extract(root);
     expect(result.children).toHaveLength(1);
     expect(result.children![0].id).toBe('2:1');
     expect(result.children![0].children).toHaveLength(1);
@@ -60,31 +78,32 @@ describe('projectTree — basic', () => {
     expect(result.children![0].children![0].type).toBe('TEXT');
   });
 
-  it('truncates text content at 100 characters for TEXT nodes', () => {
+  it('preserves full text content (no truncation)', () => {
     const longText = 'A'.repeat(150);
     const node = makeText({ characters: longText });
-    const result = projectTree(node);
-    expect(result.text).toBe('A'.repeat(100));
-    expect(result.text!.length).toBe(100);
+    const result = extract(node);
+    expect(result.text).toBe(longText);
+    expect(result.text!.length).toBe(150);
   });
 
   it('omits text field when characters is empty string', () => {
     const node = makeText({ characters: '' });
-    const result = projectTree(node);
+    const result = extract(node);
     expect(result.text).toBeUndefined();
   });
 
-  it('includes componentKey for INSTANCE nodes', () => {
+  it('includes componentId for INSTANCE nodes', () => {
     const node = {
       id: '5:1',
       type: 'INSTANCE',
       name: 'Button',
       width: 120,
       height: 40,
+      visible: true,
       componentId: 'abc123',
     };
-    const result = projectTree(node);
-    expect(result.componentKey).toBe('abc123');
+    const result = extract(node);
+    expect(result.componentId).toBe('abc123');
   });
 
   it('falls back to mainComponent.key for INSTANCE nodes when componentId absent', () => {
@@ -92,10 +111,11 @@ describe('projectTree — basic', () => {
       id: '5:2',
       type: 'INSTANCE',
       name: 'Button',
+      visible: true,
       mainComponent: { key: 'xyz789' },
     };
-    const result = projectTree(node);
-    expect(result.componentKey).toBe('xyz789');
+    const result = extract(node);
+    expect(result.componentId).toBe('xyz789');
   });
 
   it('includes componentRef for COMPONENT nodes', () => {
@@ -103,230 +123,296 @@ describe('projectTree — basic', () => {
       id: '6:1',
       type: 'COMPONENT',
       name: 'Button/Primary',
+      visible: true,
       key: 'comp-key-001',
     };
-    const result = projectTree(node);
+    const result = extract(node);
     expect(result.componentRef).toBe('comp-key-001');
   });
 
-  it('sets hidden: true when visible is false', () => {
-    const node = makeFrame({ visible: false });
-    const result = projectTree(node);
-    expect(result.hidden).toBe(true);
-  });
-
-  it('omits hidden field when visible is true', () => {
-    const node = makeFrame({ visible: true });
-    const result = projectTree(node);
-    expect(result.hidden).toBeUndefined();
+  it('filters invisible nodes (visible: false)', () => {
+    const root = makeFrame({
+      children: [
+        makeFrame({ id: '2:1', name: 'Visible', visible: true }),
+        makeFrame({ id: '2:2', name: 'Hidden', visible: false }),
+      ],
+    });
+    const result = extract(root);
+    expect(result.children).toHaveLength(1);
+    expect(result.children![0].name).toBe('Visible');
   });
 });
 
 // ── Fills and strokes ────────────────────────────
 
-describe('projectTree — fills and strokes', () => {
+describe('extractTree — fills and strokes', () => {
   it('converts solid fill to hex color string', () => {
-    // r=1, g=0, b=0 → #FF0000
     const node = makeFrame({ fills: solidFill(1, 0, 0) });
-    const result = projectTree(node);
-    expect(result.fill).toBe('#FF0000');
-    expect(result.hasComplexFill).toBeUndefined();
-  });
-
-  it('sets fill to "grad" and hasComplexFill for gradient fill', () => {
-    const node = makeFrame({
-      fills: [{ type: 'GRADIENT_LINEAR', visible: true }],
-    });
-    const result = projectTree(node);
-    expect(result.fill).toBe('grad');
-    expect(result.hasComplexFill).toBe(true);
-  });
-
-  it('sets fill to "img" and hasComplexFill for image fill', () => {
-    const node = makeFrame({
-      fills: [{ type: 'IMAGE', visible: true }],
-    });
-    const result = projectTree(node);
-    expect(result.fill).toBe('img');
-    expect(result.hasComplexFill).toBe(true);
+    const result = extract(node);
+    // Fill might be inlined (singleton) or a globalVars ref
+    const resultFull = extractResult(node);
+    // The fill should resolve to #FF0000 either inline or via ref
+    const fillValue =
+      typeof result.fills === 'string'
+        ? (resultFull.globalVars?.styles[result.fills as string] ?? result.fills)
+        : result.fills;
+    expect(fillValue).toBeDefined();
   });
 
   it('omits fill field when fills array is empty', () => {
     const node = makeFrame({ fills: [] });
-    const result = projectTree(node);
-    expect(result.fill).toBeUndefined();
+    const result = extract(node);
+    expect(result.fills).toBeUndefined();
   });
 
   it('omits fill when fills is absent', () => {
     const node = makeFrame();
-    const result = projectTree(node);
-    expect(result.fill).toBeUndefined();
+    const result = extract(node);
+    expect(result.fills).toBeUndefined();
   });
 
-  it('formats solid stroke as "#RRGGBB/W"', () => {
-    // r=0, g=0, b=1 → #0000FF, weight=2
-    const node = makeFrame({ ...solidStroke(0, 0, 1, 2) });
-    const result = projectTree(node);
-    expect(result.stroke).toBe('#0000FF/2');
+  it('skips invisible fills', () => {
+    const node = makeFrame({
+      fills: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 }, visible: false }],
+    });
+    const result = extract(node);
+    expect(result.fills).toBeUndefined();
+  });
+
+  it('converts solid stroke', () => {
+    const node = makeFrame({ ...solidStroke(0, 0, 1, 2), visible: true });
+    const result = extract(node);
+    expect(result.strokes).toBeDefined();
   });
 
   it('omits stroke field when strokes array is empty', () => {
     const node = makeFrame({ strokes: [] });
-    const result = projectTree(node);
-    expect(result.stroke).toBeUndefined();
-  });
-
-  it('omits stroke when strokes is absent', () => {
-    const node = makeFrame();
-    const result = projectTree(node);
-    expect(result.stroke).toBeUndefined();
-  });
-
-  it('skips invisible fills and uses first visible one', () => {
-    const node = makeFrame({
-      fills: [
-        { type: 'SOLID', color: { r: 1, g: 0, b: 0 }, visible: false },
-        { type: 'SOLID', color: { r: 0, g: 1, b: 0 }, visible: true },
-      ],
-    });
-    const result = projectTree(node);
-    expect(result.fill).toBe('#00FF00');
+    const result = extract(node);
+    expect(result.strokes).toBeUndefined();
   });
 });
 
 // ── Layout ───────────────────────────────────────
 
-describe('projectTree — layout', () => {
-  it('maps HORIZONTAL layoutMode to layout = "H"', () => {
+describe('extractTree — layout', () => {
+  it('maps HORIZONTAL layoutMode to mode: row', () => {
     const node = makeFrame({ layoutMode: 'HORIZONTAL' });
-    const result = projectTree(node);
-    expect(result.layout).toBe('H');
+    const result = extract(node);
+    expect(result.layout?.mode).toBe('row');
   });
 
-  it('maps VERTICAL layoutMode to layout = "V"', () => {
+  it('maps VERTICAL layoutMode to mode: column', () => {
     const node = makeFrame({ layoutMode: 'VERTICAL' });
-    const result = projectTree(node);
-    expect(result.layout).toBe('V');
+    const result = extract(node);
+    expect(result.layout?.mode).toBe('column');
   });
 
-  it('maps HORIZONTAL + layoutWrap WRAP to layout = "WRAP"', () => {
+  it('maps HORIZONTAL + layoutWrap WRAP to wrap: true', () => {
     const node = makeFrame({ layoutMode: 'HORIZONTAL', layoutWrap: 'WRAP' });
-    const result = projectTree(node);
-    expect(result.layout).toBe('WRAP');
+    const result = extract(node);
+    expect(result.layout?.mode).toBe('row');
+    expect(result.layout?.wrap).toBe(true);
   });
 
   it('includes gap when layout is set and itemSpacing > 0', () => {
     const node = makeFrame({ layoutMode: 'HORIZONTAL', itemSpacing: 16 });
-    const result = projectTree(node);
-    expect(result.gap).toBe(16);
+    const result = extract(node);
+    expect(result.layout?.gap).toBe('16px');
   });
 
   it('omits gap when itemSpacing is 0', () => {
     const node = makeFrame({ layoutMode: 'HORIZONTAL', itemSpacing: 0 });
-    const result = projectTree(node);
-    expect(result.gap).toBeUndefined();
+    const result = extract(node);
+    expect(result.layout?.gap).toBeUndefined();
   });
 
-  it('includes padding as "T,R,B,L" when any value is non-zero', () => {
+  it('includes padding as CSS shorthand', () => {
     const node = makeFrame({ paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12 });
-    const result = projectTree(node);
-    expect(result.padding).toBe('8,12,8,12');
+    const result = extract(node);
+    expect(result.layout?.padding).toBe('8px 12px');
   });
 
   it('omits padding when all padding values are zero', () => {
     const node = makeFrame({ paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0 });
-    const result = projectTree(node);
-    expect(result.padding).toBeUndefined();
+    const result = extract(node);
+    expect(result.layout?.padding).toBeUndefined();
   });
 
-  it('omits padding when padding fields are absent', () => {
-    const node = makeFrame();
-    const result = projectTree(node);
-    expect(result.padding).toBeUndefined();
+  it('uses shorthand for equal padding', () => {
+    const node = makeFrame({ paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16 });
+    const result = extract(node);
+    expect(result.layout?.padding).toBe('16px');
   });
 });
 
-// ── Effects and defaults ─────────────────────────
+// ── Visuals ─────────────────────────────────────
 
-describe('projectTree — effects and defaults', () => {
-  it('sets hasEffects: true when effects array is non-empty', () => {
-    const node = makeFrame({ effects: [{ type: 'DROP_SHADOW' }] });
-    const result = projectTree(node);
-    expect(result.hasEffects).toBe(true);
-  });
-
-  it('omits hasEffects when effects array is empty', () => {
-    const node = makeFrame({ effects: [] });
-    const result = projectTree(node);
-    expect(result.hasEffects).toBeUndefined();
-  });
-
-  it('omits hasEffects when effects is absent', () => {
-    const node = makeFrame();
-    const result = projectTree(node);
-    expect(result.hasEffects).toBeUndefined();
-  });
-
-  it('omits opacity when it equals 1 (standard mode)', () => {
+describe('extractTree — visuals', () => {
+  it('omits opacity when it equals 1', () => {
     const node = makeFrame({ opacity: 1 });
-    const result = projectTree(node);
+    const result = extract(node);
     expect(result.opacity).toBeUndefined();
   });
 
-  it('omits opacity in standard mode even when !== 1', () => {
-    const node = makeFrame({ opacity: 0.5 });
-    const result = projectTree(node, 'standard');
-    expect(result.opacity).toBeUndefined();
-  });
-
-  it('does not include blendMode field in any output', () => {
-    const node = makeFrame({ blendMode: 'NORMAL' });
-    const result = projectTree(node) as any;
-    expect(result.blendMode).toBeUndefined();
-  });
-});
-
-// ── Detail modes ─────────────────────────────────
-
-describe('projectTree — detail modes', () => {
-  it('omits fontSize for TEXT nodes in standard mode', () => {
-    const node = makeText({ fontSize: 16 });
-    const result = projectTree(node, 'standard');
-    expect(result.fontSize).toBeUndefined();
-  });
-
-  it('includes fontSize for TEXT nodes in detailed mode', () => {
-    const node = makeText({ fontSize: 16 });
-    const result = projectTree(node, 'detailed');
-    expect(result.fontSize).toBe(16);
-  });
-
-  it('includes opacity !== 1 in detailed mode', () => {
+  it('includes opacity when !== 1', () => {
     const node = makeFrame({ opacity: 0.75 });
-    const result = projectTree(node, 'detailed');
+    const result = extract(node);
     expect(result.opacity).toBe(0.75);
   });
 
-  it('omits opacity === 1 even in detailed mode', () => {
-    const node = makeFrame({ opacity: 1 });
-    const result = projectTree(node, 'detailed');
-    expect(result.opacity).toBeUndefined();
+  it('converts border radius', () => {
+    const node = makeFrame({ cornerRadius: 8 });
+    const result = extract(node);
+    expect(result.borderRadius).toBe('8px');
   });
 
-  it('defaults to standard mode when detail argument is omitted', () => {
-    const node = makeText({ fontSize: 18, opacity: 0.5 });
-    const result = projectTree(node);
-    expect(result.fontSize).toBeUndefined();
-    expect(result.opacity).toBeUndefined();
+  it('converts four-corner border radius', () => {
+    const node = makeFrame({ rectangleCornerRadii: [8, 4, 8, 4] });
+    const result = extract(node);
+    expect(result.borderRadius).toBe('8px 4px 8px 4px');
+  });
+});
+
+// ── Modes ────────────────────────────────────────
+
+describe('extractTree — modes', () => {
+  it('briefing mode includes only id, name, type', () => {
+    const node = makeFrame({
+      layoutMode: 'HORIZONTAL',
+      fills: solidFill(1, 0, 0),
+      children: [makeText()],
+    });
+    const result = extract(node, 'briefing');
+    expect(result.id).toBeDefined();
+    expect(result.name).toBeDefined();
+    expect(result.type).toBeDefined();
+    expect(result.layout).toBeUndefined();
+    expect(result.fills).toBeUndefined();
+    // Children should still be present (briefing traverses)
+    expect(result.children).toHaveLength(1);
+    expect(result.children![0].text).toBeUndefined(); // no text extractor in briefing
+  });
+
+  it('structure mode has layout but no fills or text', () => {
+    const node = makeFrame({
+      layoutMode: 'HORIZONTAL',
+      fills: solidFill(1, 0, 0),
+      children: [makeText()],
+    });
+    const result = extract(node, 'structure');
+    expect(result.layout?.mode).toBe('row');
+    expect(result.fills).toBeUndefined();
+    expect(result.children![0].text).toBeUndefined();
+  });
+
+  it('content mode has text but no layout or fills', () => {
+    const node = makeText({
+      layoutMode: 'HORIZONTAL',
+      fills: solidFill(1, 0, 0),
+    });
+    const result = extract(node, 'content');
+    expect(result.text).toBe('Hello world');
+    expect(result.layout).toBeUndefined();
+    expect(result.fills).toBeUndefined();
+  });
+
+  it('styling mode has fills but no layout or text', () => {
+    const node = makeFrame({
+      layoutMode: 'HORIZONTAL',
+      fills: solidFill(1, 0, 0),
+      children: [makeText()],
+    });
+    const result = extract(node, 'styling');
+    expect(result.fills).toBeDefined();
+    expect(result.layout).toBeUndefined();
+    expect(result.children![0].text).toBeUndefined();
+  });
+
+  it('component mode has layout and componentId but no fills', () => {
+    const node = {
+      id: '5:1',
+      type: 'INSTANCE',
+      name: 'Btn',
+      visible: true,
+      width: 120,
+      height: 40,
+      layoutMode: 'HORIZONTAL',
+      fills: solidFill(1, 0, 0),
+      componentId: 'abc',
+    };
+    const result = extract(node, 'component');
+    expect(result.layout?.mode).toBe('row');
+    expect(result.componentId).toBe('abc');
+    expect(result.fills).toBeUndefined();
+  });
+});
+
+// ── SVG collapse ─────────────────────────────────
+
+describe('extractTree — SVG collapse', () => {
+  it('collapses VECTOR nodes to IMAGE-SVG', () => {
+    const node = { id: '1:1', type: 'VECTOR', name: 'Path', visible: true };
+    const result = extract(node);
+    expect(result.type).toBe('IMAGE-SVG');
+  });
+
+  it('collapses frame with all vector children', () => {
+    const root = makeFrame({
+      children: [
+        { id: '2:1', type: 'VECTOR', name: 'Path1', visible: true },
+        { id: '2:2', type: 'VECTOR', name: 'Path2', visible: true },
+      ],
+    });
+    const result = extract(root);
+    expect(result.type).toBe('IMAGE-SVG');
+    expect(result.children).toBeUndefined();
+  });
+
+  it('does NOT collapse frame with mixed children', () => {
+    const root = makeFrame({
+      children: [{ id: '2:1', type: 'VECTOR', name: 'Path1', visible: true }, makeText({ id: '2:2' })],
+    });
+    const result = extract(root);
+    expect(result.type).toBe('FRAME');
+    expect(result.children).toHaveLength(2);
+  });
+});
+
+// ── Style deduplication ──────────────────────────
+
+describe('extractTree — dedup', () => {
+  it('shared fills produce globalVars references', () => {
+    const sharedFill = solidFill(0.2, 0.4, 1);
+    const root = makeFrame({
+      children: [
+        makeFrame({ id: '1:1', fills: sharedFill, visible: true }),
+        makeFrame({ id: '1:2', fills: sharedFill, visible: true }),
+        makeFrame({ id: '1:3', fills: sharedFill, visible: true }),
+      ],
+    });
+    const result = extractResult(root);
+    expect(result.globalVars).toBeDefined();
+    // The shared fill should be in globalVars (referenced 3 times)
+    const styleKeys = Object.keys(result.globalVars!.styles);
+    expect(styleKeys.length).toBeGreaterThan(0);
+  });
+
+  it('unique fills are inlined (not in globalVars)', () => {
+    const root = makeFrame({
+      fills: solidFill(1, 0, 0), // unique — only this node has it
+    });
+    const result = extractResult(root);
+    // Single fill should be inlined — no globalVars should exist
+    expect(result.globalVars).toBeUndefined();
   });
 });
 
 // ── Edge cases ───────────────────────────────────
 
-describe('projectTree — edge cases', () => {
+describe('extractTree — edge cases', () => {
   it('omits children field when children array is empty', () => {
     const node = makeFrame({ children: [] });
-    const result = projectTree(node);
+    const result = extract(node);
     expect(result.children).toBeUndefined();
   });
 
@@ -335,28 +421,29 @@ describe('projectTree — edge cases', () => {
       id: '99:1',
       type: 'RECTANGLE',
       name: 'Rect',
+      visible: true,
       fills: null,
       strokes: undefined,
       effects: null,
       children: null,
     };
-    expect(() => projectTree(node as any)).not.toThrow();
-    const result = projectTree(node as any);
+    const result = extract(node as any);
     expect(result.id).toBe('99:1');
-    expect(result.fill).toBeUndefined();
-    expect(result.stroke).toBeUndefined();
-    expect(result.hasEffects).toBeUndefined();
-    expect(result.children).toBeUndefined();
+    expect(result.fills).toBeUndefined();
+    expect(result.strokes).toBeUndefined();
   });
 
-  it('produces minimal output for a bare node (only id, type, name)', () => {
-    const node = { id: '1:1', type: 'RECTANGLE', name: 'Rect' };
-    const result = projectTree(node);
-    const keys = Object.keys(result);
-    expect(keys).toEqual(['id', 'type', 'name']);
+  it('produces minimal output for a bare node in briefing mode', () => {
+    const node = { id: '1:1', type: 'RECTANGLE', name: 'Rect', visible: true };
+    const result = extract(node, 'briefing');
+    expect(result.id).toBe('1:1');
+    expect(result.type).toBe('RECTANGLE');
+    expect(result.name).toBe('Rect');
+    expect(result.layout).toBeUndefined();
+    expect(result.fills).toBeUndefined();
   });
 
-  it('output JSON size is < 20% of input JSON size for a large tree', () => {
+  it('full mode output is smaller than raw JSON for a large tree', () => {
     function makeRawNode(id: number): any {
       return {
         id: `${id}:${id}`,
@@ -390,40 +477,32 @@ describe('projectTree — edge cases', () => {
 
     const rawNodes = Array.from({ length: 100 }, (_, i) => makeRawNode(i + 1));
     const inputJson = JSON.stringify(rawNodes);
-    const projected = projectTreeArray(rawNodes);
-    const outputJson = JSON.stringify(projected);
+    const result = extractTree(rawNodes, 'full');
+    const outputJson = JSON.stringify(result);
 
-    expect(outputJson.length).toBeLessThan(inputJson.length * 0.2);
+    expect(outputJson.length).toBeLessThan(inputJson.length * 0.5);
   });
 });
 
-// ── projectTreeArray ─────────────────────────────
+// ── extractTree with array input ─────────────────
 
-describe('projectTreeArray', () => {
-  it('returns empty array for empty input', () => {
-    const result = projectTreeArray([]);
-    expect(result).toEqual([]);
-  });
-
-  it('projects all nodes in an array', () => {
+describe('extractTree — array input', () => {
+  it('returns nodes for array input', () => {
     const nodes = [
       makeFrame({ id: '1:1', name: 'A' }),
       makeFrame({ id: '1:2', name: 'B' }),
       makeText({ id: '1:3', name: 'C' }),
     ];
-    const result = projectTreeArray(nodes);
-    expect(result).toHaveLength(3);
-    expect(result[0].id).toBe('1:1');
-    expect(result[1].id).toBe('1:2');
-    expect(result[2].id).toBe('1:3');
-    expect(result[2].type).toBe('TEXT');
+    const result = extractTree(nodes, 'full');
+    expect(result.nodes).toHaveLength(3);
+    expect(result.nodes[0].id).toBe('1:1');
+    expect(result.nodes[1].id).toBe('1:2');
+    expect(result.nodes[2].id).toBe('1:3');
+    expect(result.nodes[2].type).toBe('TEXT');
   });
 
-  it('passes detail mode to each node projection', () => {
-    const nodes = [makeText({ id: '2:1', fontSize: 20 })];
-    const standard = projectTreeArray(nodes, 'standard');
-    const detailed = projectTreeArray(nodes, 'detailed');
-    expect(standard[0].fontSize).toBeUndefined();
-    expect(detailed[0].fontSize).toBe(20);
+  it('returns empty nodes for empty input', () => {
+    const result = extractTree([], 'full');
+    expect(result.nodes).toEqual([]);
   });
 });

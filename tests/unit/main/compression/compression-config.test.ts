@@ -11,9 +11,10 @@ const ALL_PROFILES: CompressionProfile[] = ['balanced', 'creative', 'exploration
 const CONFIG_KEYS: (keyof CompressionConfig)[] = [
   'compressMutationResults',
   'compactDesignSystem',
-  'treeProjectionDetail',
+  'defaultSemanticMode',
   'executeIdExtraction',
   'designSystemCacheTtlMs',
+  'outputFormat',
 ];
 
 describe('CompressionConfigManager', () => {
@@ -101,8 +102,12 @@ describe('Profile-specific config values', () => {
     expect(COMPRESSION_PROFILES.balanced.config.compactDesignSystem).toBe(true);
   });
 
-  it('balanced uses standard tree projection', () => {
-    expect(COMPRESSION_PROFILES.balanced.config.treeProjectionDetail).toBe('standard');
+  it('balanced uses full semantic mode', () => {
+    expect(COMPRESSION_PROFILES.balanced.config.defaultSemanticMode).toBe('full');
+  });
+
+  it('balanced uses yaml output format', () => {
+    expect(COMPRESSION_PROFILES.balanced.config.outputFormat).toBe('yaml');
   });
 
   it('minimal does NOT compress mutations', () => {
@@ -113,16 +118,16 @@ describe('Profile-specific config values', () => {
     expect(COMPRESSION_PROFILES.minimal.config.compactDesignSystem).toBe(false);
   });
 
-  it('minimal uses detailed tree projection', () => {
-    expect(COMPRESSION_PROFILES.minimal.config.treeProjectionDetail).toBe('detailed');
+  it('minimal uses json output format', () => {
+    expect(COMPRESSION_PROFILES.minimal.config.outputFormat).toBe('json');
   });
 
   it('exploration does NOT compact design system', () => {
     expect(COMPRESSION_PROFILES.exploration.config.compactDesignSystem).toBe(false);
   });
 
-  it('exploration uses detailed tree projection', () => {
-    expect(COMPRESSION_PROFILES.exploration.config.treeProjectionDetail).toBe('detailed');
+  it('exploration uses json output format', () => {
+    expect(COMPRESSION_PROFILES.exploration.config.outputFormat).toBe('json');
   });
 
   it('exploration still compresses mutations', () => {
@@ -135,6 +140,10 @@ describe('Profile-specific config values', () => {
     );
   });
 
+  it('creative uses yaml output format', () => {
+    expect(COMPRESSION_PROFILES.creative.config.outputFormat).toBe('yaml');
+  });
+
   it('creative config differs from balanced config', () => {
     const b = COMPRESSION_PROFILES.balanced.config;
     const c = COMPRESSION_PROFILES.creative.config;
@@ -145,6 +154,12 @@ describe('Profile-specific config values', () => {
   it('all profiles enable executeIdExtraction', () => {
     for (const profile of ALL_PROFILES) {
       expect(COMPRESSION_PROFILES[profile].config.executeIdExtraction).toBe(true);
+    }
+  });
+
+  it('all profiles use full as default semantic mode', () => {
+    for (const profile of ALL_PROFILES) {
+      expect(COMPRESSION_PROFILES[profile].config.defaultSemanticMode).toBe('full');
     }
   });
 });

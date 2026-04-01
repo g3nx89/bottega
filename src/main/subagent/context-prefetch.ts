@@ -50,7 +50,7 @@ export async function prefetchCommonContext(tools: ToolDefinition[], signal?: Ab
   // Screenshot omitted from prefetch: subagents take their own when needed.
   // Saves a WS roundtrip + PNG encode per batch.
   const [fileDataResult, designSystemResult] = await Promise.allSettled([
-    callTool(tools, 'figma_get_file_data', {}, signal),
+    callTool(tools, 'figma_get_file_data', { mode: 'briefing' }, signal),
     callTool(tools, 'figma_design_system', {}, signal),
   ]);
 

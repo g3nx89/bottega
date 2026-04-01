@@ -4,6 +4,7 @@ import type { IFigmaConnector } from '../../figma/figma-connector.js';
 import type { FigmaWebSocketServer } from '../../figma/websocket-server.js';
 import type { CompressionConfigManager } from '../compression/compression-config.js';
 import type { DesignSystemCache } from '../compression/design-system-cache.js';
+import { toYaml } from '../compression/yaml-emitter.js';
 import type { ImageGenerator } from '../image-gen/image-generator.js';
 import type { OperationQueue } from '../operation-queue.js';
 import { createAnnotationTools } from './annotations.js';
@@ -33,10 +34,10 @@ export interface ToolDeps {
 }
 
 /** Standard text result wrapper — avoids repeating the same shape in every tool. */
-export function textResult(data: unknown) {
+export function textResult(data: unknown, format: 'json' | 'yaml' = 'json') {
   let text: string;
   try {
-    text = JSON.stringify(data);
+    text = format === 'yaml' ? toYaml(data) : JSON.stringify(data);
   } catch {
     text = `[Serialization error] ${String(data)}`;
   }

@@ -1112,8 +1112,8 @@ function finalizeBatchCard(tab, data) {
   if (!card) return;
   const footer = card.querySelector('.batch-footer');
   const results = data.results || [];
-  const done = results.filter(r => r.status === 'completed').length;
-  const errs = results.filter(r => r.status === 'error').length;
+  const done = results.filter((r) => r.status === 'completed').length;
+  const errs = results.filter((r) => r.status === 'error').length;
   footer.textContent = `${results.length} agents \u00B7 ${done} done` + (errs ? ` \u00B7 ${errs} errors` : '');
   tab._activeBatchCard = null;
 }
@@ -1131,9 +1131,8 @@ function createJudgeVerdictCard(tab, verdict, attempt, maxAttempts) {
 
   const header = document.createElement('div');
   header.className = 'verdict-header';
-  header.textContent = verdict.verdict === 'PASS'
-    ? 'Quality Check \u00B7 PASS \u2713'
-    : 'Quality Check \u00B7 FAIL \u2717';
+  header.textContent =
+    verdict.verdict === 'PASS' ? 'Quality Check \u00B7 PASS \u2713' : 'Quality Check \u00B7 FAIL \u2717';
   card.appendChild(header);
 
   const criteria = document.createElement('div');
@@ -1177,26 +1176,28 @@ function createJudgeVerdictCard(tab, verdict, attempt, maxAttempts) {
 window.api.onSubagentBatchStart((slotId, data) => withTab(slotId, (tab) => createBatchCard(tab, data)));
 window.api.onSubagentStatus((slotId, data) => withTab(slotId, (tab) => updateBatchRow(tab, data)));
 window.api.onSubagentBatchEnd((slotId, data) => withTab(slotId, (tab) => finalizeBatchCard(tab, data)));
-window.api.onJudgeRunning((slotId) => withTab(slotId, (tab) => {
-  if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
-  const indicator = document.createElement('div');
-  indicator.className = 'judge-running-indicator';
-  const spinner = document.createElement('span');
-  spinner.className = 'judge-spinner';
-  indicator.appendChild(spinner);
-  indicator.appendChild(document.createTextNode(' Quality check running\u2026'));
-  tab.currentAssistantBubble.appendChild(indicator);
-  tab._judgeRunningIndicator = indicator;
-}));
-window.api.onJudgeVerdict((slotId, verdict, attempt, max) =>
-  withTab(slotId, (tab) => createJudgeVerdictCard(tab, verdict, attempt, max)));
-window.api.onJudgeRetryStart((slotId, attempt, max) =>
+window.api.onJudgeRunning((slotId) =>
   withTab(slotId, (tab) => {
-    if (tab._lastJudgeCard) {
-      const footer = tab._lastJudgeCard.querySelector('.verdict-footer');
-      if (footer) footer.textContent = `Attempt ${attempt}/${max} \u00B7 Retrying...`;
-    }
-  }));
+    if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
+    const indicator = document.createElement('div');
+    indicator.className = 'judge-running-indicator';
+    const spinner = document.createElement('span');
+    spinner.className = 'judge-spinner';
+    indicator.appendChild(spinner);
+    indicator.appendChild(document.createTextNode(' Quality check running\u2026'));
+    tab.currentAssistantBubble.appendChild(indicator);
+    tab._judgeRunningIndicator = indicator;
+  }),
+);
+window.api.onJudgeVerdict((slotId, verdict, attempt, max) =>
+  withTab(slotId, (tab) => createJudgeVerdictCard(tab, verdict, attempt, max)),
+);
+window.api.onJudgeRetryStart((slotId, _attempt, _max) =>
+  withTab(slotId, (_tab) => {
+    // No-op: the previous verdict card already shows the FAIL result.
+    // Overwriting its footer would erase the historical attempt number.
+  }),
+);
 
 window.api.onFigmaConnected(() => {
   statusDot.className = 'status-dot connected';
@@ -1244,9 +1245,10 @@ function handlePluginInstallResult(result) {
 
 function updateRetryButtonText(result) {
   if (!pluginRetryBtn) return;
-  pluginRetryBtn.textContent = result.success && result.figmaRunning
-    ? 'Figma still running \u2014 try again'
-    : 'Could not auto-register \u2014 use Settings to install manually';
+  pluginRetryBtn.textContent =
+    result.success && result.figmaRunning
+      ? 'Figma still running \u2014 try again'
+      : 'Could not auto-register \u2014 use Settings to install manually';
 }
 
 pluginRetryBtn?.addEventListener('click', async () => {

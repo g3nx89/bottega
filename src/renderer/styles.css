@@ -1068,7 +1068,7 @@ body {
 }
 
 .batch-row:not(.completed):not(.error) .batch-dot::after {
-  content: '';
+  content: "";
   width: 8px;
   height: 8px;
   border: 2px solid var(--accent, #a259ff);
@@ -1077,8 +1077,12 @@ body {
   animation: spin 0.8s linear infinite;
 }
 
-.batch-row.completed .batch-dot { color: #34c759; }
-.batch-row.error .batch-dot { color: #ff3b30; }
+.batch-row.completed .batch-dot {
+  color: #34c759;
+}
+.batch-row.error .batch-dot {
+  color: #ff3b30;
+}
 
 .batch-role {
   font-weight: 500;
@@ -1129,8 +1133,12 @@ body {
   margin-bottom: 6px;
 }
 
-.judge-verdict-card[data-verdict="PASS"] .verdict-header { color: #34c759; }
-.judge-verdict-card[data-verdict="FAIL"] .verdict-header { color: #ff3b30; }
+.judge-verdict-card[data-verdict="PASS"] .verdict-header {
+  color: #34c759;
+}
+.judge-verdict-card[data-verdict="FAIL"] .verdict-header {
+  color: #ff3b30;
+}
 
 .verdict-criteria {
   display: flex;
@@ -1142,8 +1150,12 @@ body {
   padding: 2px 0;
 }
 
-.criterion.pass { color: #34c759; }
-.criterion.fail { color: #ff3b30; }
+.criterion.pass {
+  color: #34c759;
+}
+.criterion.fail {
+  color: #ff3b30;
+}
 
 .verdict-actions {
   margin-top: 6px;
@@ -1695,7 +1707,7 @@ body {
 }
 
 .support-code-display code {
-  font-family: var(--font-mono, 'SF Mono', 'Menlo', monospace);
+  font-family: var(--font-mono, "SF Mono", "Menlo", monospace);
   font-size: 13px;
   letter-spacing: 1px;
   padding: 3px 8px;

@@ -6,6 +6,8 @@
  * reads the live config on every tool_result event.
  */
 
+import type { SemanticMode } from './semantic-modes.js';
+
 // ── Config interface ────────────────────────────
 
 export interface CompressionConfig {
@@ -13,12 +15,14 @@ export interface CompressionConfig {
   compressMutationResults: boolean;
   /** Return compact design system (hex colors, summary components) vs full raw */
   compactDesignSystem: boolean;
-  /** Tree projection detail level: standard omits extras, detailed keeps fontSize/opacity/effects */
-  treeProjectionDetail: 'standard' | 'detailed';
+  /** Default semantic mode for figma_get_file_data when not specified by the LLM */
+  defaultSemanticMode: SemanticMode;
   /** Prepend extracted node IDs to figma_execute results */
   executeIdExtraction: boolean;
   /** Design system cache TTL in ms */
   designSystemCacheTtlMs: number;
+  /** Output format for discovery tool results */
+  outputFormat: 'json' | 'yaml';
 }
 
 // ── Profile types ───────────────────────────────
@@ -42,14 +46,15 @@ export const COMPRESSION_PROFILES: Record<CompressionProfile, CompressionProfile
     description:
       'Default profile. Balances token savings and information completeness. ' +
       'Best for most sessions: component design, layout creation, feedback iteration. ' +
-      'Compresses mutation results and projects the node tree into compact form. ' +
-      'Design system data is cached and compacted. Ideal for 10-30 turn sessions.',
+      'Compresses mutation results and extracts the node tree with semantic modes. ' +
+      'YAML output for token efficiency. Design system data is cached and compacted. Ideal for 10-30 turn sessions.',
     config: {
       compressMutationResults: true,
       compactDesignSystem: true,
-      treeProjectionDetail: 'standard',
+      defaultSemanticMode: 'full',
       executeIdExtraction: true,
       designSystemCacheTtlMs: 60_000,
+      outputFormat: 'yaml',
     },
   },
   creative: {
@@ -59,13 +64,14 @@ export const COMPRESSION_PROFILES: Record<CompressionProfile, CompressionProfile
       'For intensive design sessions. When creating many elements (full forms, entire pages, ' +
       'component sets with variants), the agent runs dozens of mutations with few re-fetches. ' +
       'Maximizes compression to keep context clean during long sessions (30+ turns). ' +
-      'Uses shorter cache TTLs and compact design system to minimize stale data.',
+      'YAML output for token efficiency. Uses shorter cache TTLs and compact design system to minimize stale data.',
     config: {
       compressMutationResults: true,
       compactDesignSystem: true,
-      treeProjectionDetail: 'standard',
+      defaultSemanticMode: 'full',
       executeIdExtraction: true,
       designSystemCacheTtlMs: 30_000,
+      outputFormat: 'yaml',
     },
   },
   exploration: {
@@ -73,15 +79,16 @@ export const COMPRESSION_PROFILES: Record<CompressionProfile, CompressionProfile
     label: 'Exploration',
     description:
       'For analysis and auditing existing files. When exploring file structure, ' +
-      'doing design reviews, or analyzing components and tokens. The agent needs more ' +
-      'detail in nodes (fontSize, opacity, effects) and design system (full variable values ' +
-      'per mode). Mutations are still compressed since they are rare in this type of session.',
+      'doing design reviews, or analyzing components and tokens. The agent needs full ' +
+      'detail in nodes and design system (full variable values per mode). ' +
+      'JSON output for maximum detail. Mutations are still compressed since they are rare in this type of session.',
     config: {
       compressMutationResults: true,
       compactDesignSystem: false,
-      treeProjectionDetail: 'detailed',
+      defaultSemanticMode: 'full',
       executeIdExtraction: true,
       designSystemCacheTtlMs: 60_000,
+      outputFormat: 'json',
     },
   },
   minimal: {
@@ -89,15 +96,16 @@ export const COMPRESSION_PROFILES: Record<CompressionProfile, CompressionProfile
     label: 'Minimal',
     description:
       'For quick fixes and debugging. Short sessions (< 10 turns) where mutation compression is disabled. ' +
-      'All mutation results pass through in full form. Tree data is still projected in detailed mode. ' +
+      'All mutation results pass through in full form. JSON output for easy debugging. ' +
       'Also useful for diagnosing tool issues — you can see exactly what Figma returns for mutations. ' +
       'Design system caching remains active to avoid duplicate calls.',
     config: {
       compressMutationResults: false,
       compactDesignSystem: false,
-      treeProjectionDetail: 'detailed',
+      defaultSemanticMode: 'full',
       executeIdExtraction: true,
       designSystemCacheTtlMs: 60_000,
+      outputFormat: 'json',
     },
   },
 };

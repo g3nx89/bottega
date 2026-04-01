@@ -119,3 +119,104 @@ test.describe('Compression profile switching via IPC', () => {
     await window.evaluate(() => window.api.compressionSetProfile('balanced'));
   });
 });
+
+// ── Semantic extraction profile settings ──────
+
+test.describe('Semantic extraction profile settings', () => {
+  test('balanced profile description mentions YAML', async () => {
+    const profileSelect = await window.$('#compression-profile-select');
+    await profileSelect?.selectOption('balanced');
+    await window.waitForFunction(
+      () => document.querySelector('#compression-profile-select')?.value === 'balanced',
+      { timeout: 5000 },
+    );
+    const desc = await window.$('#compression-profile-desc');
+    const text = await desc?.textContent();
+    expect(text).toContain('YAML');
+  });
+
+  test('exploration profile description mentions JSON', async () => {
+    const profileSelect = await window.$('#compression-profile-select');
+    await profileSelect?.selectOption('exploration');
+    await window.waitForFunction(
+      () => document.querySelector('#compression-profile-select')?.value === 'exploration',
+      { timeout: 5000 },
+    );
+    const desc = await window.$('#compression-profile-desc');
+    const text = await desc?.textContent();
+    expect(text).toContain('JSON');
+
+    // Restore
+    await profileSelect?.selectOption('balanced');
+    await window.waitForFunction(
+      () => document.querySelector('#compression-profile-select')?.value === 'balanced',
+      { timeout: 5000 },
+    );
+  });
+
+  test('minimal profile description mentions JSON', async () => {
+    const profileSelect = await window.$('#compression-profile-select');
+    await profileSelect?.selectOption('minimal');
+    await window.waitForFunction(
+      () => document.querySelector('#compression-profile-select')?.value === 'minimal',
+      { timeout: 5000 },
+    );
+    const desc = await window.$('#compression-profile-desc');
+    const text = await desc?.textContent();
+    expect(text).toContain('JSON');
+
+    // Restore
+    await profileSelect?.selectOption('balanced');
+    await window.waitForFunction(
+      () => document.querySelector('#compression-profile-select')?.value === 'balanced',
+      { timeout: 5000 },
+    );
+  });
+});
+
+// ── Semantic mode via IPC ─────────────────────
+
+test.describe('Semantic mode via IPC', () => {
+  test('compressionGetProfiles returns config with new fields', async () => {
+    const profiles = await window.evaluate(() => window.api.compressionGetProfiles());
+    expect(profiles).toBeDefined();
+    expect(profiles.length).toBe(4);
+    // Every profile should have the new config shape
+    for (const p of profiles) {
+      expect(p.config).toHaveProperty('defaultSemanticMode');
+      expect(p.config).toHaveProperty('outputFormat');
+    }
+  });
+
+  test('switching to balanced sets outputFormat yaml', async () => {
+    await window.evaluate(() => window.api.compressionSetProfile('balanced'));
+    const profiles = await window.evaluate(() => window.api.compressionGetProfiles());
+    const balanced = profiles.find((p) => p.id === 'balanced');
+    expect(balanced.config.outputFormat).toBe('yaml');
+    expect(balanced.config.defaultSemanticMode).toBe('full');
+  });
+
+  test('switching to minimal sets outputFormat json', async () => {
+    await window.evaluate(() => window.api.compressionSetProfile('minimal'));
+    const profiles = await window.evaluate(() => window.api.compressionGetProfiles());
+    const minimal = profiles.find((p) => p.id === 'minimal');
+    expect(minimal.config.outputFormat).toBe('json');
+
+    // Restore
+    await window.evaluate(() => window.api.compressionSetProfile('balanced'));
+  });
+
+  test('creative profile uses yaml format', async () => {
+    const profiles = await window.evaluate(() => window.api.compressionGetProfiles());
+    const creative = profiles.find((p) => p.id === 'creative');
+    expect(creative.config.outputFormat).toBe('yaml');
+    expect(creative.config.defaultSemanticMode).toBe('full');
+  });
+
+  test('exploration profile uses json format', async () => {
+    const profiles = await window.evaluate(() => window.api.compressionGetProfiles());
+    const exploration = profiles.find((p) => p.id === 'exploration');
+    expect(exploration.config.outputFormat).toBe('json');
+    expect(exploration.config.defaultSemanticMode).toBe('full');
+  });
+});

@@ -21,6 +21,7 @@
     "lint:types": "eslint src/",
     "lint:arch": "which semgrep > /dev/null 2>&1 && semgrep --config .semgrep/ src/ || echo 'semgrep not installed — install via: pip3 install semgrep'",
     "lint:dead": "knip",
+    "benchmark:extraction": "tsx scripts/benchmark-extraction.ts",
     "check": "npm run validate",
     "validate": "concurrently -g npm:typecheck npm:lint npm:lint:types && concurrently -g npm:test npm:lint:dead npm:audit:deps",
     "audit:deps": "npm audit --audit-level=high",
