@@ -30,11 +30,9 @@ describe('isMutationTool', () => {
       'figma_rename',
       'figma_render_jsx',
       'figma_create_icon',
-      'figma_bind_variable',
       'figma_instantiate',
       'figma_set_instance_properties',
       'figma_arrange_component_set',
-      'figma_setup_tokens',
       'figma_batch_set_text',
       'figma_batch_set_fills',
       'figma_batch_transform',
@@ -58,8 +56,8 @@ describe('isMutationTool', () => {
     expect(isMutationTool('')).toBe(false);
   });
 
-  it('MUTATION_TOOLS Set has 27 entries', () => {
-    expect(MUTATION_TOOLS.size).toBe(27);
+  it('MUTATION_TOOLS Set has 25 entries', () => {
+    expect(MUTATION_TOOLS.size).toBe(25);
   });
 });
 
@@ -192,8 +190,8 @@ describe('compressMutationResult — figma_arrange_component_set', () => {
   });
 });
 
-describe('compressMutationResult — figma_setup_tokens', () => {
-  it('extracts collectionId and variable count', () => {
+describe('compressMutationResult — figma_setup_tokens (DS tool, not compressed)', () => {
+  it('returns null — figma_setup_tokens is a DS tool, not a mutation tool', () => {
     const payload = {
       collectionId: 'VariableCollectionId:1:2',
       modeIds: { Light: '1:0' },
@@ -203,33 +201,27 @@ describe('compressMutationResult — figma_setup_tokens', () => {
       ],
     };
     const result = compressMutationResult('figma_setup_tokens', makeContent(payload), false);
-    expect(result!.content[0].text).toBe('OK collection=VariableCollectionId:1:2 vars=2');
+    expect(result).toBeNull();
   });
 
-  it('handles zero variables', () => {
+  it('returns null even with valid collectionId', () => {
     const payload = { collectionId: 'VariableCollectionId:1:2', modeIds: {}, variables: [] };
-    const result = compressMutationResult('figma_setup_tokens', makeContent(payload), false);
-    expect(result!.content[0].text).toBe('OK collection=VariableCollectionId:1:2 vars=0');
-  });
-
-  it('returns null when collectionId is missing', () => {
-    const payload = { modeIds: {}, variables: [] };
     const result = compressMutationResult('figma_setup_tokens', makeContent(payload), false);
     expect(result).toBeNull();
   });
 });
 
-describe('compressMutationResult — figma_bind_variable', () => {
-  it('returns null when result has no nodeId (bind_variable returns only success: true)', () => {
+describe('compressMutationResult — figma_bind_variable (DS tool, not compressed)', () => {
+  it('returns null — figma_bind_variable is a DS tool, not a mutation tool', () => {
     const payload = { success: true };
     const result = compressMutationResult('figma_bind_variable', makeContent(payload), false);
     expect(result).toBeNull();
   });
 
-  it('compresses when node id is present', () => {
+  it('returns null even when node id is present', () => {
     const payload = { success: true, node: { id: '300:400', name: 'Text' } };
     const result = compressMutationResult('figma_bind_variable', makeContent(payload), false);
-    expect(result!.content[0].text).toBe('OK node=300:400');
+    expect(result).toBeNull();
   });
 });
 

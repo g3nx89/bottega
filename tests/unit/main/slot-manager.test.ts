@@ -213,14 +213,14 @@ describe('SlotManager', () => {
     it('calls createFigmaAgentForSlot with default model', async () => {
       await manager.createSlot('file-abc', 'Design.fig');
 
-      expect(createFigmaAgentForSlot).toHaveBeenCalledWith(infra, [{ name: 'mock_tool' }], DEFAULT_MODEL);
+      expect(createFigmaAgentForSlot).toHaveBeenCalledWith(infra, [{ name: 'mock_tool' }], DEFAULT_MODEL, 'file-abc');
     });
 
     it('calls createFigmaAgentForSlot with custom model', async () => {
       const customModel = { provider: 'openai', modelId: 'gpt-4o' };
       await manager.createSlot('file-abc', 'Design.fig', customModel);
 
-      expect(createFigmaAgentForSlot).toHaveBeenCalledWith(infra, [{ name: 'mock_tool' }], customModel);
+      expect(createFigmaAgentForSlot).toHaveBeenCalledWith(infra, [{ name: 'mock_tool' }], customModel, 'file-abc');
     });
 
     it('calls createScopedTools with __unbound__ when no fileKey', async () => {
@@ -341,7 +341,7 @@ describe('SlotManager', () => {
 
       await manager.recreateSession(slot.id, newConfig);
 
-      expect(createFigmaAgentForSlot).toHaveBeenLastCalledWith(infra, expect.any(Array), newConfig);
+      expect(createFigmaAgentForSlot).toHaveBeenLastCalledWith(infra, expect.any(Array), newConfig, 'file-abc');
     });
 
     it('updates slot session and modelConfig, reuses scopedTools', async () => {

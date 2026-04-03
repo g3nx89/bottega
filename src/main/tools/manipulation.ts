@@ -10,17 +10,35 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       name: 'figma_set_fills',
       label: 'Set Fills',
       description:
-        'Set the fill colors of a node. Accepts hex colors. SOLID fills only — gradients and image fills require figma_execute.',
-      promptSnippet: 'figma_set_fills: set solid fill colors on a node (SOLID only — gradients need figma_execute)',
+        'Set the fill colors of a node. Accepts hex colors. SOLID fills only — gradients and image fills require figma_execute. Use bindTo to bind fill color to a DS variable.',
+      promptSnippet:
+        'figma_set_fills: set solid fill colors on a node (SOLID only). Use bindTo to bind fill color to a DS variable',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
         fills: Type.Array(Type.Any(), {
           description: 'Array of fill paints. Simple: [{ type: "SOLID", color: "#FF0000" }]',
         }),
+        bindTo: Type.Optional(
+          Type.String({ description: 'Variable name to bind the fill color to (e.g. "colors/primary")' }),
+        ),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setNodeFills(params.nodeId, params.fills);
+          if (params.bindTo) {
+            try {
+              await connector.bindVariable(params.nodeId, params.bindTo, 'fill');
+              return textResult({
+                ...(typeof result === 'object' && result !== null ? result : { success: true }),
+                bound: params.bindTo,
+              });
+            } catch (bindErr: any) {
+              return textResult({
+                ...(typeof result === 'object' && result !== null ? result : { success: true }),
+                warning: `Fill applied but variable binding failed: ${bindErr.message}. The fill has a hardcoded value without a DS variable binding.`,
+              });
+            }
+          }
           return textResult(result);
         });
       },
@@ -29,16 +47,34 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       name: 'figma_set_strokes',
       label: 'Set Strokes',
       description:
-        'Set the stroke colors and weight of a node. SOLID strokes only — gradient strokes require figma_execute.',
-      promptSnippet: 'figma_set_strokes: set solid stroke colors and weight (SOLID only)',
+        'Set the stroke colors and weight of a node. SOLID strokes only — gradient strokes require figma_execute. Use bindTo to bind stroke color to a DS variable.',
+      promptSnippet:
+        'figma_set_strokes: set solid stroke colors and weight (SOLID only). Use bindTo to bind stroke color to a DS variable',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
         strokes: Type.Array(Type.Any(), { description: 'Array of stroke paints' }),
         weight: Type.Optional(Type.Number({ description: 'Stroke weight in px' })),
+        bindTo: Type.Optional(
+          Type.String({ description: 'Variable name to bind the stroke color to (e.g. "colors/border")' }),
+        ),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setNodeStrokes(params.nodeId, params.strokes, params.weight);
+          if (params.bindTo) {
+            try {
+              await connector.bindVariable(params.nodeId, params.bindTo, 'stroke');
+              return textResult({
+                ...(typeof result === 'object' && result !== null ? result : { success: true }),
+                bound: params.bindTo,
+              });
+            } catch (bindErr: any) {
+              return textResult({
+                ...(typeof result === 'object' && result !== null ? result : { success: true }),
+                warning: `Stroke applied but variable binding failed: ${bindErr.message}. The stroke has a hardcoded value without a DS variable binding.`,
+              });
+            }
+          }
           return textResult(result);
         });
       },
@@ -47,7 +83,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       name: 'figma_set_text',
       label: 'Set Text',
       description: 'Set the text content and optionally font properties of a text node.',
-      promptSnippet: 'figma_set_text: set text content and font properties on a text node',
+      promptSnippet:
+        'figma_set_text: set text content and font properties on a text node. NOT for DS page content — use figma_update_ds_page. NOT for component instance text managed by property — use figma_set_instance_properties',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Text node ID' }),
         text: Type.String({ description: 'Text content to set' }),

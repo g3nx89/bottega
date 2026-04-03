@@ -44,7 +44,12 @@ describe('categorizeToolName', () => {
   it('categorizes jsx render tools as mutation (they produce node IDs)', () => {
     expect(categorizeToolName('figma_render_jsx')).toBe('mutation');
     expect(categorizeToolName('figma_create_icon')).toBe('mutation');
-    expect(categorizeToolName('figma_bind_variable')).toBe('mutation');
+  });
+
+  it('categorizes DS tools as ds', () => {
+    expect(categorizeToolName('figma_bind_variable')).toBe('ds');
+    expect(categorizeToolName('figma_setup_tokens')).toBe('ds');
+    expect(categorizeToolName('figma_update_ds_page')).toBe('ds');
   });
 
   it('categorizes discovery tools', () => {

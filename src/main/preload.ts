@@ -68,6 +68,9 @@ contextBridge.exposeInMainWorld('api', {
   onTaskUpdated: (cb: (slotId: string, tasks: any[]) => void) => {
     ipcRenderer.on('task:updated', (_event, slotId, tasks) => cb(slotId, tasks));
   },
+  onTaskCleared: (cb: (slotId: string, count: number) => void) => {
+    ipcRenderer.on('task:cleared', (_event, slotId, count) => cb(slotId, count));
+  },
   getTaskList: (slotId: string) => ipcRenderer.invoke('task:list', slotId),
 
   // ── Tab management ────────────────────────

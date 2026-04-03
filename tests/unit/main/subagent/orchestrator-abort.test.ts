@@ -6,7 +6,7 @@ vi.mock('../../../../src/figma/logger.js', () => ({
 }));
 
 vi.mock('../../../../src/main/subagent/session-factory.js', () => ({
-  createSubagentSession: vi.fn().mockImplementation(async (infra, tools, config, systemPrompt, signal) => {
+  createSubagentSession: vi.fn().mockImplementation(async (_infra, _tools, _config, _systemPrompt, signal) => {
     // Simulate that createSubagentSession respects abort signal
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {

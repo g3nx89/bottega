@@ -238,7 +238,7 @@ export function createEventRouter(deps: EventRouterDeps) {
         // Check mutation precondition before emitting judge:running to avoid bogus UI state
         const hasMutations = toolNames.some((n) => {
           const cat = categorizeToolName(n);
-          return cat === 'mutation';
+          return cat === 'mutation' || cat === 'ds';
         });
         if (connector && hasMutations) {
           judgeInProgress.add(slot.id);
@@ -287,6 +287,7 @@ export function createEventRouter(deps: EventRouterDeps) {
     const next = slot.promptQueue.dequeue();
     if (next) {
       beginTurn(slot, next.text, true, usageTracker);
+      deps.infra?.setWorkflowContext?.(next.text, slot.fileKey ?? '');
 
       safeSend(wc, 'queue:updated', slot.id, slot.promptQueue.list());
       safeSend(wc, 'agent:queued-prompt-start', slot.id, next.text);

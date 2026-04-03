@@ -13,18 +13,23 @@ import {
 import type { FigmaAPI } from '../figma/figma-api.js';
 import type { FigmaWebSocketServer } from '../figma/websocket-server.js';
 import type { CompressionConfigManager } from './compression/compression-config.js';
-import type { DesignSystemCache } from './compression/design-system-cache.js';
+import type { CompactDesignSystem, DesignSystemCache } from './compression/design-system-cache.js';
 import { createCompressionExtensionFactory } from './compression/extension-factory.js';
 import type { CompressionMetricsCollector } from './compression/metrics.js';
 import type { FigmaCore } from './figma-core.js';
 import type { ImageGenerator } from './image-gen/image-generator.js';
 import type { OperationQueueManager } from './operation-queue-manager.js';
 import { ScopedConnector } from './scoped-connector.js';
-import { buildSystemPrompt } from './system-prompt.js';
+import { buildSystemPrompt, type DsBlockData } from './system-prompt.js';
 import { createTaskExtensionFactory } from './tasks/extension-factory.js';
 import { TaskStore } from './tasks/store.js';
 import { createTaskTools } from './tasks/tools.js';
 import { createFigmaTools } from './tools/index.js';
+import { composeCapabilities } from './workflows/capability-composer.js';
+import { buildDesignWorkflowContext } from './workflows/design-context.js';
+import { createWorkflowExtensionFactory, type WorkflowState } from './workflows/extension-factory.js';
+import { resolveIntent } from './workflows/intent-router.js';
+import type { DesignWorkflowContext } from './workflows/types.js';
 
 export interface ModelConfig {
   provider: string; // Pi SDK provider ID: 'anthropic' | 'openai' | 'openai-codex' | 'google' | 'google-gemini-cli'
@@ -104,6 +109,49 @@ export const AVAILABLE_MODELS: Record<string, { id: string; label: string; sdkPr
   ],
 };
 
+/** Strip markdown headers, XML tags, and newlines to prevent prompt injection. */
+function sanitizeDsValue(s: string): string {
+  return s.replace(/[#<>\n\r]/g, '').slice(0, 100);
+}
+
+/** Summarize DS variables matching a predicate into a compact `key=value` string. */
+function summarizeVars(
+  ds: CompactDesignSystem,
+  predicate: (name: string, v: { type: string; values: Record<string, string | number | boolean> }) => boolean,
+  limit: number,
+): string | undefined {
+  const matches = ds.variables
+    .flatMap((col) => Object.entries(col.vars))
+    .filter(([name, v]) => predicate(name, v))
+    .slice(0, limit);
+
+  if (matches.length === 0) return undefined;
+
+  return matches
+    .map(([name, v]) => {
+      const firstValue = Object.values(v.values)[0];
+      const safeName = sanitizeDsValue(String(name.split('/').pop() ?? name));
+      const safeValue = sanitizeDsValue(String(firstValue));
+      return `${safeName}=${safeValue}`;
+    })
+    .join(' ');
+}
+
+/** Convert cached DS data to the compact DsBlockData for the system prompt. */
+function readDesignSystemBlock(cache: DesignSystemCache, fileKey: string): DsBlockData | undefined {
+  const ds = cache.get(true, fileKey) as CompactDesignSystem | null;
+  if (!ds || !('dsStatus' in ds)) return undefined;
+  const compact = ds as CompactDesignSystem;
+
+  return {
+    colors: summarizeVars(compact, (_, v) => v.type === 'COLOR', 8),
+    typography: summarizeVars(compact, (name) => /font|type|size/i.test(name), 6),
+    spacing: summarizeVars(compact, (name, v) => v.type === 'FLOAT' && /spacing|space|gap|padding/i.test(name), 8),
+    radii: summarizeVars(compact, (name, v) => v.type === 'FLOAT' && /radius|radii|rounded/i.test(name), 6),
+    status: compact.dsStatus,
+  };
+}
+
 /**
  * Shared agent infrastructure: auth, compression, and Figma core references.
  * Created once, reused across session recreations and slot creation.
@@ -117,7 +165,10 @@ export interface AgentInfra {
   metricsCollector: CompressionMetricsCollector;
   compressionExtensionFactory: (pi: any) => void;
   taskExtensionFactory: (pi: any) => void;
+  workflowExtensionFactory: (pi: any) => void;
   setActiveTaskStore: (store: TaskStore | undefined) => void;
+  /** Update the current user message and fileKey for workflow intent resolution. */
+  setWorkflowContext: (message: string, fileKey: string) => void;
   wsServer: FigmaWebSocketServer;
   figmaAPI: FigmaAPI;
   queueManager: OperationQueueManager;
@@ -155,6 +206,57 @@ export async function createAgentInfra(
   let _activeTaskStore: TaskStore | undefined;
   const taskExtensionFactory = createTaskExtensionFactory(() => _activeTaskStore);
 
+  // Workflow extension — per-fileKey state to prevent bleed across tabs/slots
+  interface PerSlotWorkflowState {
+    message: string;
+    previousMode?: import('./workflows/types.js').InteractionMode;
+    modeBeforeReview?: import('./workflows/types.js').InteractionMode;
+    cachedState: WorkflowState | null | undefined;
+    cacheKey: string;
+  }
+  const _workflowStateMap = new Map<string, PerSlotWorkflowState>();
+  let _activeWorkflowFileKey = '';
+
+  const workflowExtensionFactory = createWorkflowExtensionFactory((): WorkflowState | null => {
+    const fileKey = _activeWorkflowFileKey;
+    const slot = _workflowStateMap.get(fileKey);
+    if (!slot || !slot.message) return null;
+
+    const key = `${slot.message}|${fileKey}`;
+    if (slot.cacheKey === key && slot.cachedState !== undefined) {
+      return slot.cachedState;
+    }
+
+    const ds = designSystemCache.get(true, fileKey) as CompactDesignSystem | null;
+    const dsStatus: DesignWorkflowContext['dsStatus'] = ds?.dsStatus ?? 'unknown';
+
+    const context = buildDesignWorkflowContext({
+      dsStatus,
+      userMessage: slot.message,
+      previousMode: slot.previousMode,
+      modeBeforeReview: slot.modeBeforeReview,
+    });
+    const resolution = resolveIntent(slot.message, context);
+
+    const result: WorkflowState | null = resolution.pack
+      ? {
+          context: resolution.context,
+          pack: resolution.pack,
+          composed: composeCapabilities(resolution.pack.capabilities),
+        }
+      : null;
+
+    // Persist mode for next turn so transitions propagate correctly
+    if (context.interactionMode === 'review' && slot.previousMode !== 'review') {
+      slot.modeBeforeReview = slot.previousMode;
+    }
+    slot.previousMode = resolution.context.interactionMode;
+
+    slot.cacheKey = key;
+    slot.cachedState = result;
+    return result;
+  });
+
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
   const sessionManager = SessionManager.create(os.tmpdir(), opts.sessionsDir || DEFAULT_SESSIONS_DIR);
@@ -170,11 +272,22 @@ export async function createAgentInfra(
     metricsCollector,
     compressionExtensionFactory,
     taskExtensionFactory,
+    workflowExtensionFactory,
     setActiveTaskStore: (s) => {
       if (_activeTaskStore !== s) {
         _activeTaskStore = s;
         taskExtensionFactory.reset();
       }
+    },
+    setWorkflowContext: (message: string, fileKey: string) => {
+      _activeWorkflowFileKey = fileKey;
+      if (!_workflowStateMap.has(fileKey)) {
+        _workflowStateMap.set(fileKey, { message: '', cachedState: undefined, cacheKey: '' });
+      }
+      const slot = _workflowStateMap.get(fileKey)!;
+      slot.message = message;
+      slot.cachedState = undefined;
+      slot.cacheKey = '';
     },
     wsServer: figmaCore.wsServer,
     figmaAPI: figmaCore.figmaAPI,
@@ -188,6 +301,7 @@ async function buildAgentSession(
   infra: AgentInfra,
   tools: ToolDefinition[],
   modelConfig: ModelConfig,
+  fileKey?: string,
 ): Promise<CreateAgentSessionResult> {
   const model = getModel(modelConfig.provider as any, modelConfig.modelId as any);
 
@@ -195,14 +309,17 @@ async function buildAgentSession(
   const entry = allModels.find((m) => m.sdkProvider === modelConfig.provider && m.id === modelConfig.modelId);
   const modelLabel = entry?.label || modelConfig.modelId;
 
+  // Read DS block from cache if fileKey available
+  const dsData = fileKey ? readDesignSystemBlock(infra.designSystemCache, fileKey) : undefined;
+
   const resourceLoader = new DefaultResourceLoader({
     cwd: os.tmpdir(),
-    systemPrompt: buildSystemPrompt(modelLabel),
+    systemPrompt: buildSystemPrompt(modelLabel, dsData),
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    extensionFactories: [infra.compressionExtensionFactory, infra.taskExtensionFactory],
+    extensionFactories: [infra.compressionExtensionFactory, infra.taskExtensionFactory, infra.workflowExtensionFactory],
   });
   await resourceLoader.reload();
 
@@ -259,6 +376,7 @@ export async function createFigmaAgentForSlot(
   infra: AgentInfra,
   scopedTools: ToolDefinition[],
   modelConfig: ModelConfig = DEFAULT_MODEL,
+  fileKey?: string,
 ): Promise<CreateAgentSessionResult> {
-  return buildAgentSession(infra, scopedTools, modelConfig);
+  return buildAgentSession(infra, scopedTools, modelConfig, fileKey);
 }

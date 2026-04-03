@@ -3888,10 +3888,10 @@ figma.ui.onmessage = async (msg) => {
     try {
       const node = await figma.getNodeByIdAsync(nodeId);
       if (!node) throw new Error('Node ' + nodeId + ' not found');
-      const variables = await figma.variables.getLocalVariablesAsync('COLOR');
-      const variable = variables.find(v => v.name === variableName);
-      if (!variable) throw new Error('Variable "' + variableName + '" not found');
       if (property === 'fill' && 'fills' in node) {
+        const variables = await figma.variables.getLocalVariablesAsync('COLOR');
+        const variable = variables.find(v => v.name === variableName);
+        if (!variable) throw new Error('COLOR variable "' + variableName + '" not found');
         const fills = [...node.fills];
         for (let i = 0; i < fills.length; i++) {
           if (fills[i].type === 'SOLID') {
@@ -3900,6 +3900,9 @@ figma.ui.onmessage = async (msg) => {
         }
         node.fills = fills;
       } else if (property === 'stroke' && 'strokes' in node) {
+        const variables = await figma.variables.getLocalVariablesAsync('COLOR');
+        const variable = variables.find(v => v.name === variableName);
+        if (!variable) throw new Error('COLOR variable "' + variableName + '" not found');
         const strokes = [...node.strokes];
         for (let i = 0; i < strokes.length; i++) {
           if (strokes[i].type === 'SOLID') {
@@ -3907,6 +3910,17 @@ figma.ui.onmessage = async (msg) => {
           }
         }
         node.strokes = strokes;
+      } else {
+        // FLOAT property binding (padding, gap, radius, fontSize, etc.)
+        const floatProperties = ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'itemSpacing', 'counterAxisSpacing', 'cornerRadius', 'fontSize', 'lineHeight', 'strokeWeight'];
+        if (floatProperties.includes(property)) {
+          const allVars = await figma.variables.getLocalVariablesAsync('FLOAT');
+          const floatVar = allVars.find(v => v.name === variableName);
+          if (!floatVar) throw new Error('FLOAT variable "' + variableName + '" not found');
+          node.setBoundVariable(property, floatVar);
+        } else {
+          throw new Error('Unsupported property: ' + property + '. Supported: fill, stroke, ' + floatProperties.join(', '));
+        }
       }
       figma.ui.postMessage({ type: 'BIND_VARIABLE_RESULT', success: true, requestId });
     } catch (e) {

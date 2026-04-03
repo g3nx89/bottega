@@ -88,12 +88,32 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
     {
       name: 'figma_bind_variable',
       label: 'Bind Variable',
-      description: 'Link a node fill or stroke to a Figma variable (design token) by name.',
-      promptSnippet: 'figma_bind_variable: link a node fill/stroke to a design token variable',
+      description:
+        'Bind a node property to a Figma variable (design token). For colors: binds fill or stroke. For numeric properties: binds padding (paddingTop/Right/Bottom/Left), itemSpacing, cornerRadius, fontSize, lineHeight, strokeWeight.',
+      promptSnippet:
+        'figma_bind_variable: bind node property to a design token. Colors: fill/stroke. Numeric: padding, itemSpacing, cornerRadius, fontSize, lineHeight, strokeWeight',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
         variableName: Type.String({ description: 'Variable name (e.g. "colors/primary")' }),
-        property: StringEnum(['fill', 'stroke'] as const, { description: 'Which property to bind' }),
+        property: StringEnum(
+          [
+            'fill',
+            'stroke',
+            'paddingTop',
+            'paddingRight',
+            'paddingBottom',
+            'paddingLeft',
+            'itemSpacing',
+            'cornerRadius',
+            'fontSize',
+            'lineHeight',
+            'strokeWeight',
+          ] as const,
+          {
+            description:
+              'Which property to bind. Color props: fill, stroke. Numeric props: paddingTop, paddingRight, paddingBottom, paddingLeft, itemSpacing, cornerRadius, fontSize, lineHeight, strokeWeight',
+          },
+        ),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {

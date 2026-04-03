@@ -16,8 +16,9 @@ async function createModes(
   }
   for (let i = 1; i < modeNames.length; i++) {
     const name = modeNames[i]!;
-    const mode = await connector.addMode(collectionId, name);
-    modeIds[name] = mode.modeId || mode.id;
+    const result = await connector.addMode(collectionId, name);
+    // Bridge wraps: { success, newMode: { modeId, name }, collection }
+    modeIds[name] = result.newMode?.modeId || result.modeId || result.id;
   }
   return modeIds;
 }
@@ -30,11 +31,18 @@ async function createVariablesWithValues(
 ): Promise<Array<{ name: string; id: string }>> {
   const created: Array<{ name: string; id: string }> = [];
   for (const v of variables) {
-    const variable = await connector.createVariable(v.name, collectionId, v.type);
+    const varResult = await connector.createVariable(v.name, collectionId, v.type);
+    // Bridge wraps: { success, variable: { id, name, ... } }
+    const variable = varResult.variable ?? varResult;
     const varId = variable.id || variable.variableId;
     for (const [modeName, value] of Object.entries(v.values)) {
       const modeId = modeIds[modeName];
-      if (modeId) await connector.updateVariable(varId, modeId, value);
+      if (!modeId) {
+        throw new Error(
+          `Mode "${modeName}" not found in collection. Available modes: ${Object.keys(modeIds).join(', ')}`,
+        );
+      }
+      await connector.updateVariable(varId, modeId, value);
     }
     created.push({ name: v.name, id: varId });
   }
@@ -48,8 +56,10 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_setup_tokens',
       label: 'Setup Design Tokens',
-      description: 'Create a complete design token system: collection, modes, and variables with values.',
-      promptSnippet: 'figma_setup_tokens: create a design token collection with modes and variables in one call',
+      description:
+        'Create or update a design token system: collection, modes, and variables with values. Idempotent — creates if new, updates if existing. Example: { collectionName: "Tokens", modes: ["Light", "Dark"], variables: [{ name: "colors/primary", type: "COLOR", values: { "Light": { r: 0.65, g: 0.35, b: 1 }, "Dark": { r: 0.8, g: 0.5, b: 1 } } }] }',
+      promptSnippet:
+        'figma_setup_tokens: create/update token collection. REQUIRED per variable: name, type, values (mode→value map). Example: variables: [{ name: "colors/primary", type: "COLOR", values: { "Light": { r:0.65, g:0.35, b:1 }, "Dark": { r:0.8, g:0.5, b:1 } } }]',
       parameters: Type.Object({
         collectionName: Type.String({ description: 'Name for the variable collection' }),
         modes: Type.Array(Type.String(), { description: 'Mode names (e.g. ["Light", "Dark"])' }),
@@ -63,27 +73,98 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
-          const collection = await connector.createVariableCollection(params.collectionName);
-          const collectionId = collection.id || collection.collectionId;
-          const modeIds = await createModes(connector, collectionId, params.modes, collection.defaultModeId);
-          const variables = await createVariablesWithValues(connector, collectionId, params.variables, modeIds);
-          return textResult({ collectionId, modeIds, variables });
+          // Check for existing collection (idempotent)
+          const existing = await connector.getVariables();
+          const existingCollections: any[] = existing?.variableCollections ?? existing?.collections ?? [];
+          const existingCollection = existingCollections.find((c: any) => c.name === params.collectionName);
+
+          if (existingCollection) {
+            // Update existing collection
+            const collectionId = existingCollection.id || existingCollection.collectionId;
+            const existingModes: Array<{ modeId: string; name: string }> = existingCollection.modes ?? [];
+            const existingModeMap: Record<string, string> = {};
+            for (const m of existingModes) {
+              existingModeMap[m.name] = m.modeId;
+            }
+
+            // Reconcile modes: rename Figma's default mode if it doesn't match requested names
+            const requestedSet = new Set(params.modes as string[]);
+            const unmatchedExisting = existingModes.filter((m) => !requestedSet.has(m.name));
+            let renameIdx = 0;
+            for (const modeName of params.modes) {
+              if (existingModeMap[modeName]) continue; // already exists with correct name
+              if (renameIdx < unmatchedExisting.length) {
+                // Rename an unmatched existing mode (e.g. "Mode 1" → "Light")
+                const toRename = unmatchedExisting[renameIdx++]!;
+                await connector.renameMode(collectionId, toRename.modeId, modeName);
+                existingModeMap[modeName] = toRename.modeId;
+                delete existingModeMap[toRename.name];
+              } else {
+                // No more existing modes to rename — create new
+                const modeResult = await connector.addMode(collectionId, modeName);
+                // Bridge wraps: { success, newMode: { modeId, name }, collection }
+                existingModeMap[modeName] = modeResult.newMode?.modeId || modeResult.modeId || modeResult.id;
+              }
+            }
+
+            // Upsert variables.
+            // Support two payload shapes:
+            // 1. Real Desktop Bridge: variables are a flat top-level array with variableCollectionId
+            // 2. Legacy/mock: variables are embedded directly inside each collection object
+            const existingVars: any[] = (() => {
+              if (Array.isArray(existingCollection.variables) && existingCollection.variables.length > 0) {
+                // Embedded shape (legacy/mock)
+                return existingCollection.variables;
+              }
+              // Flat shape (real Desktop Bridge)
+              const flatVars: any[] = existing?.variables ?? [];
+              return flatVars.filter((v: any) => v.variableCollectionId === collectionId);
+            })();
+            const created: Array<{ name: string; id: string }> = [];
+            for (const v of params.variables) {
+              const existingVar = existingVars.find((ev: any) => ev.name === v.name);
+              if (existingVar) {
+                // Update existing variable values
+                const varId = existingVar.id || existingVar.variableId;
+                for (const [modeName, value] of Object.entries(v.values)) {
+                  const modeId = existingModeMap[modeName];
+                  if (!modeId) {
+                    throw new Error(
+                      `Mode "${modeName}" not found in collection. Available modes: ${Object.keys(existingModeMap).join(', ')}`,
+                    );
+                  }
+                  await connector.updateVariable(varId, modeId, value);
+                }
+                created.push({ name: v.name, id: varId });
+              } else {
+                // Create new variable
+                const variable = await connector.createVariable(v.name, collectionId, v.type);
+                const varId = variable.id || variable.variableId;
+                for (const [modeName, value] of Object.entries(v.values)) {
+                  const modeId = existingModeMap[modeName];
+                  if (!modeId) {
+                    throw new Error(
+                      `Mode "${modeName}" not found in collection. Available modes: ${Object.keys(existingModeMap).join(', ')}`,
+                    );
+                  }
+                  await connector.updateVariable(varId, modeId, value);
+                }
+                created.push({ name: v.name, id: varId });
+              }
+            }
+
+            return textResult({ collectionId, modeIds: existingModeMap, variables: created });
+          } else {
+            // Create new collection
+            const collResult = await connector.createVariableCollection(params.collectionName);
+            // Bridge wraps: { success, collection: { id, modes, defaultModeId, ... } }
+            const collection = collResult.collection ?? collResult;
+            const collectionId = collection.id || collection.collectionId;
+            const modeIds = await createModes(connector, collectionId, params.modes, collection.defaultModeId);
+            const variables = await createVariablesWithValues(connector, collectionId, params.variables, modeIds);
+            return textResult({ collectionId, modeIds, variables });
+          }
         });
-      },
-    },
-    {
-      name: 'figma_lint',
-      label: 'Lint Design',
-      description:
-        'Run design linting rules on a node or the entire page. Checks naming conventions, spacing consistency, and other design quality rules.',
-      promptSnippet: 'figma_lint: check design quality (naming, spacing, consistency)',
-      parameters: Type.Object({
-        nodeId: Type.Optional(Type.String({ description: 'Node ID to lint. If omitted, lints entire page.' })),
-        rules: Type.Optional(Type.Array(Type.String(), { description: 'Specific rule names to check' })),
-      }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
-        const result = await connector.lintDesign(params.nodeId, params.rules);
-        return textResult(result);
       },
     },
   ];

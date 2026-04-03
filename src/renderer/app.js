@@ -968,6 +968,14 @@ function renderTaskPanel(tab) {
   header.textContent = `${tasks.length} tasks (${completed}/${tasks.length} done)`;
   panel.appendChild(header);
 
+  const progressOuter = document.createElement('div');
+  progressOuter.className = 'task-progress';
+  const progressInner = document.createElement('div');
+  progressInner.className = 'task-progress-fill';
+  progressInner.style.width = tasks.length > 0 ? `${(completed / tasks.length) * 100}%` : '0%';
+  progressOuter.appendChild(progressInner);
+  panel.appendChild(progressOuter);
+
   for (const t of tasks) {
     const row = document.createElement('div');
     row.className = `task-row ${t.status}`;

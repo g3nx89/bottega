@@ -343,7 +343,7 @@ describe('Compression E2E — metrics collection', () => {
 });
 
 describe('Compression E2E — individual compressors', () => {
-  it('compressMutationResult handles all 17 mutation tools', () => {
+  it('compressMutationResult handles all 15 mutation tools', () => {
     const mutationTools = [
       'figma_set_fills',
       'figma_set_strokes',
@@ -358,20 +358,13 @@ describe('Compression E2E — individual compressors', () => {
       'figma_instantiate',
       'figma_set_instance_properties',
       'figma_arrange_component_set',
-      'figma_setup_tokens',
       'figma_render_jsx',
       'figma_create_icon',
-      'figma_bind_variable',
     ];
 
     // Tool-specific payloads for special-cased tools
     const payloads: Record<string, any> = {
       figma_delete: { success: true, deleted: { id: '1:1', name: 'N' } },
-      figma_setup_tokens: {
-        collectionId: 'VC:1:2',
-        modeIds: { Light: '1:0' },
-        variables: [{ name: 'c/p', id: 'V:3:4' }],
-      },
       figma_render_jsx: { success: true, nodeId: '1:1', childIds: ['2:2'] },
     };
     const defaultPayload = { success: true, node: { id: '1:1', name: 'N' } };

@@ -113,6 +113,12 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
           if (parsed?.error) return textResult({ error: parsed.error });
           const result = extractTree(parsed, mode, { maxDepth: params.depth });
           const format = configManager.getActiveConfig().outputFormat;
+          const dsCache = designSystemCache?.get(true, fileKey);
+          if (dsCache && 'dsStatus' in dsCache) {
+            if (typeof result === 'object' && result !== null && !Array.isArray(result)) {
+              (result as any)._dsStatus = (dsCache as any).dsStatus;
+            }
+          }
           return textResult(result, format);
         } catch {
           return textResult(rawResult);
@@ -211,8 +217,9 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       name: 'figma_design_system',
       label: 'Design System Overview',
       description:
-        'Get an overview of the design system: variables (tokens) and local components. Results are cached — use forceRefresh if you suspect the design system changed.',
-      promptSnippet: 'figma_design_system: get design system overview (variables + local components, cached)',
+        'Get an overview of the design system: variables (tokens), rules, naming conventions, and local components. Returns dsStatus (none/partial/active). Results are cached — use forceRefresh after DS changes.',
+      promptSnippet:
+        'figma_design_system: get design system overview (variables + rules + naming + local components, cached). Use forceRefresh after DS changes',
       parameters: Type.Object({
         forceRefresh: Type.Optional(
           Type.Boolean({
@@ -232,8 +239,21 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
         }
 
         // Fetch fresh from Figma
-        const [variables, components] = await Promise.all([connector.getVariables(), connector.getLocalComponents()]);
-        const raw = { variables, components };
+        // getVariables() may return a wrapper { variables, variableCollections } or a plain array.
+        // Normalize to the shape compactDesignSystem expects: { variables: collections[], components: [] }
+        const [varsResult, compsResult] = await Promise.all([connector.getVariables(), connector.getLocalComponents()]);
+        const rawCollections = Array.isArray(varsResult)
+          ? varsResult
+          : (varsResult?.variableCollections ?? varsResult?.variables ?? varsResult);
+        const rawComponents = Array.isArray(compsResult) ? compsResult : (compsResult?.components ?? compsResult);
+        // Preserve both flat variables AND collections for compactDesignSystem's shape detection
+        const flatVars = !Array.isArray(varsResult) ? varsResult?.variables : undefined;
+        const raw = {
+          variables: Array.isArray(rawCollections) ? rawCollections : [],
+          ...(flatVars && Array.isArray(flatVars) ? { flatVariables: flatVars } : {}),
+          variableCollections: varsResult?.variableCollections,
+          components: Array.isArray(rawComponents) ? rawComponents : [],
+        };
 
         // Store in cache and return appropriate form
         const { compact } = designSystemCache.set(raw, fileKey);

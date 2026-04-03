@@ -322,6 +322,11 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
       return;
     }
 
+    // Update workflow context so the extension factory can resolve intent
+    if (slot.fileKey) {
+      infra.setWorkflowContext(text, slot.fileKey);
+    }
+
     // Direct send — assign a promptId for correlation across tool calls and turn end
     beginTurn(slot, text, false, usageTracker);
     slot.suggester.trackUserPrompt(text);

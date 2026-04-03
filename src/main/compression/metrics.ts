@@ -59,7 +59,7 @@ export interface SessionMetrics {
   compressionByCategory: Record<string, { totalBefore: number; totalAfter: number }>;
 }
 
-export type ToolCategory = 'mutation' | 'discovery' | 'screenshot' | 'execute' | 'other';
+export type ToolCategory = 'mutation' | 'discovery' | 'screenshot' | 'execute' | 'ds' | 'task' | 'other';
 
 // ── Category routing ────────────────────────────
 
@@ -77,10 +77,10 @@ export const CATEGORY_MAP: Record<string, ToolCategory> = {
   figma_instantiate: 'mutation',
   figma_set_instance_properties: 'mutation',
   figma_arrange_component_set: 'mutation',
-  figma_setup_tokens: 'mutation',
+  figma_setup_tokens: 'ds',
   figma_render_jsx: 'mutation',
   figma_create_icon: 'mutation',
-  figma_bind_variable: 'mutation',
+  figma_bind_variable: 'ds',
   figma_batch_set_text: 'mutation',
   figma_batch_set_fills: 'mutation',
   figma_batch_transform: 'mutation',
@@ -106,10 +106,11 @@ export const CATEGORY_MAP: Record<string, ToolCategory> = {
   figma_get_annotations: 'discovery',
   figma_get_annotation_categories: 'discovery',
   figma_lint: 'discovery',
+  figma_update_ds_page: 'ds',
   figma_execute: 'execute',
-  task_create: 'other',
-  task_update: 'other',
-  task_list: 'other',
+  task_create: 'task',
+  task_update: 'task',
+  task_list: 'task',
 };
 
 export function categorizeToolName(toolName: string): ToolCategory {

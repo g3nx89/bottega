@@ -172,6 +172,7 @@ describe('Core Tools', () => {
                 connectedAt: deps.wsServer.getConnectedFileInfo().connectedAt,
               },
               files: [],
+              dsStatus: 'unknown',
             }),
           },
         ],

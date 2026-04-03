@@ -190,6 +190,7 @@ describe('setupIpcHandlers', () => {
       designSystemCache: { invalidate: vi.fn() },
       metricsCollector: { finalize: vi.fn() },
       wsServer: { sendCommand: vi.fn() },
+      setWorkflowContext: vi.fn(),
     };
     const mock = createMockSlotManager(mockSession);
     slotId = mock.slotId;

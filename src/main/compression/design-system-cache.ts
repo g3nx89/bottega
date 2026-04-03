@@ -22,9 +22,23 @@ export interface CompactComponent {
   props?: string[];
 }
 
+export interface DsRule {
+  section: string;
+  content: string;
+}
+
+export interface DsNaming {
+  pageStyle: string;
+  componentStyle: string;
+  variableStyle: string;
+}
+
 export interface CompactDesignSystem {
   variables: CompactVariableCollection[];
   components: CompactComponent[];
+  rules: DsRule[]; // Never compressed
+  naming: DsNaming | null; // Never compressed
+  dsStatus: 'active' | 'partial' | 'none'; // Never compressed
 }
 
 // ── Compaction logic ─────────────────────────────
@@ -117,11 +131,47 @@ function compactComponent(comp: any, setVariants: Record<string, string[]>): Com
   return result;
 }
 
+/**
+ * Build a per-collection variable lookup from the flat variables array returned
+ * by the real Desktop Bridge connector (getVariables response shape):
+ *   { variables: [{ variableCollectionId, name, resolvedType, valuesByMode, ... }],
+ *     variableCollections: [{ id, name, modes, variableIds, ... }] }
+ *
+ * Each collection object does NOT embed variables — they are stored flat with a
+ * back-reference via `variableCollectionId`.
+ */
+function buildCollectionsFromFlatShape(collections: any[], flatVariables: any[]): any[] {
+  const byCollection: Record<string, any[]> = {};
+  for (const v of flatVariables) {
+    const cid = v.variableCollectionId ?? '';
+    if (!byCollection[cid]) byCollection[cid] = [];
+    byCollection[cid].push(v);
+  }
+  return collections.map((col) => ({
+    ...col,
+    variables: byCollection[col.id ?? ''] ?? [],
+  }));
+}
+
 export function compactDesignSystem(raw: any): CompactDesignSystem {
-  const rawVariables: any[] = Array.isArray(raw?.variables) ? raw.variables : [];
+  const rawFlatVariables: any[] = Array.isArray(raw?.variables) ? raw.variables : [];
   const rawComponents: any[] = Array.isArray(raw?.components) ? raw.components : [];
 
-  const variables = rawVariables.map(compactCollection);
+  // Support two payload shapes:
+  // 1. Separate flat arrays (real Desktop Bridge): raw.variableCollections + raw.variables (flat)
+  // 2. Embedded collections (legacy / mock): raw.variables is an array of collections with .variables
+  let rawCollections: any[];
+  if (Array.isArray(raw?.variableCollections) && raw.variableCollections.length > 0) {
+    // Real Desktop Bridge shape — collections don't embed variables; build from flat array
+    // flatVariables may be passed separately by discovery.ts normalization, or inline as raw.variables
+    const flatVars = Array.isArray(raw?.flatVariables) ? raw.flatVariables : rawFlatVariables;
+    rawCollections = buildCollectionsFromFlatShape(raw.variableCollections, flatVars);
+  } else {
+    // Legacy / mock shape — raw.variables is already an array of collection objects with embedded vars
+    rawCollections = rawFlatVariables;
+  }
+
+  const variables = rawCollections.map(compactCollection);
 
   // Group components by componentSetName when available
   const setVariants: Record<string, string[]> = {};
@@ -135,7 +185,22 @@ export function compactDesignSystem(raw: any): CompactDesignSystem {
 
   const components = rawComponents.map((comp) => compactComponent(comp, setVariants));
 
-  return { variables, components };
+  // Derive dsStatus from collections and their variables
+  let dsStatus: 'active' | 'partial' | 'none';
+  if (rawCollections.length === 0) {
+    dsStatus = 'none';
+  } else {
+    const totalVars = rawCollections.reduce(
+      (sum, col) => sum + (Array.isArray(col.variables) ? col.variables.length : 0),
+      0,
+    );
+    dsStatus = totalVars > 0 ? 'active' : 'partial';
+  }
+
+  const rules: DsRule[] = Array.isArray(raw?.rules) ? raw.rules : [];
+  const naming: DsNaming | null = raw?.naming ?? null;
+
+  return { variables, components, rules, naming, dsStatus };
 }
 
 // ── Cache ────────────────────────────────────────

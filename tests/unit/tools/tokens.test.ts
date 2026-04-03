@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createLintTools } from '../../../src/main/tools/lint.js';
 import { createTokenTools } from '../../../src/main/tools/tokens.js';
 import { createTestToolDeps } from '../../helpers/mock-connector.js';
 
@@ -174,13 +175,17 @@ describe('Token Tools', () => {
   // ── figma_lint ──────────────────────────────────────────────────────
 
   describe('figma_lint', () => {
-    const getTool = () => tools.find((t) => t.name === 'figma_lint');
+    const getTool = () => {
+      const tool = createLintTools(deps).find((t) => t.name === 'figma_lint');
+      if (!tool) throw new Error('figma_lint not found');
+      return tool;
+    };
 
     it('calls connector.lintDesign with nodeId and rules', async () => {
       const tool = getTool();
       deps.connector.lintDesign.mockResolvedValue({ issues: [], count: 0 });
 
-      await tool.execute('call-10', { nodeId: '1:42', rules: ['naming'] }, undefined, undefined, undefined);
+      await tool.execute('call-10', { nodeId: '1:42', rules: ['naming'] }, undefined, undefined, undefined as any);
 
       expect(deps.connector.lintDesign).toHaveBeenCalledWith('1:42', ['naming']);
     });
@@ -189,7 +194,7 @@ describe('Token Tools', () => {
       const tool = getTool();
       deps.connector.lintDesign.mockResolvedValue({ issues: [] });
 
-      await tool.execute('call-11', {}, undefined, undefined, undefined);
+      await tool.execute('call-11', {}, undefined, undefined, undefined as any);
 
       expect(deps.connector.lintDesign).toHaveBeenCalledWith(undefined, undefined);
     });
@@ -199,7 +204,7 @@ describe('Token Tools', () => {
       const executeSpy = vi.spyOn(deps.operationQueue, 'execute');
       deps.connector.lintDesign.mockResolvedValue({ issues: [] });
 
-      await tool.execute('call-12', {}, undefined, undefined, undefined);
+      await tool.execute('call-12', {}, undefined, undefined, undefined as any);
 
       expect(executeSpy).not.toHaveBeenCalled();
     });

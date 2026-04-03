@@ -34,9 +34,9 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
       name: 'figma_execute',
       label: 'Execute Plugin Code',
       description:
-        'Execute arbitrary Figma Plugin API code. Use async IIFE pattern. Always call figma.loadFontAsync() before setting text. Set layoutMode before padding.',
+        'Execute arbitrary Figma Plugin API code. Use async IIFE pattern. Always call figma.loadFontAsync() before setting text. Set layoutMode before padding. NEVER use for DS operations (tokens, variables, DS page) — use dedicated DS tools.',
       promptSnippet:
-        'figma_execute: run arbitrary Plugin API code in Figma (escape hatch for anything not covered by other tools)',
+        'figma_execute: run arbitrary Plugin API code in Figma (escape hatch — NEVER for DS operations like tokens/variables/DS page)',
       parameters: Type.Object({
         code: Type.String({ description: 'JavaScript code to execute in Figma plugin context' }),
         timeout: Type.Optional(Type.Number({ description: 'Timeout in ms (default: 30000)', default: 30000 })),
@@ -69,16 +69,19 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
         // Plugin returns { success, image: { base64, format, scale, node, bounds } }
         const base64 = result?.image?.base64 ?? result?.imageData;
         if (base64) {
-          return {
-            content: [
-              {
-                type: 'image' as const,
-                data: base64,
-                mimeType: 'image/png',
-              },
-            ],
-            details: {},
-          };
+          const dsCache = deps.designSystemCache?.get(true, deps.fileKey);
+          const dsHint = dsCache && 'dsStatus' in dsCache ? (dsCache as any).dsStatus : undefined;
+          const content: any[] = [
+            {
+              type: 'image' as const,
+              data: base64,
+              mimeType: 'image/png',
+            },
+          ];
+          if (dsHint) {
+            content.push({ type: 'text', text: `[dsStatus: ${dsHint}]` });
+          }
+          return { content, details: {} };
         }
         return textResult(result);
       },
@@ -93,7 +96,9 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
         const connected = wsServer.isClientConnected();
         const fileInfo = wsServer.getConnectedFileInfo();
         const files = wsServer.getConnectedFiles();
-        return textResult({ connected, fileInfo, files });
+        const dsCache = deps.designSystemCache.get(true, deps.fileKey);
+        const dsStatus = dsCache?.dsStatus ?? 'unknown';
+        return textResult({ connected, fileInfo, files, dsStatus });
       },
     },
     {

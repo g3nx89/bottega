@@ -12,9 +12,11 @@ import { createBatchTools } from './batch.js';
 import { createComponentTools } from './components.js';
 import { createCoreTools } from './core.js';
 import { createDiscoveryTools } from './discovery.js';
+import { createDsPageTools } from './ds-page.js';
 import { createImageGenTools } from './image-gen.js';
 import { createJsxRenderTools } from './jsx-render.js';
 import { createLayoutTools } from './layout.js';
+import { createLintTools } from './lint.js';
 import { createManipulationTools } from './manipulation.js';
 import { createStyleTools } from './style.js';
 import { createTokenTools } from './tokens.js';
@@ -66,6 +68,8 @@ export function createFigmaTools(deps: ToolDeps): ToolDefinition[] {
     ...createBatchTools(deps),
     ...createManipulationTools(deps),
     ...createTokenTools(deps),
+    ...createLintTools(deps),
+    ...createDsPageTools(deps),
     ...createLayoutTools(deps),
     ...createStyleTools(deps),
     ...createJsxRenderTools(deps),

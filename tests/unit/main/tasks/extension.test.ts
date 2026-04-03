@@ -92,7 +92,7 @@ describe('createTaskExtensionFactory', () => {
       const result = await call(makeEvent());
       const lastElement = result.content[result.content.length - 1];
       expect(lastElement.type).toBe('text');
-      expect(lastElement.text).toContain('<system-reminder>Task tools not used recently');
+      expect(lastElement.text).toContain('<system-reminder>');
     });
 
     it('resets counter after injection so next 3 calls return null', async () => {

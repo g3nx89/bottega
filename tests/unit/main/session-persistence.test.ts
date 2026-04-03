@@ -137,6 +137,7 @@ describe('Session persistence IPC', () => {
       },
       designSystemCache: { invalidate: vi.fn() },
       metricsCollector: { finalize: vi.fn() },
+      setWorkflowContext: vi.fn(),
     };
 
     sessionStore = new SessionStore(join(tmpDir, 'file-sessions.json'), 100);

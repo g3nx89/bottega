@@ -109,6 +109,7 @@ describe('Agent pipeline with ScriptedSession', () => {
       designSystemCache: { invalidate: vi.fn() },
       metricsCollector: { finalize: vi.fn() },
       wsServer: { sendCommand: vi.fn() },
+      setWorkflowContext: vi.fn(),
     };
     const { slotManager, slot, slotId: id } = createMockSlotManager(session);
     slotId = id;

@@ -5,6 +5,7 @@
 
 import { createChildLogger } from '../../figma/logger.js';
 import type { AgentInfra } from '../agent.js';
+import { categorizeToolName } from '../compression/metrics.js';
 import { isMutationTool } from '../compression/mutation-compressor.js';
 import type { ScopedConnector } from '../scoped-connector.js';
 import type { SessionSlot } from '../slot-manager.js';
@@ -61,8 +62,8 @@ export async function runJudgeHarness(
   // Precondition: judge mode must be 'auto'
   if (settings.judgeMode !== 'auto') return null;
 
-  // Precondition: turn must have mutations
-  const hasMutations = turnToolNames.some(isMutationTool);
+  // Precondition: turn must have mutations or DS-category tools (e.g. figma_setup_tokens, figma_bind_variable)
+  const hasMutations = turnToolNames.some((t) => isMutationTool(t) || categorizeToolName(t) === 'ds');
   if (!hasMutations) return null;
 
   // Prevent concurrent judges on the same slot

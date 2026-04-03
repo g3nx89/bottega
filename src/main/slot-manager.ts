@@ -107,7 +107,7 @@ export class SlotManager {
     // Mutable ref: tools capture a closure over this; slot manager updates it on model switch
     const providerRef = { current: effectiveModel.provider };
     const { tools, taskStore } = createScopedTools(this.infra, fileKey || UNBOUND_FILE_KEY, () => providerRef.current);
-    const result = await createFigmaAgentForSlot(this.infra, tools, effectiveModel);
+    const result = await createFigmaAgentForSlot(this.infra, tools, effectiveModel, fileKey);
     const session = result.session as AgentSessionLike;
 
     await this.initSession(session, fileKey ?? null);
@@ -229,7 +229,12 @@ export class SlotManager {
       }
 
       // Reuse existing scoped tools — fileKey doesn't change on model switch
-      const result = await createFigmaAgentForSlot(this.infra, slot.scopedTools, modelConfig);
+      const result = await createFigmaAgentForSlot(
+        this.infra,
+        slot.scopedTools,
+        modelConfig,
+        slot.fileKey ?? undefined,
+      );
       const session = result.session as AgentSessionLike;
 
       await this.initSession(session, slot.fileKey);
