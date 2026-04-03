@@ -299,6 +299,7 @@ function switchToTab(slotId) {
     updateInputState();
     renderTabBar();
     renderPromptQueue(newTab);
+    renderTaskPanel(newTab);
     syncBarToTab(newTab);
     scrollToBottom();
   }
@@ -938,6 +939,65 @@ window.api.onToolEnd((slotId, _toolName, toolCallId, success) =>
   }),
 );
 window.api.onScreenshot((slotId, base64) => withTab(slotId, (tab) => addScreenshot(tab, base64)));
+
+// ── Task panel ────────────────────────────
+window.api.onTaskUpdated((slotId, tasks) => {
+  withTab(slotId, (tab) => {
+    tab._tasks = tasks;
+    // Only update the visible panel if this is the active tab
+    if (slotId === activeTabId) renderTaskPanel(tab);
+  });
+});
+
+function renderTaskPanel(tab) {
+  const panel = document.getElementById('task-panel');
+  const tasks = tab._tasks || [];
+  while (panel.firstChild) panel.removeChild(panel.firstChild);
+
+  if (tasks.length === 0) {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+
+  const completed = tasks.filter((t) => t.status === 'completed').length;
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+
+  const header = document.createElement('div');
+  header.className = 'task-header';
+  header.textContent = `${tasks.length} tasks (${completed}/${tasks.length} done)`;
+  panel.appendChild(header);
+
+  for (const t of tasks) {
+    const row = document.createElement('div');
+    row.className = `task-row ${t.status}`;
+
+    const dot = document.createElement('span');
+    dot.className = 'task-dot';
+    if (t.status === 'completed') dot.textContent = '\u2714';
+    else if (t.status === 'pending') dot.textContent = '\u25FB';
+
+    const subject = document.createElement('span');
+    subject.className = 'task-subject';
+    subject.textContent = `#${t.id} ${t.status === 'in_progress' && t.activeForm ? t.activeForm + '\u2026' : t.subject}`;
+
+    row.appendChild(dot);
+    row.appendChild(subject);
+
+    const openBlockers = (t.blockedBy || []).filter((bid) => {
+      const b = taskById.get(bid);
+      return b && b.status !== 'completed';
+    });
+    if (openBlockers.length > 0) {
+      const blocker = document.createElement('span');
+      blocker.className = 'task-blocker';
+      blocker.textContent = `blocked by ${openBlockers.map((b) => '#' + b).join(', ')}`;
+      row.appendChild(blocker);
+    }
+
+    panel.appendChild(row);
+  }
+}
 
 window.api.onAgentEnd((slotId) => {
   const tab = tabs.get(slotId);

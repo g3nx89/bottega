@@ -107,6 +107,9 @@ export const CATEGORY_MAP: Record<string, ToolCategory> = {
   figma_get_annotation_categories: 'discovery',
   figma_lint: 'discovery',
   figma_execute: 'execute',
+  task_create: 'other',
+  task_update: 'other',
+  task_list: 'other',
 };
 
 export function categorizeToolName(toolName: string): ToolCategory {

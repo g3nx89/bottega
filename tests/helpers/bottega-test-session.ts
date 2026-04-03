@@ -23,6 +23,9 @@ import {
 import { CompressionConfigManager, type CompressionProfile } from '../../src/main/compression/compression-config.js';
 import { createCompressionExtensionFactory } from '../../src/main/compression/extension-factory.js';
 import { CompressionMetricsCollector } from '../../src/main/compression/metrics.js';
+import { createTaskExtensionFactory } from '../../src/main/tasks/extension-factory.js';
+import { TaskStore } from '../../src/main/tasks/store.js';
+import { createTaskTools } from '../../src/main/tasks/tools.js';
 import { createFigmaTools, type ToolDeps } from '../../src/main/tools/index.js';
 import {
   type BottegaTestEvents,
@@ -53,6 +56,8 @@ export interface BottegaTestSessionOptions {
   systemPrompt?: string;
   /** Abort test on real tool throw (default: true) */
   propagateErrors?: boolean;
+  /** Pre-built TaskStore (default: new TaskStore()) */
+  taskStore?: TaskStore;
 }
 
 export interface BottegaTestSession {
@@ -68,6 +73,8 @@ export interface BottegaTestSession {
   configManager: CompressionConfigManager;
   /** Tool deps used (for assertion on mock calls) */
   deps: ToolDeps;
+  /** Task store for assertions */
+  taskStore: TaskStore;
   /** Cleanup */
   dispose(): void;
 }
@@ -105,8 +112,11 @@ export async function createBottegaTestSession(options: BottegaTestSessionOption
     ...options.toolDeps,
   } as ToolDeps;
 
-  // 2. Create Bottega's actual tools
+  // 2. Create Bottega's actual tools + task tools
   const bottegaTools = createFigmaTools(deps);
+  const taskStore = options.taskStore ?? new TaskStore();
+  const taskTools = createTaskTools(taskStore);
+  const allTools = [...bottegaTools, ...taskTools];
 
   // 3. Compression infrastructure (real)
   const configManager = new CompressionConfigManager();
@@ -124,7 +134,7 @@ export async function createBottegaTestSession(options: BottegaTestSessionOption
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    extensionFactories: [compressionExtensionFactory],
+    extensionFactories: [compressionExtensionFactory, createTaskExtensionFactory(() => taskStore) as any],
   });
   await resourceLoader.reload();
 
@@ -142,7 +152,7 @@ export async function createBottegaTestSession(options: BottegaTestSessionOption
     cwd: os.tmpdir(),
     model,
     tools: [], // no built-in coding tools
-    customTools: bottegaTools,
+    customTools: allTools,
     resourceLoader,
     sessionManager,
     settingsManager,
@@ -206,6 +216,7 @@ export async function createBottegaTestSession(options: BottegaTestSessionOption
     compressionMetrics,
     configManager,
     deps,
+    taskStore,
 
     get playbook() {
       return {

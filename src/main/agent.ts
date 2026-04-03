@@ -21,6 +21,9 @@ import type { ImageGenerator } from './image-gen/image-generator.js';
 import type { OperationQueueManager } from './operation-queue-manager.js';
 import { ScopedConnector } from './scoped-connector.js';
 import { buildSystemPrompt } from './system-prompt.js';
+import { createTaskExtensionFactory } from './tasks/extension-factory.js';
+import { TaskStore } from './tasks/store.js';
+import { createTaskTools } from './tasks/tools.js';
 import { createFigmaTools } from './tools/index.js';
 
 export interface ModelConfig {
@@ -113,6 +116,8 @@ export interface AgentInfra {
   designSystemCache: DesignSystemCache;
   metricsCollector: CompressionMetricsCollector;
   compressionExtensionFactory: (pi: any) => void;
+  taskExtensionFactory: (pi: any) => void;
+  setActiveTaskStore: (store: TaskStore | undefined) => void;
   wsServer: FigmaWebSocketServer;
   figmaAPI: FigmaAPI;
   queueManager: OperationQueueManager;
@@ -147,6 +152,9 @@ export async function createAgentInfra(
   const metricsCollector = new CompressionMetricsCollector('app-session', 'pending', 1_000_000);
   const compressionExtensionFactory = createCompressionExtensionFactory(configManager, metricsCollector);
 
+  let _activeTaskStore: TaskStore | undefined;
+  const taskExtensionFactory = createTaskExtensionFactory(() => _activeTaskStore);
+
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
   const sessionManager = SessionManager.create(os.tmpdir(), opts.sessionsDir || DEFAULT_SESSIONS_DIR);
@@ -161,6 +169,13 @@ export async function createAgentInfra(
     designSystemCache,
     metricsCollector,
     compressionExtensionFactory,
+    taskExtensionFactory,
+    setActiveTaskStore: (s) => {
+      if (_activeTaskStore !== s) {
+        _activeTaskStore = s;
+        taskExtensionFactory.reset();
+      }
+    },
     wsServer: figmaCore.wsServer,
     figmaAPI: figmaCore.figmaAPI,
     queueManager,
@@ -187,7 +202,7 @@ async function buildAgentSession(
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    extensionFactories: [infra.compressionExtensionFactory],
+    extensionFactories: [infra.compressionExtensionFactory, infra.taskExtensionFactory],
   });
   await resourceLoader.reload();
 
@@ -213,11 +228,11 @@ export function createScopedTools(
   infra: AgentInfra,
   fileKey: string,
   getProvider?: () => string,
-): { tools: ToolDefinition[]; connector: ScopedConnector } {
+): { tools: ToolDefinition[]; connector: ScopedConnector; taskStore: TaskStore } {
   const connector = new ScopedConnector(infra.wsServer, fileKey);
   const operationQueue = infra.queueManager.getQueue(fileKey);
 
-  const tools = createFigmaTools({
+  const figmaTools = createFigmaTools({
     connector,
     figmaAPI: infra.figmaAPI,
     operationQueue,
@@ -229,7 +244,11 @@ export function createScopedTools(
     getProvider,
   });
 
-  return { tools, connector };
+  const taskStore = new TaskStore();
+  const taskTools = createTaskTools(taskStore);
+  const tools = [...figmaTools, ...taskTools];
+
+  return { tools, connector, taskStore };
 }
 
 /**

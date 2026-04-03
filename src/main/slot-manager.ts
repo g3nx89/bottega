@@ -17,6 +17,7 @@ import { PromptQueue } from './prompt-queue.js';
 import { PromptSuggester } from './prompt-suggester.js';
 import type { SessionStore } from './session-store.js';
 import { abortActiveJudge } from './subagent/judge-harness.js';
+import type { TaskStore } from './tasks/store.js';
 import { hashFileKey, type UsageTracker } from './usage-tracker.js';
 
 const log = createChildLogger({ component: 'slot-manager' });
@@ -44,6 +45,7 @@ export interface SessionSlot extends TurnTracking {
   suggester: PromptSuggester;
   promptQueue: PromptQueue;
   scopedTools: ToolDefinition[];
+  taskStore: TaskStore;
   createdAt: number;
   /** Mutable ref for the current provider — tools capture a closure over this for model-aware screenshot optimization. */
   _providerRef: { current: string };
@@ -104,7 +106,7 @@ export class SlotManager {
     const effectiveModel = modelConfig || DEFAULT_MODEL;
     // Mutable ref: tools capture a closure over this; slot manager updates it on model switch
     const providerRef = { current: effectiveModel.provider };
-    const { tools } = createScopedTools(this.infra, fileKey || UNBOUND_FILE_KEY, () => providerRef.current);
+    const { tools, taskStore } = createScopedTools(this.infra, fileKey || UNBOUND_FILE_KEY, () => providerRef.current);
     const result = await createFigmaAgentForSlot(this.infra, tools, effectiveModel);
     const session = result.session as AgentSessionLike;
 
@@ -124,6 +126,7 @@ export class SlotManager {
       suggester,
       promptQueue: new PromptQueue(),
       scopedTools: tools,
+      taskStore,
       createdAt: Date.now(),
       turnIndex: 0,
       currentPromptId: null,

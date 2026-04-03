@@ -292,6 +292,13 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   });
   const { subscribeToSlot } = eventRouter;
 
+  // ── Task tracking (per-slot) ───────────
+
+  ipcMain.handle('task:list', (_event, slotId: string) => {
+    const slot = requireSlot(slotId);
+    return slot.taskStore.list();
+  });
+
   // ── Agent prompt/abort ─────────────────
 
   ipcMain.handle('agent:prompt', async (_event, slotId: string, text: string) => {

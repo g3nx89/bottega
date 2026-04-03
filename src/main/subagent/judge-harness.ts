@@ -122,6 +122,16 @@ export async function runJudgeHarness(
         break;
       }
 
+      // FAIL — create remediation tasks in the slot's TaskStore
+      if (slot.taskStore && lastVerdict.actionItems.length > 0) {
+        for (const item of lastVerdict.actionItems) {
+          slot.taskStore.create(item, `Judge remediation (attempt ${attempt})`, undefined, {
+            source: 'judge',
+            judgeAttempt: attempt,
+          });
+        }
+      }
+
       // FAIL — retry if enabled and attempts remain
       if (settings.autoRetry && attempt < maxAttempts) {
         log.info({ slotId: slot.id, attempt, maxAttempts }, 'Judge FAIL — retrying');

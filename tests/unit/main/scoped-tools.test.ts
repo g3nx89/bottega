@@ -80,7 +80,8 @@ describe('createScopedTools', () => {
       designSystemCache: infra.designSystemCache,
       configManager: infra.configManager,
     });
-    expect(tools.length).toBe(reference.length);
+    // createScopedTools adds 3 task tools on top of figma tools
+    expect(tools.length).toBe(reference.length + 3);
   });
 
   it('tools include expected tool names (figma_execute, figma_screenshot, figma_status)', () => {

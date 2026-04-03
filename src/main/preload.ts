@@ -64,6 +64,12 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('agent:queued-prompt-start', (_event, slotId, text) => cb(slotId, text));
   },
 
+  // ── Task tracking (per-slot) ──────────────
+  onTaskUpdated: (cb: (slotId: string, tasks: any[]) => void) => {
+    ipcRenderer.on('task:updated', (_event, slotId, tasks) => cb(slotId, tasks));
+  },
+  getTaskList: (slotId: string) => ipcRenderer.invoke('task:list', slotId),
+
   // ── Tab management ────────────────────────
   createTab: (fileKey?: string, fileName?: string) =>
     ipcRenderer.invoke('tab:create', fileKey, fileName) as Promise<{

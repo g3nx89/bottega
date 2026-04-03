@@ -141,6 +141,12 @@ export function createEventRouter(deps: EventRouterDeps) {
       const imageContent = event.result.content.find((c: any) => c.type === 'image');
       if (imageContent) safeSend(wc, 'agent:screenshot', slot.id, imageContent.data);
     }
+
+    // Emit task list update after any task tool call
+    if (event.toolName?.startsWith('task_') && slot.taskStore) {
+      const tasks = slot.taskStore.list();
+      safeSend(wc, 'task:updated', slot.id, tasks);
+    }
   }
 
   function handleMessageEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
@@ -243,6 +249,10 @@ export function createEventRouter(deps: EventRouterDeps) {
               onProgress: (event) => safeSend(wc, 'subagent:status', slot.id, event),
               onVerdict: (v, attempt, max) => {
                 safeSend(wc, 'judge:verdict', slot.id, v, attempt, max);
+                // Judge FAIL creates remediation tasks directly in TaskStore — notify renderer
+                if (v.verdict === 'FAIL' && slot.taskStore?.size > 0) {
+                  safeSend(wc, 'task:updated', slot.id, slot.taskStore.list());
+                }
                 usageTracker?.trackJudgeVerdict({
                   batchId: slot.id,
                   verdict: v.verdict,
@@ -340,6 +350,8 @@ export function createEventRouter(deps: EventRouterDeps) {
     subscribeToSlot(slot: SessionSlot): void {
       if (subscribedSessions.has(slot.session)) return;
       subscribedSessions.add(slot.session);
+      // Keep the task extension factory's store ref in sync with the active slot
+      deps.infra?.setActiveTaskStore?.(slot.taskStore);
       const wc = mainWindow.webContents;
       const boundSession = slot.session;
       slot.session.subscribe((event: any) => {
