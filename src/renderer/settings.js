@@ -522,10 +522,10 @@ if (compressionRefreshBtn) {
 
 // ── Subagent settings ────────────────────
 
-const judgeModeSelect = document.getElementById('judge-mode-select');
 const autoRetryToggle = document.getElementById('auto-retry-toggle');
 const maxRetriesInput = document.getElementById('max-retries-input');
 const maxRetriesRow = document.getElementById('max-retries-row');
+const microJudgeContainer = document.getElementById('micro-judge-list');
 
 function updateMaxRetriesVisibility() {
   if (maxRetriesRow && autoRetryToggle) {
@@ -534,10 +534,8 @@ function updateMaxRetriesVisibility() {
 }
 
 async function loadSubagentSettings() {
-  if (!judgeModeSelect) return;
   try {
     const config = await window.api.getSubagentConfig();
-    judgeModeSelect.value = config.judgeMode || 'ask';
     if (autoRetryToggle) autoRetryToggle.checked = config.autoRetry || false;
     if (maxRetriesInput) maxRetriesInput.value = config.maxRetries || 2;
     updateMaxRetriesVisibility();
@@ -548,6 +546,18 @@ async function loadSubagentSettings() {
         if (select && mc) select.value = `${mc.provider}:${mc.modelId}`;
       }
     }
+    // Populate micro-judge rows
+    if (config.microJudges && microJudgeContainer) {
+      for (const row of microJudgeContainer.querySelectorAll('.micro-judge-row')) {
+        const judgeId = row.dataset.judge;
+        const mc = config.microJudges[judgeId];
+        if (!mc) continue;
+        const checkbox = row.querySelector('.judge-enable');
+        const modelSelect = row.querySelector('.judge-model');
+        if (checkbox) checkbox.checked = mc.enabled;
+        if (modelSelect && mc.model) modelSelect.value = `${mc.model.provider}:${mc.model.modelId}`;
+      }
+    }
   } catch (err) {
     // biome-ignore lint/suspicious/noConsole: renderer has no structured logger
     console.warn('Failed to load subagent config:', err);
@@ -555,7 +565,6 @@ async function loadSubagentSettings() {
 }
 
 async function saveSubagentSettings() {
-  if (!judgeModeSelect) return;
   try {
     // Merge with current config to preserve models and other fields
     const current = await window.api.getSubagentConfig();
@@ -567,12 +576,32 @@ async function saveSubagentSettings() {
         if (provider && modelId) models[role] = { provider, modelId };
       }
     }
+    // Collect micro-judge configs
+    const microJudges = { ...(current.microJudges || {}) };
+    if (microJudgeContainer) {
+      for (const row of microJudgeContainer.querySelectorAll('.micro-judge-row')) {
+        const judgeId = row.dataset.judge;
+        if (!judgeId) continue;
+        const checkbox = row.querySelector('.judge-enable');
+        const modelSelect = row.querySelector('.judge-model');
+        const existing = microJudges[judgeId] || {};
+        microJudges[judgeId] = {
+          enabled: checkbox ? checkbox.checked : true,
+          model: existing.model || { provider: 'anthropic', modelId: 'claude-haiku-4-5' },
+        };
+        if (modelSelect && modelSelect.value) {
+          const [provider, modelId] = modelSelect.value.split(':');
+          if (provider && modelId) microJudges[judgeId].model = { provider, modelId };
+        }
+      }
+    }
     await window.api.setSubagentConfig({
       ...current,
       models,
-      judgeMode: judgeModeSelect.value,
+      judgeMode: current.judgeMode || 'auto',
       autoRetry: autoRetryToggle?.checked || false,
       maxRetries: Number.parseInt(maxRetriesInput?.value || '2', 10),
+      microJudges,
     });
   } catch (err) {
     // biome-ignore lint/suspicious/noConsole: renderer has no structured logger
@@ -591,6 +620,7 @@ const roleModelSelects = {
 async function populateRoleModelSelects() {
   try {
     const modelsData = await window.api.getModels();
+    // Populate role model selects
     for (const select of Object.values(roleModelSelects)) {
       if (!select) continue;
       clearChildren(select);
@@ -603,16 +633,28 @@ async function populateRoleModelSelects() {
         }
       }
     }
+    // Populate micro-judge model selects
+    if (microJudgeContainer) {
+      for (const select of microJudgeContainer.querySelectorAll('.judge-model')) {
+        clearChildren(select);
+        for (const models of Object.values(modelsData)) {
+          for (const m of models) {
+            const opt = document.createElement('option');
+            opt.value = `${m.sdkProvider}:${m.id}`;
+            opt.textContent = m.label;
+            select.appendChild(opt);
+          }
+        }
+      }
+    }
   } catch (err) {
     // biome-ignore lint/suspicious/noConsole: renderer has no structured logger
     console.warn('Failed to populate role model selects:', err);
   }
 }
 
-if (judgeModeSelect) {
-  populateRoleModelSelects().then(() => loadSubagentSettings());
-  judgeModeSelect.addEventListener('change', saveSubagentSettings);
-}
+// Initialize subagent settings (judge-mode-select removed — toggle is the new paradigm)
+populateRoleModelSelects().then(() => loadSubagentSettings());
 if (autoRetryToggle) {
   autoRetryToggle.addEventListener('change', () => {
     updateMaxRetriesVisibility();
@@ -624,6 +666,15 @@ if (maxRetriesInput) {
 }
 for (const select of Object.values(roleModelSelects)) {
   if (select) select.addEventListener('change', saveSubagentSettings);
+}
+// Micro-judge change listeners
+if (microJudgeContainer) {
+  for (const row of microJudgeContainer.querySelectorAll('.micro-judge-row')) {
+    const checkbox = row.querySelector('.judge-enable');
+    const modelSelect = row.querySelector('.judge-model');
+    if (checkbox) checkbox.addEventListener('change', saveSubagentSettings);
+    if (modelSelect) modelSelect.addEventListener('change', saveSubagentSettings);
+  }
 }
 
 // ── Figma Plugin setup ──────────────────

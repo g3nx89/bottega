@@ -350,14 +350,16 @@ describe('TaskStore', () => {
       expect(warnings.some((w) => w.toLowerCase().includes('cycle'))).toBe(true);
     });
 
-    it('does not prevent the edge from being added on cycle detection (warns but does not block)', () => {
+    it('prevents the cyclic edge from being added on cycle detection', () => {
       const a = store.create('A', 'D');
       const b = store.create('B', 'D');
       store.update(a.id, { addBlocks: [b.id] });
-      store.update(b.id, { addBlocks: [a.id] });
-      // Both edges should still exist
-      expect(b.blocks).toContain(a.id);
-      expect(a.blockedBy).toContain(b.id);
+      const { warnings } = store.update(b.id, { addBlocks: [a.id] });
+      // Cycle warning emitted
+      expect(warnings.some((w) => w.toLowerCase().includes('cycle'))).toBe(true);
+      // The cyclic edge should NOT be added
+      expect(b.blocks).not.toContain(a.id);
+      expect(a.blockedBy).not.toContain(b.id);
     });
   });
 

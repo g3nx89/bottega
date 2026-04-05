@@ -458,6 +458,10 @@ export class UsageTracker {
     maxAttempts: number;
     failedCriteria: string[];
     durationMs: number;
+    tier?: string;
+    judgesRun?: string[];
+    prefetchDurationMs?: number;
+    perJudgeDurations?: Record<string, number>;
     context?: { promptId?: string; slotId?: string; turnIndex?: number };
   }): void {
     this.emit('usage:judge_verdict', {
@@ -467,6 +471,10 @@ export class UsageTracker {
       maxAttempts: data.maxAttempts,
       failedCriteria: data.failedCriteria,
       durationMs: data.durationMs,
+      ...(data.tier && { tier: data.tier }),
+      ...(data.judgesRun && { judgesRun: data.judgesRun }),
+      ...(data.prefetchDurationMs != null && { prefetchDurationMs: data.prefetchDurationMs }),
+      ...(data.perJudgeDurations && { perJudgeDurations: data.perJudgeDurations }),
       ...spreadTurnContext(data.context),
     });
   }

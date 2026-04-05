@@ -83,6 +83,10 @@
             <span id="bar-effort-label">Medium</span>
             <svg width="8" height="5" viewBox="0 0 8 5" fill="none"><path d="M1 1L4 4L7 1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
           </button>
+          <button id="bar-judge-btn" class="toolbar-chip" title="Quality judge">
+            <span id="bar-judge-icon">&#x1F6E1;</span>
+            <span id="bar-judge-label">Judge</span>
+          </button>
         </div>
         <button id="reset-session-btn" class="toolbar-chip reset-chip" title="New chat — reset session">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -160,14 +164,6 @@
           <div class="setting-group">
             <label class="setting-label">Subagents</label>
             <span class="setting-hint">Parallel read-only agents for research, audit, and quality checks.</span>
-            <div class="setting-row">
-              <label class="setting-sublabel" for="judge-mode-select">Judge mode</label>
-              <select id="judge-mode-select" class="setting-select">
-                <option value="off">Off</option>
-                <option value="auto">Auto (after mutations)</option>
-                <option value="ask">On request</option>
-              </select>
-            </div>
             <div class="setting-row" id="auto-retry-row">
               <label class="setting-sublabel">
                 <input type="checkbox" id="auto-retry-toggle"> Auto-retry on FAIL
@@ -177,6 +173,47 @@
               <label class="setting-sublabel" for="max-retries-input">Max retries</label>
               <input type="number" id="max-retries-input" class="setting-input-small" min="1" max="5" value="2">
             </div>
+            <label class="setting-sublabel" style="margin-top:8px">Micro-Judges</label>
+            <span class="setting-hint">Enable/disable individual quality criteria. Use the toolbar toggle for quick on/off.</span>
+            <div id="micro-judge-list">
+              <div class="micro-judge-row" data-judge="alignment">
+                <input type="checkbox" class="judge-enable" checked>
+                <div class="judge-info"><span class="judge-label">Alignment</span><span class="judge-desc">Layout precision, auto-layout, pixel offsets</span></div>
+                <select class="judge-model setting-select setting-select-sm"></select>
+              </div>
+              <div class="micro-judge-row" data-judge="token_compliance">
+                <input type="checkbox" class="judge-enable" checked>
+                <div class="judge-info"><span class="judge-label">Token Compliance</span><span class="judge-desc">Design token usage, hardcoded values, lint violations</span></div>
+                <select class="judge-model setting-select setting-select-sm"></select>
+              </div>
+              <div class="micro-judge-row" data-judge="visual_hierarchy">
+                <input type="checkbox" class="judge-enable" checked>
+                <div class="judge-info"><span class="judge-label">Visual Hierarchy</span><span class="judge-desc">Typography scale, primary action prominence</span></div>
+                <select class="judge-model setting-select setting-select-sm"></select>
+              </div>
+              <div class="micro-judge-row" data-judge="completeness">
+                <input type="checkbox" class="judge-enable" checked>
+                <div class="judge-info"><span class="judge-label">Completeness</span><span class="judge-desc">All requested elements present vs task description</span></div>
+                <select class="judge-model setting-select setting-select-sm"></select>
+              </div>
+              <div class="micro-judge-row" data-judge="consistency">
+                <input type="checkbox" class="judge-enable" checked>
+                <div class="judge-info"><span class="judge-label">Consistency</span><span class="judge-desc">Uniform spacing, sizing across similar elements</span></div>
+                <select class="judge-model setting-select setting-select-sm"></select>
+              </div>
+              <div class="micro-judge-row" data-judge="naming">
+                <input type="checkbox" class="judge-enable" checked>
+                <div class="judge-info"><span class="judge-label">Naming</span><span class="judge-desc">Semantic names, no auto-generated names</span></div>
+                <select class="judge-model setting-select setting-select-sm"></select>
+              </div>
+              <div class="micro-judge-row" data-judge="componentization">
+                <input type="checkbox" class="judge-enable" checked>
+                <div class="judge-info"><span class="judge-label">Componentization</span><span class="judge-desc">Duplicate detection, library usage, detached instances</span></div>
+                <select class="judge-model setting-select setting-select-sm"></select>
+              </div>
+            </div>
+            <div class="setting-divider" style="margin:8px 0"></div>
+            <label class="setting-sublabel">Subagent Models</label>
             <div class="setting-row">
               <label class="setting-sublabel" for="model-scout">Scout</label>
               <select id="model-scout" class="setting-select setting-select-sm" data-role="scout"></select>
@@ -190,7 +227,7 @@
               <select id="model-auditor" class="setting-select setting-select-sm" data-role="auditor"></select>
             </div>
             <div class="setting-row">
-              <label class="setting-sublabel" for="model-judge">Judge</label>
+              <label class="setting-sublabel" for="model-judge">Judge (legacy)</label>
               <select id="model-judge" class="setting-select setting-select-sm" data-role="judge"></select>
             </div>
           </div>

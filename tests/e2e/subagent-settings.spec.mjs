@@ -41,28 +41,39 @@ async function ensureSettings(open) {
 test('subagent settings section is visible with default values', async () => {
   await ensureSettings(true);
 
-  const judgeModeSelect = await window.$('#judge-mode-select');
-  expect(judgeModeSelect).not.toBeNull();
-
   const autoRetryToggle = await window.$('#auto-retry-toggle');
   expect(autoRetryToggle).not.toBeNull();
 
   const maxRetriesInput = await window.$('#max-retries-input');
   expect(maxRetriesInput).not.toBeNull();
+
+  const microJudgeList = await window.$('#micro-judge-list');
+  expect(microJudgeList).not.toBeNull();
 });
 
-test('judge mode dropdown has correct options', async () => {
+test('micro-judge list shows 7 judges', async () => {
   await ensureSettings(true);
 
-  const options = await window.$$eval('#judge-mode-select option', (opts) =>
-    opts.map((o) => ({ value: o.value, text: o.textContent })),
-  );
+  const rows = await window.$$('.micro-judge-row');
+  expect(rows.length).toBe(7);
+});
 
-  expect(options).toEqual([
-    { value: 'off', text: 'Off' },
-    { value: 'auto', text: 'Auto (after mutations)' },
-    { value: 'ask', text: 'On request' },
-  ]);
+test('micro-judge rows have enable checkbox, label, and model select', async () => {
+  await ensureSettings(true);
+
+  const firstRow = await window.$('.micro-judge-row[data-judge="alignment"]');
+  expect(firstRow).not.toBeNull();
+
+  const checkbox = await firstRow.$('.judge-enable');
+  expect(checkbox).not.toBeNull();
+
+  const label = await firstRow.$('.judge-label');
+  expect(label).not.toBeNull();
+  const labelText = await label.textContent();
+  expect(labelText).toBe('Alignment');
+
+  const modelSelect = await firstRow.$('.judge-model');
+  expect(modelSelect).not.toBeNull();
 });
 
 test('auto-retry toggle shows/hides max retries stepper', async () => {
@@ -94,17 +105,19 @@ test('per-role model selects are present', async () => {
   }
 });
 
-test('changing judge mode persists via IPC', async () => {
+test('disabling a micro-judge persists via IPC', async () => {
   await ensureSettings(true);
 
-  await window.selectOption('#judge-mode-select', 'auto');
+  // Uncheck alignment judge
+  const alignmentCheckbox = await window.$('.micro-judge-row[data-judge="alignment"] .judge-enable');
+  await alignmentCheckbox.click();
 
-  // Read back via IPC — Playwright evaluate runs in renderer context
+  // Read back via IPC
   const config = await window.evaluate(async () => await window.api.getSubagentConfig());
-  expect(config.judgeMode).toBe('auto');
+  expect(config.microJudges?.alignment?.enabled).toBe(false);
 
-  // Reset to default
-  await window.selectOption('#judge-mode-select', 'ask');
+  // Re-enable
+  await alignmentCheckbox.click();
 });
 
 // ── Subagent IPC channels after semantic refactor ──
@@ -113,14 +126,19 @@ test('subagent IPC channels still available after semantic refactor', async () =
   const channels = await window.evaluate(() => ({
     getSubagentConfig: typeof window.api.getSubagentConfig === 'function',
     runSubagentBatch: typeof window.api.runSubagentBatch === 'function',
+    setJudgeOverride: typeof window.api.setJudgeOverride === 'function',
+    forceRerunJudge: typeof window.api.forceRerunJudge === 'function',
   }));
   expect(channels.getSubagentConfig).toBe(true);
   expect(channels.runSubagentBatch).toBe(true);
+  expect(channels.setJudgeOverride).toBe(true);
+  expect(channels.forceRerunJudge).toBe(true);
 });
 
-test('subagent config returns valid structure', async () => {
+test('subagent config returns valid structure with microJudges', async () => {
   const config = await window.evaluate(async () => await window.api.getSubagentConfig());
   expect(config).toBeDefined();
   expect(config).toHaveProperty('judgeMode');
   expect(config).toHaveProperty('autoRetry');
+  expect(config).toHaveProperty('microJudges');
 });

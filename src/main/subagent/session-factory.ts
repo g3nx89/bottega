@@ -27,6 +27,7 @@ export async function createSubagentSession(
   tools: ToolDefinition[],
   modelConfig: SubagentModelConfig,
   systemPrompt: string,
+  thinkingLevel: 'low' | 'medium' | 'high' = 'medium',
 ): Promise<CreateAgentSessionResult> {
   const model = getModel(modelConfig.provider as any, modelConfig.modelId as any);
 
@@ -44,7 +45,7 @@ export async function createSubagentSession(
   return createAgentSession({
     cwd: os.tmpdir(),
     model,
-    thinkingLevel: 'medium',
+    thinkingLevel,
     tools: [],
     customTools: tools,
     resourceLoader,

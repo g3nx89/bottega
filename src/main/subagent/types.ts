@@ -75,9 +75,97 @@ export interface AggregatedBatchResult {
   };
 }
 
+/** Image content for multimodal prompts (matches Pi SDK ImageContent shape). */
+export interface ScreenshotImage {
+  type: 'image';
+  data: string;
+  mimeType: string;
+}
+
 /** Pre-fetched context shared across all subagents in a batch. */
 export interface PrefetchedContext {
-  screenshot: string | null;
+  screenshot: ScreenshotImage | null;
   fileData: string | null;
   designSystem: string | null;
+  lint: string | null;
+  libraryComponents: string | null;
+  componentAnalysis: ComponentAnalysis | null;
+}
+
+// ── Micro-Judge Types ────────────────────────────────────────────────
+
+/** The 7 specialized micro-judges. */
+export type MicroJudgeId =
+  | 'alignment'
+  | 'token_compliance'
+  | 'visual_hierarchy'
+  | 'completeness'
+  | 'consistency'
+  | 'naming'
+  | 'componentization';
+
+/** Output of a single micro-judge evaluation. */
+export interface MicroVerdict {
+  judgeId: MicroJudgeId;
+  pass: boolean;
+  finding: string;
+  evidence: string;
+  actionItems: string[];
+  status: 'evaluated' | 'timeout' | 'error';
+  durationMs: number;
+}
+
+/** Activation tier — determines which judges run based on tool usage. */
+export type ActivationTier = 'full' | 'visual' | 'narrow';
+
+/** Data keys available for selective prefetch. */
+export type PrefetchDataKey = 'screenshot' | 'fileData' | 'lint' | 'designSystem' | 'libraryComponents';
+
+// ── Component Analysis Types ─────────────────────────────────────────
+
+/** A group of structurally identical subtrees within a single screen. */
+export interface WithinScreenDuplicates {
+  screenName: string;
+  fingerprint: string;
+  nodeNames: string[];
+  count: number;
+}
+
+/** A structural or name match across different screens. */
+export interface CrossScreenMatch {
+  fingerprint: string;
+  screens: Array<{ screenName: string; nodeName: string }>;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  matchType: 'struct+name' | 'struct_only' | 'name+relaxed' | 'name_only';
+}
+
+/** A node that looks like it should be a library component but isn't. */
+export interface LibraryMiss {
+  nodeName: string;
+  screenName: string;
+  matchedComponentName: string;
+  similarity: number;
+}
+
+/** A node that appears to be a detached component instance. */
+export interface DetachedInstance {
+  nodeName: string;
+  screenName: string;
+}
+
+/** Statistics from component analysis. */
+export interface ComponentStats {
+  totalScreens: number;
+  totalNodes: number;
+  instanceCount: number;
+  componentizationRatio: number;
+}
+
+/** Full component analysis report — preprocessed for the componentization judge. */
+export interface ComponentAnalysis {
+  withinScreen: WithinScreenDuplicates[];
+  crossScreen: CrossScreenMatch[];
+  libraryMisses: LibraryMiss[];
+  detachedInstances: DetachedInstance[];
+  stats: ComponentStats;
 }

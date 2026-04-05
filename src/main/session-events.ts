@@ -12,7 +12,7 @@ import type { UsageTracker } from './remote-logger.js';
 import { safeSend } from './safe-send.js';
 import type { SessionSlot, SlotManager } from './slot-manager.js';
 import { loadSubagentSettings } from './subagent/config.js';
-import { abortActiveJudge, runJudgeHarness } from './subagent/judge-harness.js';
+import { abortActiveJudge, READ_ONLY_CATEGORIES, runJudgeHarness } from './subagent/judge-harness.js';
 
 const log = createChildLogger({ component: 'session-events' });
 
@@ -49,6 +49,7 @@ export function createEventRouter(deps: EventRouterDeps) {
   // Re-entrancy guard: prevents recursive handleAgentEnd when judge retry fires agent_end.
   // Also suppresses streaming events (text_delta, tool_start, etc.) during judge retry.
   const judgeInProgress = new Set<string>();
+  const judgeAbortControllers = new Map<string, AbortController>();
 
   // ── Per-turn accumulators (keyed by slotId) ──
   const turnToolNames = new Map<string, string[]>();
@@ -230,22 +231,30 @@ export function createEventRouter(deps: EventRouterDeps) {
 
     const toolNames = turnToolNames.get(slot.id) ?? [];
 
+    // Save tool names for force re-run — only overwrite when turn had tools,
+    // so subsequent no-tool turns don't clear the list needed by re-judge
+    if (toolNames.length > 0) {
+      slot.lastTurnToolNames = [...toolNames];
+    }
+
     // Auto-judge: run BEFORE finalizeTurn so retry turns get proper turn tracking
     if (deps.infra && deps.getConnectorForSlot) {
       const settings = loadSubagentSettings();
-      if (settings.judgeMode === 'auto') {
+      // Fail-safe: trigger for everything except pure read-only turns
+      const hasMutations = toolNames.some((n) => !READ_ONLY_CATEGORIES.has(categorizeToolName(n)));
+      // Check judgeOverride and judgeMode
+      const shouldRun = slot.judgeOverride === true || (slot.judgeOverride !== false && settings.judgeMode === 'auto');
+      if (shouldRun) {
         const connector = deps.getConnectorForSlot(slot);
-        // Check mutation precondition before emitting judge:running to avoid bogus UI state
-        const hasMutations = toolNames.some((n) => {
-          const cat = categorizeToolName(n);
-          return cat === 'mutation' || cat === 'ds';
-        });
         if (connector && hasMutations) {
           judgeInProgress.add(slot.id);
           const judgeStart = Date.now();
           try {
             safeSend(wc, 'judge:running', slot.id);
-            await runJudgeHarness(deps.infra, connector, slot, settings, toolNames, new AbortController().signal, {
+            // Store controller for external abort (e.g., user closes slot)
+            const judgeController = new AbortController();
+            judgeAbortControllers.set(slot.id, judgeController);
+            await runJudgeHarness(deps.infra, connector, slot, settings, toolNames, judgeController.signal, {
               onProgress: (event) => safeSend(wc, 'subagent:status', slot.id, event),
               onVerdict: (v, attempt, max) => {
                 safeSend(wc, 'judge:verdict', slot.id, v, attempt, max);
@@ -268,6 +277,7 @@ export function createEventRouter(deps: EventRouterDeps) {
             log.warn({ err, slotId: slot.id }, 'Judge harness error in agent_end');
           } finally {
             judgeInProgress.delete(slot.id);
+            judgeAbortControllers.delete(slot.id);
           }
         }
       }
@@ -364,6 +374,13 @@ export function createEventRouter(deps: EventRouterDeps) {
     finalizeTurn,
     /** Abort any running judge for a slot (called from user abort). Delegates to judge-harness. */
     abortJudge(slotId: string): void {
+      // Abort via parent signal (stored controller from session-events)
+      const ctrl = judgeAbortControllers.get(slotId);
+      if (ctrl) {
+        ctrl.abort();
+        judgeAbortControllers.delete(slotId);
+      }
+      // Also abort via internal judge mechanism
       abortActiveJudge(slotId);
     },
   };

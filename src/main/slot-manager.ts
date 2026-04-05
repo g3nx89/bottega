@@ -49,6 +49,10 @@ export interface SessionSlot extends TurnTracking {
   createdAt: number;
   /** Mutable ref for the current provider — tools capture a closure over this for model-aware screenshot optimization. */
   _providerRef: { current: string };
+  /** Judge toggle override: true = force on, false = force off, null = follow settings. */
+  judgeOverride: boolean | null;
+  /** Tool names from the last completed turn — used for force re-run judge. */
+  lastTurnToolNames: string[];
 }
 
 export interface SlotInfo {
@@ -133,6 +137,8 @@ export class SlotManager {
       promptStartTime: null,
       lastCompletedPromptId: null,
       lastCompletedTurnIndex: 0,
+      judgeOverride: null,
+      lastTurnToolNames: [],
     };
 
     this.slots.set(slot.id, slot);

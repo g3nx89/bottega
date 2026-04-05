@@ -1055,7 +1055,7 @@ body {
 }
 .task-progress-fill {
   height: 100%;
-  background: #A259FF;
+  background: #a259ff;
   border-radius: 2px;
   transition: width 0.3s ease;
 }
@@ -1658,6 +1658,62 @@ body {
 .toolbar-chip.open {
   background: var(--accent-dim);
   color: var(--accent);
+}
+
+/* Judge toggle chip */
+#bar-judge-btn.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+#bar-judge-btn.disabled-chip {
+  opacity: 0.4;
+}
+
+/* Re-judge button in verdict card */
+.rejudge-btn {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  margin-left: auto;
+}
+.rejudge-btn:hover {
+  background: var(--accent);
+  color: white;
+}
+
+/* Micro-judge settings rows */
+.micro-judge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.micro-judge-row .judge-enable {
+  flex-shrink: 0;
+}
+.micro-judge-row .judge-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.micro-judge-row .judge-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.micro-judge-row .judge-desc {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.micro-judge-row .judge-model {
+  flex-shrink: 0;
+  font-size: 11px;
 }
 
 /* Dropdown menu (shared by model + effort) */

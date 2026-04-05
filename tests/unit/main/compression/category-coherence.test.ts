@@ -94,17 +94,25 @@ describe('MUTATION_TOOLS equals the set of mutation-category tools in CATEGORY_M
   });
 });
 
-// ── Test 3: hasMutations check in session-events.ts includes 'ds' category ───
+// ── Test 3: hasMutations check in session-events.ts uses fail-safe approach ───
 
-describe('hasMutations check in session-events.ts includes ds category', () => {
-  it('session-events.ts hasMutations logic includes the ds category', () => {
+describe('hasMutations check in session-events.ts uses fail-safe READ_ONLY_CATEGORIES', () => {
+  it('session-events.ts imports and uses READ_ONLY_CATEGORIES', () => {
     const sessionEventsPath = join(process.cwd(), 'src', 'main', 'session-events.ts');
     const source = readFileSync(sessionEventsPath, 'utf-8');
 
-    // Find the hasMutations block — it should check for both 'mutation' and 'ds'
-    expect(source).toContain("cat === 'ds'");
-    // And it references mutation too
-    expect(source).toContain("cat === 'mutation'");
+    // Fail-safe: imports READ_ONLY_CATEGORIES from judge-harness
+    expect(source).toContain('READ_ONLY_CATEGORIES');
+    // Uses it in the hasMutations check
+    expect(source).toContain('!READ_ONLY_CATEGORIES.has');
+  });
+
+  it('READ_ONLY_CATEGORIES in judge-harness.ts contains key categories', () => {
+    const harnessPath = join(process.cwd(), 'src', 'main', 'subagent', 'judge-harness.ts');
+    const source = readFileSync(harnessPath, 'utf-8');
+
+    expect(source).toContain("'discovery'");
+    expect(source).toContain("'screenshot'");
   });
 });
 

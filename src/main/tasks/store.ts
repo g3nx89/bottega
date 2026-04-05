@@ -118,6 +118,7 @@ export class TaskStore {
         // Check cycle: if target already blocks this task
         if (task.blockedBy.includes(targetId)) {
           warnings.push(`Cycle detected: #${id} and #${targetId} block each other`);
+          continue;
         }
         if (!task.blocks.includes(targetId)) {
           task.blocks.push(targetId);
@@ -144,6 +145,7 @@ export class TaskStore {
         // Check cycle: if this task already blocks the blocker
         if (task.blocks.includes(blockerId)) {
           warnings.push(`Cycle detected: #${id} and #${blockerId} block each other`);
+          continue;
         }
         if (!task.blockedBy.includes(blockerId)) {
           task.blockedBy.push(blockerId);

@@ -331,6 +331,14 @@ function syncEffortToTab(tab) {
 function syncBarToTab(tab) {
   syncModelToTab(tab.modelConfig);
   syncEffortToTab(tab);
+  syncJudgeToTab(tab);
+}
+
+function syncJudgeToTab(tab) {
+  const override = tab.judgeOverride ?? null;
+  judgeOverride = override;
+  barJudgeBtn.classList.toggle('active', override === true);
+  barJudgeBtn.classList.toggle('disabled-chip', override === false);
 }
 
 function createTabState(slotInfo) {
@@ -348,6 +356,7 @@ function createTabState(slotInfo) {
     currentAssistantBubble: null,
     thinkingBubble: null,
     queuedPrompts: [],
+    judgeOverride: null,
   };
 }
 
@@ -1233,6 +1242,16 @@ function createJudgeVerdictCard(tab, verdict, attempt, maxAttempts) {
   } else {
     footer.textContent = `Attempt ${attempt}/${maxAttempts}`;
   }
+  // Re-judge button on final FAIL
+  if (verdict.verdict === 'FAIL' && attempt >= maxAttempts) {
+    const rejudgeBtn = document.createElement('button');
+    rejudgeBtn.className = 'rejudge-btn';
+    rejudgeBtn.textContent = '\uD83D\uDD04 Re-judge';
+    rejudgeBtn.addEventListener('click', () => {
+      if (tab.id) window.api.forceRerunJudge(tab.id);
+    });
+    footer.appendChild(rejudgeBtn);
+  }
   card.appendChild(footer);
 
   // Append as sibling of .message-content so markdown rendering doesn't destroy it
@@ -1574,6 +1593,27 @@ barEffortBtn.addEventListener('click', (e) => {
 });
 
 // Saved effort is applied when a tab is first activated (activeTabId is null at load time)
+
+// ── Judge toggle chip ─────────────────────
+
+const barJudgeBtn = document.getElementById('bar-judge-btn');
+let judgeOverride = null; // null = follow settings, true = force on, false = force off
+
+barJudgeBtn.addEventListener('click', () => {
+  if (judgeOverride === null) {
+    judgeOverride = true;
+  } else if (judgeOverride === true) {
+    judgeOverride = false;
+  } else {
+    judgeOverride = null;
+  }
+  barJudgeBtn.classList.toggle('active', judgeOverride === true);
+  barJudgeBtn.classList.toggle('disabled-chip', judgeOverride === false);
+  // Persist per-tab
+  const tab = activeTabId ? tabs.get(activeTabId) : null;
+  if (tab) tab.judgeOverride = judgeOverride;
+  if (activeTabId) window.api.setJudgeOverride(activeTabId, judgeOverride);
+});
 
 // ── Paste screenshot support ─────────────
 

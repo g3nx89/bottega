@@ -5,7 +5,8 @@
 
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { createChildLogger } from '../../figma/logger.js';
-import type { PrefetchedContext } from './types.js';
+import { analyzeComponents } from './component-analysis.js';
+import type { PrefetchDataKey, PrefetchedContext, ScreenshotImage } from './types.js';
 
 const log = createChildLogger({ component: 'subagent-prefetch' });
 
@@ -41,6 +42,37 @@ async function callTool(
 }
 
 /**
+ * Call a named tool and extract the image content block (for screenshot).
+ */
+async function callToolForImage(
+  tools: ToolDefinition[],
+  toolName: string,
+  params: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<ScreenshotImage | null> {
+  const tool = tools.find((t) => t.name === toolName);
+  if (!tool) {
+    log.warn({ toolName }, 'Pre-fetch image tool not found');
+    return null;
+  }
+  try {
+    const result = await (tool.execute as any)(`prefetch-${toolName}`, params, signal, undefined, undefined);
+    const content = result?.content;
+    if (Array.isArray(content)) {
+      const imagePart = content.find((c: any) => c.type === 'image');
+      if (imagePart?.data) {
+        return { type: 'image', data: imagePart.data, mimeType: imagePart.mimeType ?? 'image/png' };
+      }
+    }
+    return null;
+  } catch (err: unknown) {
+    if ((err as Error)?.name === 'AbortError') throw err;
+    log.warn({ err, toolName }, 'Pre-fetch image tool call failed');
+    return null;
+  }
+}
+
+/**
  * Pre-fetch common context data for subagents.
  * Runs 3 reads in parallel — all are independent.
  * Returns partial data on individual tool failures (does not throw).
@@ -65,6 +97,9 @@ export async function prefetchCommonContext(tools: ToolDefinition[], signal?: Ab
     screenshot: null,
     fileData: fileDataResult.status === 'fulfilled' ? fileDataResult.value : null,
     designSystem: designSystemResult.status === 'fulfilled' ? designSystemResult.value : null,
+    lint: null,
+    libraryComponents: null,
+    componentAnalysis: null,
   };
 }
 
@@ -88,4 +123,115 @@ export function formatBriefing(context: PrefetchedContext): string {
   return sections.length > 0
     ? `# Pre-fetched Briefing\n\n${sections.join('\n\n')}`
     : 'No pre-fetched data available. Start with direct observation.';
+}
+
+/**
+ * Selective pre-fetch for micro-judges.
+ * Only fetches data that the active judges actually need.
+ * Runs component analysis as a post-processing step if libraryComponents is fetched.
+ */
+export async function prefetchForMicroJudges(
+  tools: ToolDefinition[],
+  neededData: Set<PrefetchDataKey>,
+  signal?: AbortSignal,
+  fileKey?: string,
+): Promise<PrefetchedContext> {
+  const result: PrefetchedContext = {
+    screenshot: null,
+    fileData: null,
+    designSystem: null,
+    lint: null,
+    libraryComponents: null,
+    componentAnalysis: null,
+  };
+
+  // Fetch screenshot separately (returns image, not text)
+  let screenshotPromise: Promise<ScreenshotImage | null> | null = null;
+  if (neededData.has('screenshot')) {
+    screenshotPromise = callToolForImage(tools, 'figma_screenshot', { zoom: 2 }, signal);
+  }
+
+  // Build parallel fetch list for text-based data
+  const fetches: Array<{ key: PrefetchDataKey; promise: Promise<string | null> }> = [];
+  if (neededData.has('fileData')) {
+    fetches.push({ key: 'fileData', promise: callTool(tools, 'figma_get_file_data', { mode: 'full' }, signal) });
+  }
+  if (neededData.has('lint')) {
+    fetches.push({ key: 'lint', promise: callTool(tools, 'figma_lint', {}, signal) });
+  }
+  if (neededData.has('designSystem')) {
+    fetches.push({ key: 'designSystem', promise: callTool(tools, 'figma_design_system', {}, signal) });
+  }
+  if (neededData.has('libraryComponents') && fileKey) {
+    fetches.push({
+      key: 'libraryComponents',
+      promise: callTool(tools, 'figma_get_library_components', { fileKey }, signal),
+    });
+  }
+
+  // Execute all in parallel (text fetches + screenshot)
+  const allPromises: Promise<any>[] = fetches.map((f) => f.promise);
+  if (screenshotPromise) allPromises.push(screenshotPromise);
+
+  const settled = await Promise.allSettled(allPromises);
+
+  // Re-throw abort errors
+  for (const r of settled) {
+    if (r.status === 'rejected' && (r.reason as Error)?.name === 'AbortError') {
+      throw r.reason;
+    }
+  }
+
+  // Populate text results
+  for (let i = 0; i < fetches.length; i++) {
+    const s = settled[i]!;
+    const key = fetches[i]!.key;
+    if (s.status === 'fulfilled' && s.value != null) {
+      (result as any)[key] = s.value;
+    }
+  }
+
+  // Populate screenshot result
+  if (screenshotPromise) {
+    const screenshotResult = settled[fetches.length];
+    if (screenshotResult?.status === 'fulfilled' && screenshotResult.value) {
+      result.screenshot = screenshotResult.value;
+    }
+  }
+
+  // Post-process: run component analysis if we have the data
+  if (result.fileData && result.libraryComponents) {
+    try {
+      // Extract component names from library output — handles multiple formats:
+      // - { components: [...], componentSets: [...] } (figma_get_library_components)
+      // - [...] (plain array)
+      // - newline-separated text
+      let componentNames: string[] = [];
+      try {
+        const parsed = JSON.parse(result.libraryComponents);
+        if (Array.isArray(parsed)) {
+          componentNames = parsed.map((c: any) => (typeof c === 'string' ? c : (c.name ?? ''))).filter(Boolean);
+        } else if (parsed && typeof parsed === 'object') {
+          const extractNames = (arr: any[]) =>
+            arr.map((c: any) => (typeof c === 'string' ? c : (c.name ?? ''))).filter(Boolean);
+          if (Array.isArray(parsed.components)) {
+            componentNames.push(...extractNames(parsed.components));
+          }
+          if (Array.isArray(parsed.componentSets)) {
+            componentNames.push(...extractNames(parsed.componentSets));
+          }
+        }
+      } catch {
+        componentNames = result.libraryComponents
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean);
+      }
+      result.componentAnalysis = analyzeComponents(result.fileData, componentNames);
+    } catch (err) {
+      log.warn({ err }, 'Component analysis failed — skipping');
+    }
+  }
+
+  return result;
 }

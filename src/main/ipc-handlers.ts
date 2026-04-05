@@ -649,6 +649,48 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     return { success: false, error: 'No active batch' };
   });
 
+  // ── Judge control ──────────────────────────────────
+
+  ipcMain.handle('judge:set-override', (_event: any, slotId: string, enabled: boolean | null) => {
+    const slot = slotManager.getSlot(slotId);
+    if (!slot) return { success: false, error: 'Slot not found' };
+    slot.judgeOverride = typeof enabled === 'boolean' || enabled === null ? enabled : null;
+    return { success: true };
+  });
+
+  ipcMain.handle('judge:force-rerun', async (_event: any, slotId: string) => {
+    const slot = slotManager.getSlot(slotId);
+    if (!slot) return { success: false, error: 'Slot not found' };
+    if (!slot.fileKey) return { success: false, error: 'No file connected' };
+
+    const connector = new ScopedConnector(infra.wsServer, slot.fileKey);
+    const settings = (await import('./subagent/config.js')).loadSubagentSettings();
+    const { forceRerunJudge } = await import('./subagent/judge-harness.js');
+    const wc = mainWindow.webContents;
+
+    const judgeController = new AbortController();
+    activeBatchControllers.set(`judge-${slotId}`, judgeController);
+    try {
+      safeSend(wc, 'judge:running', slotId);
+      const verdict = await forceRerunJudge(infra, connector, slot, settings, judgeController.signal, {
+        onProgress: (event) => safeSend(wc, 'subagent:status', slotId, event),
+        onVerdict: (v, attempt, max) => {
+          safeSend(wc, 'judge:verdict', slotId, v, attempt, max);
+          if (v.verdict === 'FAIL' && slot.taskStore?.size > 0) {
+            safeSend(wc, 'task:updated', slotId, slot.taskStore.list());
+          }
+        },
+        onRetryStart: (attempt, max) => safeSend(wc, 'judge:retry-start', slotId, attempt, max),
+      });
+      return { success: true, verdict };
+    } catch (err: any) {
+      log.warn({ err, slotId }, 'Force re-run judge failed');
+      return { success: false, error: err.message };
+    } finally {
+      activeBatchControllers.delete(`judge-${slotId}`);
+    }
+  });
+
   // ── Figma plugin setup (global) ──────────────────
 
   ipcMain.handle('plugin:check', () => {

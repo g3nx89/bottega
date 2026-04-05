@@ -11,27 +11,43 @@ vi.mock('../../../../src/main/compression/metrics.js', async (importOriginal) =>
 
 vi.mock('../../../../src/main/subagent/orchestrator.js', () => ({
   runSubagentBatch: vi.fn(),
+  runMicroJudgeBatch: vi.fn(),
 }));
 
-import type { SubagentSettings } from '../../../../src/main/subagent/config.js';
-import { abortActiveJudge, runJudgeHarness } from '../../../../src/main/subagent/judge-harness.js';
-import { runSubagentBatch } from '../../../../src/main/subagent/orchestrator.js';
+vi.mock('../../../../src/main/subagent/read-only-tools.js', () => ({
+  createReadOnlyTools: vi.fn(() => []),
+}));
 
-const mockRunBatch = vi.mocked(runSubagentBatch);
+vi.mock('../../../../src/main/subagent/context-prefetch.js', () => ({
+  prefetchCommonContext: vi.fn(),
+  formatBriefing: vi.fn(() => ''),
+  prefetchForMicroJudges: vi.fn().mockResolvedValue({
+    screenshot: null,
+    fileData: null,
+    designSystem: null,
+    lint: null,
+    libraryComponents: null,
+    componentAnalysis: null,
+  }),
+}));
+
+import { DEFAULT_SUBAGENT_SETTINGS, type SubagentSettings } from '../../../../src/main/subagent/config.js';
+import { abortActiveJudge, runJudgeHarness } from '../../../../src/main/subagent/judge-harness.js';
+import { runMicroJudgeBatch } from '../../../../src/main/subagent/orchestrator.js';
+import type { MicroVerdict } from '../../../../src/main/subagent/types.js';
+
+const mockRunMicroBatch = vi.mocked(runMicroJudgeBatch);
 
 const makeSlot = (overrides: any = {}) => ({
   id: 'slot-1',
   session: { prompt: vi.fn().mockResolvedValue(undefined), abort: vi.fn().mockResolvedValue(undefined) },
+  judgeOverride: null,
+  lastTurnToolNames: [],
   ...overrides,
 });
 
 const defaultSettings: SubagentSettings = {
-  models: {
-    scout: { provider: 'anthropic', modelId: 'claude-haiku-4-5' },
-    analyst: { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
-    auditor: { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
-    judge: { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
-  },
+  ...DEFAULT_SUBAGENT_SETTINGS,
   judgeMode: 'auto',
   autoRetry: false,
   maxRetries: 2,
@@ -43,12 +59,94 @@ const mockCallbacks = () => ({
   onRetryStart: vi.fn(),
 });
 
+function makePassVerdicts(): MicroVerdict[] {
+  return [
+    {
+      judgeId: 'alignment',
+      pass: true,
+      finding: 'ok',
+      evidence: 'verified',
+      actionItems: [],
+      status: 'evaluated',
+      durationMs: 100,
+    },
+    {
+      judgeId: 'token_compliance',
+      pass: true,
+      finding: 'ok',
+      evidence: 'verified',
+      actionItems: [],
+      status: 'evaluated',
+      durationMs: 100,
+    },
+    {
+      judgeId: 'visual_hierarchy',
+      pass: true,
+      finding: 'ok',
+      evidence: 'verified',
+      actionItems: [],
+      status: 'evaluated',
+      durationMs: 100,
+    },
+    {
+      judgeId: 'completeness',
+      pass: true,
+      finding: 'ok',
+      evidence: 'verified',
+      actionItems: [],
+      status: 'evaluated',
+      durationMs: 100,
+    },
+    {
+      judgeId: 'consistency',
+      pass: true,
+      finding: 'ok',
+      evidence: 'verified',
+      actionItems: [],
+      status: 'evaluated',
+      durationMs: 100,
+    },
+    {
+      judgeId: 'naming',
+      pass: true,
+      finding: 'ok',
+      evidence: 'verified',
+      actionItems: [],
+      status: 'evaluated',
+      durationMs: 100,
+    },
+    {
+      judgeId: 'componentization',
+      pass: true,
+      finding: 'ok',
+      evidence: 'verified',
+      actionItems: [],
+      status: 'evaluated',
+      durationMs: 100,
+    },
+  ];
+}
+
+function makeFailVerdicts(): MicroVerdict[] {
+  const pass = makePassVerdicts();
+  pass[0] = {
+    judgeId: 'alignment',
+    pass: false,
+    finding: 'bad',
+    evidence: 'off by 2px',
+    actionItems: ['Fix alignment'],
+    status: 'evaluated',
+    durationMs: 100,
+  };
+  return pass;
+}
+
 describe('Judge Harness', () => {
   describe('runJudgeHarness', () => {
     it('returns null when judgeMode is off', async () => {
       const result = await runJudgeHarness(
         {} as any,
-        {} as any,
+        { fileKey: 'fk' } as any,
         makeSlot() as any,
         { ...defaultSettings, judgeMode: 'off' },
         ['figma_set_fills'],
@@ -58,12 +156,12 @@ describe('Judge Harness', () => {
       expect(result).toBeNull();
     });
 
-    it('returns null when judgeMode is ask', async () => {
+    it('returns null when judgeOverride is false', async () => {
       const result = await runJudgeHarness(
         {} as any,
-        {} as any,
-        makeSlot() as any,
-        { ...defaultSettings, judgeMode: 'ask' },
+        { fileKey: 'fk' } as any,
+        makeSlot({ judgeOverride: false }) as any,
+        defaultSettings,
         ['figma_set_fills'],
         new AbortController().signal,
         mockCallbacks(),
@@ -74,7 +172,7 @@ describe('Judge Harness', () => {
     it('returns null when turn has no mutations', async () => {
       const result = await runJudgeHarness(
         {} as any,
-        {} as any,
+        { fileKey: 'fk' } as any,
         makeSlot() as any,
         defaultSettings,
         ['figma_screenshot', 'figma_get_file_data'],
@@ -84,53 +182,45 @@ describe('Judge Harness', () => {
       expect(result).toBeNull();
     });
 
-    it('returns PASS verdict when judge passes', async () => {
-      const verdict = {
-        verdict: 'PASS' as const,
-        criteria: [{ name: 'alignment', pass: true, finding: 'ok', evidence: 'verified' }],
-        actionItems: [],
-        summary: 'All good',
-      };
-      mockRunBatch.mockResolvedValueOnce({
-        batchId: 'batch-1',
-        results: [{ role: 'judge', subagentId: 'j1', status: 'completed', output: '{}', verdict, durationMs: 100 }],
-        totalDurationMs: 100,
-        aborted: false,
-      });
+    it('returns PASS verdict when all micro-judges pass', async () => {
+      mockRunMicroBatch.mockResolvedValueOnce(makePassVerdicts());
 
       const cbs = mockCallbacks();
+      const infra = {
+        queueManager: { getQueue: () => ({}) },
+        wsServer: {},
+        figmaAPI: {},
+        designSystemCache: {},
+        configManager: {},
+      } as any;
       const result = await runJudgeHarness(
-        {} as any,
-        {} as any,
+        infra,
+        { fileKey: 'fk' } as any,
         makeSlot() as any,
         defaultSettings,
         ['figma_set_fills', 'figma_screenshot'],
         new AbortController().signal,
         cbs,
       );
-      expect(result).toEqual(verdict);
-      expect(cbs.onVerdict).toHaveBeenCalledWith(verdict, 1, 1);
+      expect(result?.verdict).toBe('PASS');
+      expect(cbs.onVerdict).toHaveBeenCalledTimes(1);
     });
 
     it('returns FAIL verdict without retry when autoRetry is off', async () => {
-      const verdict = {
-        verdict: 'FAIL' as const,
-        criteria: [{ name: 'alignment', pass: false, finding: 'bad', evidence: 'off by 2px' }],
-        actionItems: ['Fix alignment'],
-        summary: 'Failed',
-      };
-      mockRunBatch.mockResolvedValueOnce({
-        batchId: 'batch-1',
-        results: [{ role: 'judge', subagentId: 'j1', status: 'completed', output: '{}', verdict, durationMs: 100 }],
-        totalDurationMs: 100,
-        aborted: false,
-      });
+      mockRunMicroBatch.mockResolvedValueOnce(makeFailVerdicts());
 
       const slot = makeSlot();
       const cbs = mockCallbacks();
+      const infra = {
+        queueManager: { getQueue: () => ({}) },
+        wsServer: {},
+        figmaAPI: {},
+        designSystemCache: {},
+        configManager: {},
+      } as any;
       const result = await runJudgeHarness(
-        {} as any,
-        {} as any,
+        infra,
+        { fileKey: 'fk' } as any,
         slot as any,
         { ...defaultSettings, autoRetry: false },
         ['figma_set_fills'],
@@ -144,56 +234,30 @@ describe('Judge Harness', () => {
     });
 
     it('retries on FAIL when autoRetry is enabled', async () => {
-      const failVerdict = {
-        verdict: 'FAIL' as const,
-        criteria: [{ name: 'alignment', pass: false, finding: 'bad', evidence: 'off' }],
-        actionItems: ['Fix it'],
-        summary: 'Failed',
-      };
-      const passVerdict = {
-        verdict: 'PASS' as const,
-        criteria: [{ name: 'alignment', pass: true, finding: 'ok', evidence: 'verified' }],
-        actionItems: [],
-        summary: 'All good',
-      };
-
-      mockRunBatch
-        .mockResolvedValueOnce({
-          batchId: 'b1',
-          results: [
-            {
-              role: 'judge',
-              subagentId: 'j1',
-              status: 'completed',
-              output: '{}',
-              verdict: failVerdict,
-              durationMs: 100,
-            },
-          ],
-          totalDurationMs: 100,
-          aborted: false,
-        })
-        .mockResolvedValueOnce({
-          batchId: 'b2',
-          results: [
-            {
-              role: 'judge',
-              subagentId: 'j2',
-              status: 'completed',
-              output: '{}',
-              verdict: passVerdict,
-              durationMs: 100,
-            },
-          ],
-          totalDurationMs: 100,
-          aborted: false,
-        });
+      mockRunMicroBatch.mockResolvedValueOnce(makeFailVerdicts()).mockResolvedValueOnce([
+        {
+          judgeId: 'alignment',
+          pass: true,
+          finding: 'fixed',
+          evidence: 'ok',
+          actionItems: [],
+          status: 'evaluated',
+          durationMs: 100,
+        },
+      ]);
 
       const slot = makeSlot();
       const cbs = mockCallbacks();
+      const infra = {
+        queueManager: { getQueue: () => ({}) },
+        wsServer: {},
+        figmaAPI: {},
+        designSystemCache: {},
+        configManager: {},
+      } as any;
       const result = await runJudgeHarness(
-        {} as any,
-        {} as any,
+        infra,
+        { fileKey: 'fk' } as any,
         slot as any,
         { ...defaultSettings, autoRetry: true, maxRetries: 2 },
         ['figma_set_fills'],
@@ -203,49 +267,9 @@ describe('Judge Harness', () => {
       expect(result?.verdict).toBe('PASS');
       // Parent should have been prompted to fix
       expect(slot.session.prompt).toHaveBeenCalledTimes(1);
-      expect(slot.session.prompt).toHaveBeenCalledWith(expect.stringContaining('Fix it'));
-      // maxRetries=2 → 3 total attempts (1 initial + 2 retries)
+      expect(slot.session.prompt).toHaveBeenCalledWith(expect.stringContaining('Fix alignment'));
+      // maxRetries=2 → 3 total attempts; retry callback fires for attempt 2
       expect(cbs.onRetryStart).toHaveBeenCalledWith(2, 3);
-    });
-
-    it('returns null when batch is aborted', async () => {
-      mockRunBatch.mockResolvedValueOnce({
-        batchId: 'b1',
-        results: [],
-        totalDurationMs: 10,
-        aborted: true,
-      });
-
-      const result = await runJudgeHarness(
-        {} as any,
-        {} as any,
-        makeSlot() as any,
-        defaultSettings,
-        ['figma_set_fills'],
-        new AbortController().signal,
-        mockCallbacks(),
-      );
-      expect(result).toBeNull();
-    });
-
-    it('returns null when judge result has no verdict', async () => {
-      mockRunBatch.mockResolvedValueOnce({
-        batchId: 'b1',
-        results: [{ role: 'judge', subagentId: 'j1', status: 'error', error: 'timeout', durationMs: 100 }],
-        totalDurationMs: 100,
-        aborted: false,
-      });
-
-      const result = await runJudgeHarness(
-        {} as any,
-        {} as any,
-        makeSlot() as any,
-        defaultSettings,
-        ['figma_set_fills'],
-        new AbortController().signal,
-        mockCallbacks(),
-      );
-      expect(result).toBeNull();
     });
   });
 

@@ -6,7 +6,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { SubagentRole } from './types.js';
+import { ALL_MICRO_JUDGE_IDS, getJudgeDefinition } from './judge-registry.js';
+import type { MicroJudgeId, SubagentRole } from './types.js';
 
 const CONFIG_DIR = path.join(os.homedir(), '.bottega');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'subagent.json');
@@ -16,14 +17,33 @@ export interface SubagentModelConfig {
   modelId: string;
 }
 
-export interface SubagentSettings {
-  models: Record<SubagentRole, SubagentModelConfig>;
-  judgeMode: 'off' | 'auto' | 'ask';
-  autoRetry: boolean;
-  maxRetries: number;
+export interface MicroJudgeConfig {
+  enabled: boolean;
+  model: SubagentModelConfig;
 }
 
-const VALID_JUDGE_MODES = new Set(['off', 'auto', 'ask']);
+export interface SubagentSettings {
+  models: Record<SubagentRole, SubagentModelConfig>;
+  judgeMode: 'off' | 'auto';
+  autoRetry: boolean;
+  maxRetries: number;
+  microJudges: Record<MicroJudgeId, MicroJudgeConfig>;
+}
+
+const VALID_JUDGE_MODES = new Set(['off', 'auto']);
+
+/** Build default microJudges config from the registry. */
+function buildDefaultMicroJudges(): Record<MicroJudgeId, MicroJudgeConfig> {
+  const result = {} as Record<MicroJudgeId, MicroJudgeConfig>;
+  for (const id of ALL_MICRO_JUDGE_IDS) {
+    const def = getJudgeDefinition(id);
+    result[id] = {
+      enabled: true,
+      model: { provider: 'anthropic', modelId: def.defaultModel },
+    };
+  }
+  return result;
+}
 
 export const DEFAULT_SUBAGENT_SETTINGS: SubagentSettings = {
   models: {
@@ -32,10 +52,27 @@ export const DEFAULT_SUBAGENT_SETTINGS: SubagentSettings = {
     auditor: { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
     judge: { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
   },
-  judgeMode: 'ask',
+  judgeMode: 'auto',
   autoRetry: false,
   maxRetries: 2,
+  microJudges: buildDefaultMicroJudges(),
 };
+
+/** Validate a single MicroJudgeConfig entry. */
+function validateMicroJudgeConfig(raw: any, defaultConfig: MicroJudgeConfig): MicroJudgeConfig {
+  if (!raw || typeof raw !== 'object') return { ...defaultConfig };
+  const enabled = typeof raw.enabled === 'boolean' ? raw.enabled : defaultConfig.enabled;
+  let model = defaultConfig.model;
+  if (
+    raw.model &&
+    typeof raw.model === 'object' &&
+    typeof raw.model.provider === 'string' &&
+    typeof raw.model.modelId === 'string'
+  ) {
+    model = { provider: raw.model.provider, modelId: raw.model.modelId };
+  }
+  return { enabled, model };
+}
 
 /** Validate and clamp a parsed config, returning defaults for invalid fields. */
 function validateConfig(raw: any): SubagentSettings {
@@ -54,27 +91,50 @@ function validateConfig(raw: any): SubagentSettings {
     }
   }
 
-  const judgeMode = VALID_JUDGE_MODES.has(raw.judgeMode) ? raw.judgeMode : defaults.judgeMode;
+  // Migration: 'ask' → 'auto' (toggle is the new paradigm, 'ask' users had judge active)
+  let judgeMode: 'off' | 'auto';
+  if (raw.judgeMode === 'ask') {
+    judgeMode = 'auto';
+  } else {
+    judgeMode = VALID_JUDGE_MODES.has(raw.judgeMode) ? (raw.judgeMode as 'off' | 'auto') : defaults.judgeMode;
+  }
+
   const autoRetry = typeof raw.autoRetry === 'boolean' ? raw.autoRetry : defaults.autoRetry;
   const maxRetries =
     typeof raw.maxRetries === 'number' && Number.isFinite(raw.maxRetries)
       ? Math.max(1, Math.min(5, Math.round(raw.maxRetries)))
       : defaults.maxRetries;
 
-  return { models, judgeMode, autoRetry, maxRetries };
+  // Migrate or validate microJudges
+  const microJudges = { ...defaults.microJudges };
+  if (raw.microJudges && typeof raw.microJudges === 'object') {
+    for (const id of ALL_MICRO_JUDGE_IDS) {
+      if (raw.microJudges[id]) {
+        microJudges[id] = validateMicroJudgeConfig(raw.microJudges[id], defaults.microJudges[id]);
+      }
+    }
+  }
+
+  return { models, judgeMode, autoRetry, maxRetries, microJudges };
 }
 
 /** In-memory cache — avoids synchronous disk reads on every agent turn. */
 let cachedSettings: SubagentSettings | null = null;
 
-/** Load settings from cache (or disk on first call). */
+/** Load settings from cache (or disk on first call). Auto-persists if migration occurred. */
 export function loadSubagentSettings(): SubagentSettings {
   if (cachedSettings) return cachedSettings;
+  let needsMigration = false;
   try {
     const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    needsMigration = raw.judgeMode === 'ask' || !raw.microJudges;
     cachedSettings = validateConfig(raw);
   } catch {
     cachedSettings = { ...DEFAULT_SUBAGENT_SETTINGS };
+  }
+  // Persist migrated config so old formats don't re-migrate on every load
+  if (needsMigration) {
+    saveSubagentSettings(cachedSettings).catch(() => {});
   }
   return cachedSettings;
 }

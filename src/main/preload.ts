@@ -181,6 +181,11 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('judge:retry-start', (_event, slotId, attempt, max) => cb(slotId, attempt, max));
   },
 
+  // ── Judge control ──────────────────────────
+  setJudgeOverride: (slotId: string, enabled: boolean | null) =>
+    ipcRenderer.invoke('judge:set-override', slotId, enabled),
+  forceRerunJudge: (slotId: string) => ipcRenderer.invoke('judge:force-rerun', slotId),
+
   // ── Compression profiles & cache (global) ─
   compressionGetProfiles: () => ipcRenderer.invoke('compression:get-profiles'),
   compressionGetProfile: () => ipcRenderer.invoke('compression:get-profile'),

@@ -3,7 +3,7 @@
  * All prompts are in English only.
  */
 
-import type { SubagentRole } from './types.js';
+import type { MicroJudgeId, SubagentRole } from './types.js';
 
 const COMMON_PREAMBLE = `You are a read-only specialist. You can observe the Figma file but NOT modify it.
 You have received a briefing as orientation. Do NOT trust it — verify every claim via your tools.
@@ -98,6 +98,7 @@ Use \`figma_get_file_data\` with \`mode: 'styling'\` for token compliance checks
 - **Overall Score**: compliance percentage with justification`;
 }
 
+/** @deprecated Use getMicroJudgeSystemPrompt + getMicroJudgeCriterionPrompt instead. */
 function judgePrompt(): string {
   return `${COMMON_PREAMBLE}
 
@@ -263,4 +264,60 @@ const PROMPT_BUILDERS: Record<SubagentRole, () => string> = {
 /** Get the system prompt for a given subagent role. */
 export function getSystemPrompt(role: SubagentRole): string {
   return PROMPT_BUILDERS[role]();
+}
+
+// ── Micro-Judge Prompts ──────────────────────────────────────────────
+
+/** Shared system prompt for all micro-judges (~150 tokens, cacheable). */
+export function getMicroJudgeSystemPrompt(): string {
+  return `You are a single-criterion design quality evaluator. All data is provided below.
+You have NO tools. Do NOT call any tools. Evaluate from the provided data ONLY.
+
+Output ONLY a JSON object:
+{"pass": boolean, "finding": "one sentence", "evidence": "specific values", "actionItems": ["fix X"]}
+
+Rules: Binary PASS/FAIL. No partial credit. Evidence must be specific (node names, values, measurements). If borderline, FAIL.
+Do not add any text outside the JSON. Do not use markdown code fences.`;
+}
+
+const CRITERION_PROMPTS: Record<MicroJudgeId, string> = {
+  alignment: `## Criterion: Alignment
+Check coordinates, auto-layout usage, and pixel offsets.
+FAIL if any element is misaligned by more than 1px, if auto-layout is missing where it should be used, or if absolute positioning is used unnecessarily.
+Look for: x/y coordinates not on grid, mixed alignment modes, inconsistent padding within auto-layout frames.`,
+
+  token_compliance: `## Criterion: Token Compliance
+Check lint violations, hardcoded hex values, and design token availability.
+FAIL if any hardcoded hex/rgba value exists where a design token is available, or if lint reports token violations.
+Look for: raw hex in fills/strokes/effects, missing variable bindings, inconsistent token usage.`,
+
+  visual_hierarchy: `## Criterion: Visual Hierarchy
+Check typography scale and primary action prominence using the attached screenshot image.
+FAIL if the typography scale doesn't create clear hierarchy (heading > subheading > body), if the primary action isn't visually prominent, or if information density is inappropriate.
+Look for: font size ratios, weight contrast, color emphasis, button prominence. Use the screenshot to verify visual weight and readability.`,
+
+  completeness: `## Criterion: Completeness
+Check that all requested elements are present vs the task description using the attached screenshot image and file data.
+FAIL if any specified element, state, or variant is absent. Visually verify from the screenshot that all requested UI elements are rendered.
+Look for: missing frames, placeholder content not replaced, absent states (hover, error, loading, empty).`,
+
+  consistency: `## Criterion: Consistency
+Check uniform spacing, sizing, and styling across similar elements.
+FAIL if two elements at the same level use different spacing, padding, font sizes, or border radii without clear design reason.
+Look for: sibling elements with different gaps, inconsistent corner radii, varying padding in similar components.`,
+
+  naming: `## Criterion: Naming
+Check for semantic layer names and consistent naming convention.
+FAIL if auto-generated names exist (Frame 1, Group 2, Rectangle 3), if naming convention is inconsistent (mixing camelCase and kebab-case), or if names don't describe content.
+Look for: "Frame N", "Group N", "Rectangle N" patterns, mixed naming styles, generic names.`,
+
+  componentization: `## Criterion: Componentization
+Evaluate the pre-computed component analysis report. Confirm or dismiss each finding.
+FAIL if there are 3+ structurally identical elements that should be components, if library components exist but aren't used, or if detached instances are found.
+Review: within-screen duplicates, cross-screen matches, library misses, detached instances.`,
+};
+
+/** Get the criterion-specific prompt for a micro-judge (injected as user message). */
+export function getMicroJudgeCriterionPrompt(id: MicroJudgeId): string {
+  return CRITERION_PROMPTS[id];
 }
