@@ -131,6 +131,18 @@ export async function runJudgeHarness(
     if (!config.enabled) disabledJudges.add(id as MicroJudgeId);
   }
   const toolCategories = new Set(turnToolNames.map(categorizeToolName));
+
+  // Skip token_compliance if the file has no design tokens cached
+  // (either never set up, or not yet discovered in this session)
+  const fileKey = connector.fileKey;
+  const hasDesignTokens = infra.designSystemCache?.isValid?.(fileKey) ?? false;
+  const hasUsedTokenTools = [...slot.sessionToolHistory].some(
+    (t) => t === 'figma_setup_tokens' || t === 'figma_bind_variable' || t === 'figma_lint',
+  );
+  if (!hasDesignTokens && !hasUsedTokenTools) {
+    disabledJudges.add('token_compliance' as MicroJudgeId);
+  }
+
   const activeJudgeIds = getActiveJudges(tier, turnToolNames, disabledJudges, toolCategories);
 
   if (activeJudgeIds.length === 0) {

@@ -54,7 +54,7 @@ export const DEFAULT_SUBAGENT_SETTINGS: SubagentSettings = {
   },
   judgeMode: 'auto',
   autoRetry: false,
-  maxRetries: 2,
+  maxRetries: 1,
   microJudges: buildDefaultMicroJudges(),
 };
 

@@ -83,6 +83,9 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
  */
 export class FigmaAPI {
   private accessToken: string;
+  private consecutive403Count = 0;
+  private apiDisabled = false;
+  private static readonly MAX_403_BEFORE_DISABLE = 3;
 
   constructor(accessToken?: string) {
     this.accessToken = accessToken || '';
@@ -92,6 +95,10 @@ export class FigmaAPI {
    * Make authenticated request to Figma API
    */
   private async request(endpoint: string, options: RequestInit = {}): Promise<any> {
+    if (this.apiDisabled) {
+      throw new Error('Figma REST API disabled: invalid token (3 consecutive 403s)');
+    }
+
     const url = `${FIGMA_API_BASE}${endpoint}`;
 
     const isOAuthToken = this.accessToken.startsWith('figu_');
@@ -128,9 +135,23 @@ export class FigmaAPI {
         { status: response.status, statusText: response.statusText, body: errorText },
         'Figma API request failed',
       );
+
+      // Only count 403s that indicate a genuinely invalid token (not file-level permission errors)
+      if (response.status === 403 && errorText.includes('Invalid token')) {
+        this.consecutive403Count++;
+        if (this.consecutive403Count >= FigmaAPI.MAX_403_BEFORE_DISABLE) {
+          this.apiDisabled = true;
+          logger.warn('Figma REST API disabled: invalid token (3 consecutive 403s)');
+        }
+      } else if (response.status !== 403) {
+        this.consecutive403Count = 0;
+      }
+
       throw new Error(`Figma API error (${response.status}): ${errorText}`);
     }
 
+    // Reset 403 counter on success
+    this.consecutive403Count = 0;
     const data = await response.json();
     return data;
   }

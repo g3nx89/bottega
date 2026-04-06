@@ -301,6 +301,7 @@ function switchToTab(slotId) {
     renderPromptQueue(newTab);
     renderTaskPanel(newTab);
     syncBarToTab(newTab);
+    updateContextBar(newTab.lastContextTokens);
     scrollToBottom();
   }
 }
@@ -357,6 +358,7 @@ function createTabState(slotInfo) {
     thinkingBubble: null,
     queuedPrompts: [],
     judgeOverride: null,
+    lastContextTokens: 0,
   };
 }
 
@@ -716,6 +718,38 @@ function scrollToBottom() {
   });
 }
 
+/** Create an SVG element for the send button icon. */
+function createSendIcon() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '16');
+  svg.setAttribute('height', '16');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('fill', 'none');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M14 8L2 2L5 8L2 14L14 8Z');
+  path.setAttribute('fill', 'currentColor');
+  svg.appendChild(path);
+  return svg;
+}
+
+/** Create an SVG element for the stop button icon. */
+function createStopIcon() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '14');
+  svg.setAttribute('height', '14');
+  svg.setAttribute('viewBox', '0 0 14 14');
+  svg.setAttribute('fill', 'none');
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', '2');
+  rect.setAttribute('y', '2');
+  rect.setAttribute('width', '10');
+  rect.setAttribute('height', '10');
+  rect.setAttribute('rx', '2');
+  rect.setAttribute('fill', 'currentColor');
+  svg.appendChild(rect);
+  return svg;
+}
+
 function updateInputState() {
   const tab = getActiveTab();
   const streaming = tab ? tab.isStreaming : false;
@@ -726,6 +760,18 @@ function updateInputState() {
     : streaming
       ? 'Type to queue\u2026'
       : 'Type / for image commands, or describe what you want\u2026';
+
+  // Toggle send/stop button appearance
+  if (streaming) {
+    sendBtn.classList.add('stop-mode');
+    sendBtn.title = 'Stop (Esc)';
+    sendBtn.replaceChildren(createStopIcon());
+  } else {
+    sendBtn.classList.remove('stop-mode');
+    sendBtn.title = 'Send (Enter)';
+    sendBtn.replaceChildren(createSendIcon());
+  }
+
   if (tab && !streaming) {
     inputField.focus();
   }
@@ -846,17 +892,31 @@ resetSessionBtn.addEventListener('click', async () => {
   const result = await window.api.resetSession(tab.id);
   if (result.success) {
     clearChat(tab);
+    tab.lastContextTokens = 0;
+    updateContextBar(0);
   }
 });
 
 // ── Event listeners ──────────────────────
 
-sendBtn.addEventListener('click', sendMessage);
+sendBtn.addEventListener('click', () => {
+  const tab = getActiveTab();
+  if (tab && tab.isStreaming && !inputField.value.trim()) {
+    window.api.abort(tab.id);
+    return;
+  }
+  sendMessage();
+});
 
 /** Handle keyboard navigation within the slash command menu. Returns true if the event was consumed. */
 
 function handleInputEscape() {
-  if (!slashHelpEl.classList.contains('hidden')) hideSlashHelp();
+  if (!slashHelpEl.classList.contains('hidden')) { hideSlashHelp(); return; }
+  // Abort streaming on Escape
+  const tab = getActiveTab();
+  if (tab && tab.isStreaming) {
+    window.api.abort(tab.id);
+  }
 }
 
 function handleInputArrowUp(e) {
@@ -1084,7 +1144,10 @@ function updateContextBar(inputTokens) {
 
 window.api.onUsage((slotId, usage) => {
   const tab = tabs.get(slotId);
-  if (tab && tab.id === activeTabId) updateContextBar(usage.input);
+  if (tab) {
+    tab.lastContextTokens = usage.input;
+    if (tab.id === activeTabId) updateContextBar(usage.input);
+  }
 });
 
 // Load context sizes and init bar

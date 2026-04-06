@@ -31,7 +31,7 @@ describe('Config Migration', () => {
     }
   });
 
-  it('maxRetries default is 2', () => {
-    expect(DEFAULT_SUBAGENT_SETTINGS.maxRetries).toBe(2);
+  it('maxRetries default is 1', () => {
+    expect(DEFAULT_SUBAGENT_SETTINGS.maxRetries).toBe(1);
   });
 });

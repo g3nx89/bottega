@@ -43,6 +43,7 @@ const makeSlot = (overrides: any = {}) => ({
   session: { prompt: vi.fn().mockResolvedValue(undefined), abort: vi.fn().mockResolvedValue(undefined) },
   judgeOverride: null,
   lastTurnToolNames: [],
+  sessionToolHistory: new Set<string>(['figma_setup_tokens']),
   ...overrides,
 });
 

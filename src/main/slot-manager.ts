@@ -53,6 +53,8 @@ export interface SessionSlot extends TurnTracking {
   judgeOverride: boolean | null;
   /** Tool names from the last completed turn — used for force re-run judge. */
   lastTurnToolNames: string[];
+  /** Accumulates all tool names ever called in this session — used for conditional judge skipping. */
+  sessionToolHistory: Set<string>;
 }
 
 export interface SlotInfo {
@@ -139,6 +141,7 @@ export class SlotManager {
       lastCompletedTurnIndex: 0,
       judgeOverride: null,
       lastTurnToolNames: [],
+      sessionToolHistory: new Set<string>(),
     };
 
     this.slots.set(slot.id, slot);

@@ -154,6 +154,7 @@ function makeSlot() {
     },
     judgeOverride: null,
     lastTurnToolNames: [],
+    sessionToolHistory: new Set<string>(['figma_setup_tokens']),
     taskStore: { create: vi.fn(), size: 0, list: vi.fn(() => []) },
   } as any;
 }

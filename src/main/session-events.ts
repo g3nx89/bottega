@@ -235,6 +235,7 @@ export function createEventRouter(deps: EventRouterDeps) {
     // so subsequent no-tool turns don't clear the list needed by re-judge
     if (toolNames.length > 0) {
       slot.lastTurnToolNames = [...toolNames];
+      for (const t of toolNames) slot.sessionToolHistory.add(t);
     }
 
     // Auto-judge: run BEFORE finalizeTurn so retry turns get proper turn tracking

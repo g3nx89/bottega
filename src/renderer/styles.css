@@ -1613,6 +1613,14 @@ body {
   transform: none;
 }
 
+#send-btn.stop-mode {
+  background: #e53e3e;
+}
+
+#send-btn.stop-mode:hover:not(:disabled) {
+  background: #c53030;
+}
+
 /* ──────────────────────────────────────────
    Input toolbar (model/effort selectors)
 ────────────────────────────────────────── */
