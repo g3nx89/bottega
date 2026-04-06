@@ -54,6 +54,72 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
 
   return [
     {
+      name: 'figma_batch_bind_variable',
+      label: 'Batch Bind Variable',
+      description:
+        'Bind multiple node properties to Figma variables (design tokens) in a single call. Much faster than calling figma_bind_variable repeatedly.',
+      promptSnippet:
+        'figma_batch_bind_variable: bind multiple nodes to design tokens at once (colors: fill/stroke, numeric: padding, spacing, etc.)',
+      parameters: Type.Object({
+        bindings: Type.Array(
+          Type.Object({
+            nodeId: Type.String({ description: 'Node ID' }),
+            variableName: Type.String({ description: 'Variable name (e.g. "colors/primary")' }),
+            property: StringEnum(
+              [
+                'fill',
+                'stroke',
+                'paddingTop',
+                'paddingRight',
+                'paddingBottom',
+                'paddingLeft',
+                'itemSpacing',
+                'cornerRadius',
+                'fontSize',
+                'lineHeight',
+                'strokeWeight',
+              ] as const,
+              { description: 'Property to bind' },
+            ),
+          }),
+          { description: 'Array of variable bindings to apply', maxItems: 200 },
+        ),
+      }),
+      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+        return operationQueue.execute(async () => {
+          const results: Array<{
+            nodeId: string;
+            variableName: string;
+            property: string;
+            success: boolean;
+            error?: string;
+          }> = [];
+          for (const binding of params.bindings) {
+            try {
+              await connector.bindVariable(binding.nodeId, binding.variableName, binding.property);
+              results.push({
+                nodeId: binding.nodeId,
+                variableName: binding.variableName,
+                property: binding.property,
+                success: true,
+              });
+            } catch (err: any) {
+              results.push({
+                nodeId: binding.nodeId,
+                variableName: binding.variableName,
+                property: binding.property,
+                success: false,
+                error: err.message ?? String(err),
+              });
+            }
+          }
+          const succeeded = results.filter((r) => r.success).length;
+          const failed = results.filter((r) => !r.success).length;
+          return textResult({ succeeded, failed, total: results.length, results });
+        });
+      },
+    },
+    {
       name: 'figma_setup_tokens',
       label: 'Setup Design Tokens',
       description:

@@ -20,6 +20,8 @@ vi.mock('../../../src/main/subagent/config.js', () => ({
 
 vi.mock('../../../src/main/subagent/judge-harness.js', () => ({
   runJudgeHarness: vi.fn().mockResolvedValue(null),
+  abortActiveJudge: vi.fn(),
+  READ_ONLY_CATEGORIES: new Set(['discovery', 'screenshot', 'task', 'other']),
 }));
 
 vi.mock('../../../src/main/messages.js', () => ({
@@ -48,6 +50,7 @@ function makeSlot(overrides: Partial<any> = {}): any {
       resetAssistantText: vi.fn(),
       suggest: vi.fn().mockResolvedValue([]),
     },
+    sessionToolHistory: new Set<string>(),
     promptQueue: {
       dequeue: vi.fn().mockReturnValue(null),
       list: vi.fn().mockReturnValue([]),
@@ -179,7 +182,7 @@ describe('createEventRouter', () => {
       );
     });
 
-    it('accumulates response char length from text_delta events', () => {
+    it('accumulates response char length from text_delta events', async () => {
       eventHandler({
         type: 'message_update',
         assistantMessageEvent: { type: 'text_delta', delta: 'Hello ' },
@@ -189,8 +192,10 @@ describe('createEventRouter', () => {
         assistantMessageEvent: { type: 'text_delta', delta: 'world' },
       });
 
-      // Verified via turn_end event
+      // agent_end is async (judge harness) — flush microtasks
       eventHandler({ type: 'agent_end' });
+      // agent_end fires async handleAgentEnd as fire-and-forget — poll for completion
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
 
       expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -199,7 +204,7 @@ describe('createEventRouter', () => {
       );
     });
 
-    it('emits usage:turn_end with full metrics on agent_end', () => {
+    it('emits usage:turn_end with full metrics on agent_end', async () => {
       // Simulate a turn: text + 2 tool calls
       eventHandler({
         type: 'message_update',
@@ -223,6 +228,8 @@ describe('createEventRouter', () => {
       });
 
       eventHandler({ type: 'agent_end' });
+      // agent_end fires async handleAgentEnd as fire-and-forget — poll for completion
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
 
       expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -238,12 +245,14 @@ describe('createEventRouter', () => {
       );
     });
 
-    it('sets hasAction false for text-only turns', () => {
+    it('sets hasAction false for text-only turns', async () => {
       eventHandler({
         type: 'message_update',
         assistantMessageEvent: { type: 'text_delta', delta: 'Just some explanation.' },
       });
       eventHandler({ type: 'agent_end' });
+      // agent_end fires async handleAgentEnd as fire-and-forget — poll for completion
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
 
       expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -254,8 +263,10 @@ describe('createEventRouter', () => {
       );
     });
 
-    it('preserves lastCompletedPromptId after finalizeTurn', () => {
+    it('preserves lastCompletedPromptId after finalizeTurn', async () => {
       eventHandler({ type: 'agent_end' });
+      // agent_end fires async handleAgentEnd as fire-and-forget — poll for completion
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
 
       expect(slot.lastCompletedPromptId).toBe('prompt-abc');
       expect(slot.lastCompletedTurnIndex).toBe(1);
@@ -263,7 +274,7 @@ describe('createEventRouter', () => {
       expect(slot.promptStartTime).toBeNull();
     });
 
-    it('resets per-turn state after agent_end', () => {
+    it('resets per-turn state after agent_end', async () => {
       eventHandler({
         type: 'message_update',
         assistantMessageEvent: { type: 'text_delta', delta: 'first turn' },
@@ -277,6 +288,8 @@ describe('createEventRouter', () => {
         result: { content: [{ type: 'text', text: 'connected' }] },
       });
       eventHandler({ type: 'agent_end' });
+      // agent_end fires async handleAgentEnd as fire-and-forget — poll for completion
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
 
       // Set up a second turn
       slot.currentPromptId = 'prompt-def';
@@ -289,6 +302,8 @@ describe('createEventRouter', () => {
         assistantMessageEvent: { type: 'text_delta', delta: 'second turn' },
       });
       eventHandler({ type: 'agent_end' });
+      // agent_end fires async handleAgentEnd as fire-and-forget — poll for completion
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
 
       // Second turn should have its own data, not carry over from first
       const secondCall = deps.usageTracker.trackTurnEnd.mock.calls[1][0];
@@ -334,15 +349,15 @@ describe('createEventRouter', () => {
       judgeEventHandler({ type: 'tool_execution_start', toolName: 'figma_set_fills', toolCallId: 'tc-judge-1' });
       judgeEventHandler({ type: 'agent_end' });
 
-      // Give the async handleAgentEnd time to complete
-      await new Promise((r) => setTimeout(r, 50));
+      // Give the async handleAgentEnd time to complete (it returns early because isStreaming=false)
+      await new Promise((r) => process.nextTick(r));
 
-      // agent:end should NOT have been sent
+      // agent:end should NOT have been sent (user aborted during judge)
       const safeSendCalls = (safeSend as any).mock.calls;
       const agentEndCalls = safeSendCalls.filter((c: any) => c[1] === 'agent:end');
       expect(agentEndCalls).toHaveLength(0);
 
-      // trackTurnEnd should NOT have been called
+      // trackTurnEnd should NOT have been called (early return because isStreaming=false)
       expect(judgeDeps.usageTracker.trackTurnEnd).not.toHaveBeenCalled();
     });
 
@@ -388,11 +403,114 @@ describe('createEventRouter', () => {
       capturedEventHandler({ type: 'tool_execution_start', toolName: 'figma_set_fills', toolCallId: 'tc-1' });
       capturedEventHandler({ type: 'agent_end' });
 
-      await new Promise((r) => setTimeout(r, 50));
+      // agent_end fires async handleAgentEnd as fire-and-forget — poll for completion
+      await vi.waitFor(() => expect(judgeDeps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
 
       // agent:usage should NOT have been sent during judge
       const usageCalls = (safeSend as any).mock.calls.filter((c: any) => c[1] === 'agent:usage');
       expect(usageCalls).toHaveLength(0);
+    });
+
+    describe('B-011: suggestion race condition guard', () => {
+      let suggestResolve: (value: string[]) => void;
+      let safeSendMock: ReturnType<typeof vi.fn>;
+
+      beforeEach(async () => {
+        const { safeSend } = await import('../../../src/main/safe-send.js');
+        safeSendMock = safeSend as ReturnType<typeof vi.fn>;
+        safeSendMock.mockClear();
+      });
+
+      function setupSuggestionSlot(overrides: Partial<any> = {}) {
+        // Create a slot with a suggest() that returns a controllable promise
+        const suggestPromise = new Promise<string[]>((resolve) => {
+          suggestResolve = resolve;
+        });
+        return makeSlot({
+          suggester: {
+            appendAssistantText: vi.fn(),
+            resetAssistantText: vi.fn(),
+            suggest: vi.fn().mockReturnValue(suggestPromise),
+          },
+          promptQueue: {
+            dequeue: vi.fn().mockReturnValue(null),
+            list: vi.fn().mockReturnValue([]),
+            length: 0,
+            clear: vi.fn(),
+          },
+          ...overrides,
+        });
+      }
+
+      it('emits suggestions when turnIndex has not changed', async () => {
+        const suggestSlot = setupSuggestionSlot({ turnIndex: 3 });
+        const suggestDeps = makeDeps();
+        suggestDeps.slotManager.getSlot.mockReturnValue(suggestSlot);
+
+        const { subscribeToSlot } = createEventRouter(suggestDeps as any);
+        subscribeToSlot(suggestSlot);
+        const handler = suggestSlot.session.subscribe.mock.calls[0][0];
+
+        handler({ type: 'agent_end' });
+        // Wait for finalizeTurn to complete (async handleAgentEnd)
+        await vi.waitFor(() => expect(suggestDeps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+
+        // Resolve suggest() without changing turnIndex — suggestions should be emitted
+        suggestResolve(['Try changing the color', 'Add a border']);
+        await vi.waitFor(
+          () => {
+            const suggestionCalls = safeSendMock.mock.calls.filter((c: any) => c[1] === 'agent:suggestions');
+            expect(suggestionCalls).toHaveLength(1);
+            expect(suggestionCalls[0][3]).toEqual(['Try changing the color', 'Add a border']);
+          },
+          { timeout: 500 },
+        );
+      });
+
+      it('suppresses suggestions after session reset (turnIndex resets to 0)', async () => {
+        const suggestSlot = setupSuggestionSlot({ turnIndex: 5 });
+        const suggestDeps = makeDeps();
+        suggestDeps.slotManager.getSlot.mockReturnValue(suggestSlot);
+
+        const { subscribeToSlot } = createEventRouter(suggestDeps as any);
+        subscribeToSlot(suggestSlot);
+        const handler = suggestSlot.session.subscribe.mock.calls[0][0];
+
+        handler({ type: 'agent_end' });
+        await vi.waitFor(() => expect(suggestDeps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+
+        // Simulate session reset: turnIndex goes back to 0 BEFORE suggest resolves
+        suggestSlot.turnIndex = 0;
+
+        suggestResolve(['Stale suggestion']);
+        // Give the .then() callback time to execute
+        await new Promise((r) => process.nextTick(r));
+
+        const suggestionCalls = safeSendMock.mock.calls.filter((c: any) => c[1] === 'agent:suggestions');
+        expect(suggestionCalls).toHaveLength(0);
+      });
+
+      it('suppresses suggestions when a new turn starts before suggest resolves', async () => {
+        const suggestSlot = setupSuggestionSlot({ turnIndex: 2 });
+        const suggestDeps = makeDeps();
+        suggestDeps.slotManager.getSlot.mockReturnValue(suggestSlot);
+
+        const { subscribeToSlot } = createEventRouter(suggestDeps as any);
+        subscribeToSlot(suggestSlot);
+        const handler = suggestSlot.session.subscribe.mock.calls[0][0];
+
+        handler({ type: 'agent_end' });
+        await vi.waitFor(() => expect(suggestDeps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+
+        // Simulate new turn starting: turnIndex increments BEFORE suggest resolves
+        suggestSlot.turnIndex = 3;
+
+        suggestResolve(['Outdated suggestion']);
+        await new Promise((r) => process.nextTick(r));
+
+        const suggestionCalls = safeSendMock.mock.calls.filter((c: any) => c[1] === 'agent:suggestions');
+        expect(suggestionCalls).toHaveLength(0);
+      });
     });
 
     it('does not subscribe to same session twice with same router', () => {

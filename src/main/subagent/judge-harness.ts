@@ -63,23 +63,32 @@ const STRUCTURAL_TOOLS = new Set([
 ]);
 
 /**
- * Determine activation tier based on tools used in the turn.
- * - full: structural mutations (create, clone, delete, execute, instantiate, jsx)
- * - visual: styling/typography/layout mutations
+ * Determine activation tier based on complexity — estimated from structural tool call count.
+ * - minimal: 1-2 structural calls → only completeness judge
+ * - standard: 3-8 structural calls → completeness + alignment + visual_hierarchy
+ * - full: 9+ structural calls → all judges
+ * - visual: styling-only (no structural) → styling-relevant subset
  * - narrow: rename or token-only changes
  */
-/** Mutation tools that only affect naming — route to narrow tier, not visual. */
 const NAMING_ONLY_TOOLS = new Set(['figma_rename']);
 
 export function determineTier(turnToolNames: string[]): ActivationTier {
+  let structuralCount = 0;
   let hasVisual = false;
+
   for (const t of turnToolNames) {
     const cat = categorizeToolName(t);
-    if (cat === 'execute' || STRUCTURAL_TOOLS.has(t)) return 'full';
-    if (NAMING_ONLY_TOOLS.has(t)) continue; // Don't count rename as visual
-    if (cat === 'mutation' || cat === 'ds') hasVisual = true;
+    if (cat === 'execute' || STRUCTURAL_TOOLS.has(t)) structuralCount++;
+    else if (NAMING_ONLY_TOOLS.has(t)) continue;
+    else if (cat === 'mutation' || cat === 'ds') hasVisual = true;
   }
-  // If we only had naming-only tools (and no visual mutations), use narrow
+
+  // Complexity-based: use structural tool count to determine tier
+  if (structuralCount >= 9) return 'full';
+  if (structuralCount >= 3) return 'standard';
+  if (structuralCount >= 1) return 'minimal';
+
+  // No structural tools — check for visual-only or narrow
   if (!hasVisual && turnToolNames.some((t) => NAMING_ONLY_TOOLS.has(t))) return 'narrow';
   return hasVisual ? 'visual' : 'narrow';
 }
@@ -132,14 +141,12 @@ export async function runJudgeHarness(
   }
   const toolCategories = new Set(turnToolNames.map(categorizeToolName));
 
-  // Skip token_compliance if the file has no design tokens cached
-  // (either never set up, or not yet discovered in this session)
-  const fileKey = connector.fileKey;
-  const hasDesignTokens = infra.designSystemCache?.isValid?.(fileKey) ?? false;
-  const hasUsedTokenTools = [...slot.sessionToolHistory].some(
-    (t) => t === 'figma_setup_tokens' || t === 'figma_bind_variable' || t === 'figma_lint',
+  // Skip token_compliance unless tokens have been explicitly set up in this session.
+  // figma_lint alone does NOT mean tokens exist — it's a discovery tool.
+  const hasSetupTokens = [...slot.sessionToolHistory].some(
+    (t) => t === 'figma_setup_tokens' || t === 'figma_bind_variable',
   );
-  if (!hasDesignTokens && !hasUsedTokenTools) {
+  if (!hasSetupTokens) {
     disabledJudges.add('token_compliance' as MicroJudgeId);
   }
 
@@ -271,8 +278,8 @@ export async function runJudgeHarness(
         const failedJudgeIds = allVerdicts.filter((v) => v.status === 'evaluated' && !v.pass).map((v) => v.judgeId);
         currentJudgeIds = failedJudgeIds.length > 0 ? failedJudgeIds : currentJudgeIds;
 
-        // Build retry prompt from action items
-        const retryPrompt = `${JUDGE_RETRY_MARKER}\nThe quality judge found issues. Please fix:\n${lastVerdict.actionItems.map((a, i) => `${i + 1}. ${a}`).join('\n')}\n\nAfter fixing, take a screenshot to verify.`;
+        // Build enriched retry prompt with node IDs and tool hints from judge evidence
+        const retryPrompt = buildRetryPrompt(allVerdicts);
 
         try {
           await slot.session.prompt(retryPrompt);
@@ -292,6 +299,53 @@ export async function runJudgeHarness(
   }
 
   return lastVerdict;
+}
+
+// ── Tool hint map for enriched retry prompts ────────────────────────
+const CRITERION_TOOL_HINTS: Record<string, string> = {
+  alignment: 'Use figma_move, figma_auto_layout, or figma_set_layout_sizing to fix positioning.',
+  token_compliance: 'Use figma_bind_variable(nodeId, variableName, property) to bind tokens.',
+  visual_hierarchy: 'Use figma_set_text_style to adjust font size/weight for hierarchy.',
+  completeness: 'Use figma_create_child or figma_render_jsx to add missing elements.',
+  consistency: 'Use figma_batch_set_fills or figma_batch_transform for uniform styling.',
+  naming: 'Use figma_rename(nodeId, name) or figma_batch_rename for semantic names.',
+  componentization: 'Use figma_create_component to convert frames to reusable components.',
+};
+
+/** Extract node IDs from judge evidence text (format: "nodeId:128:445" or "id: 128:445") */
+export function extractNodeIds(evidence: string): string[] {
+  const ids: string[] = [];
+  const patterns = [/nodeId[:\s]+(\d+:\d+)/gi, /\bid[:\s]+(\d+:\d+)/gi, /\((\d+:\d+)\)/g];
+  for (const pat of patterns) {
+    let m: RegExpExecArray | null = pat.exec(evidence);
+    while (m !== null) {
+      if (!ids.includes(m[1]!)) ids.push(m[1]!);
+      m = pat.exec(evidence);
+    }
+  }
+  return ids;
+}
+
+/** Build enriched retry prompt with node IDs and tool suggestions from judge evidence. */
+export function buildRetryPrompt(allVerdicts: MicroVerdict[]): string {
+  const failedItems: string[] = [];
+  for (const mv of allVerdicts) {
+    if (mv.status !== 'evaluated' || mv.pass) continue;
+
+    const nodeIds = extractNodeIds(mv.evidence);
+    const nodeHint = nodeIds.length > 0 ? ` Affected nodes: ${nodeIds.join(', ')}.` : '';
+    const toolHint = CRITERION_TOOL_HINTS[mv.judgeId] || '';
+
+    for (const item of mv.actionItems) {
+      failedItems.push(`[${mv.judgeId}] ${item}${nodeHint}\n   → ${toolHint}`);
+    }
+  }
+
+  if (failedItems.length === 0) {
+    return `${JUDGE_RETRY_MARKER}\nThe quality judge found minor issues but no specific action items. Take a screenshot to verify current state.`;
+  }
+
+  return `${JUDGE_RETRY_MARKER}\nFix these specific issues. Do NOT re-screenshot or re-analyze first — apply fixes directly using the suggested tools:\n\n${failedItems.map((item, i) => `${i + 1}. ${item}`).join('\n\n')}\n\nAfter all fixes, take ONE screenshot to verify.`;
 }
 
 /**

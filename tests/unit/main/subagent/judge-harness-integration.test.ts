@@ -192,17 +192,35 @@ describe('Judge Harness Integration', () => {
   });
 
   it('retry loop: FAIL → parent fixes → judge re-runs → PASS', async () => {
-    // First run: FAIL on token_compliance
-    mockRunMicroBatch.mockResolvedValueOnce(makeFailVerdicts(['token_compliance']));
-    // Retry: only the failed judge re-runs, now PASS
+    // First run: FAIL on majority of criteria active in visual tier
+    mockRunMicroBatch.mockResolvedValueOnce(makeFailVerdicts(['token_compliance', 'alignment', 'visual_hierarchy']));
+    // Retry: only the failed judges re-run, now all PASS
     mockRunMicroBatch.mockResolvedValueOnce([
       {
-        judgeId: 'token_compliance',
+        judgeId: 'token_compliance' as const,
         pass: true,
         finding: 'Fixed',
         evidence: 'OK',
         actionItems: [],
-        status: 'evaluated',
+        status: 'evaluated' as const,
+        durationMs: 100,
+      },
+      {
+        judgeId: 'alignment' as const,
+        pass: true,
+        finding: 'Fixed',
+        evidence: 'OK',
+        actionItems: [],
+        status: 'evaluated' as const,
+        durationMs: 100,
+      },
+      {
+        judgeId: 'visual_hierarchy' as const,
+        pass: true,
+        finding: 'Fixed',
+        evidence: 'OK',
+        actionItems: [],
+        status: 'evaluated' as const,
         durationMs: 100,
       },
     ]);
@@ -223,7 +241,7 @@ describe('Judge Harness Integration', () => {
     expect(verdict?.verdict).toBe('PASS');
     // Parent was prompted to fix
     expect(slot.session.prompt).toHaveBeenCalledTimes(1);
-    expect(slot.session.prompt).toHaveBeenCalledWith(expect.stringContaining('Replace #FF0000'));
+    expect(slot.session.prompt).toHaveBeenCalledWith(expect.stringContaining('[JUDGE_RETRY]'));
     // maxRetries=2 → 3 total attempts; retry callback fires for attempt 2
     expect(cbs.onRetryStart).toHaveBeenCalledWith(2, 3);
     // Verdict callback fired twice (FAIL then PASS)
@@ -231,32 +249,13 @@ describe('Judge Harness Integration', () => {
   });
 
   it('retry exhaustion: FAIL × maxRetries → final FAIL shown', async () => {
-    const failVerdicts = makeFailVerdicts(['token_compliance']);
+    const failVerdicts = makeFailVerdicts(['token_compliance', 'alignment', 'visual_hierarchy']);
     // maxRetries=2 → 3 total attempts: initial + 2 retries
+    const retryFail = makeFailVerdicts(['token_compliance', 'alignment', 'visual_hierarchy']);
     mockRunMicroBatch
       .mockResolvedValueOnce(failVerdicts)
-      .mockResolvedValueOnce([
-        {
-          judgeId: 'token_compliance',
-          pass: false,
-          finding: 'Still bad',
-          evidence: '#FF0000',
-          actionItems: ['Fix token compliance'],
-          status: 'evaluated',
-          durationMs: 100,
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          judgeId: 'token_compliance',
-          pass: false,
-          finding: 'Still bad',
-          evidence: '#FF0000',
-          actionItems: ['Fix token compliance'],
-          status: 'evaluated',
-          durationMs: 100,
-        },
-      ]);
+      .mockResolvedValueOnce(retryFail)
+      .mockResolvedValueOnce(retryFail);
 
     const slot = makeSlot();
     const verdict = await runJudgeHarness(
@@ -326,7 +325,9 @@ describe('Judge Harness Integration', () => {
   });
 
   it('parent agent error during retry exits loop gracefully', async () => {
-    mockRunMicroBatch.mockResolvedValueOnce(makeFailVerdicts(['alignment']));
+    mockRunMicroBatch.mockResolvedValueOnce(
+      makeFailVerdicts(['alignment', 'token_compliance', 'visual_hierarchy', 'consistency']),
+    );
 
     const slot = makeSlot();
     slot.session.prompt.mockRejectedValueOnce(new Error('Model rate limited'));

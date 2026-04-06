@@ -137,6 +137,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         'The source node must have an image fill or be exportable as PNG.',
         'Describe changes clearly: "remove the background", "change sky to sunset", "add snow on the mountains".',
         'The edited image is automatically re-applied to the same node.',
+        'To revert an edit, use figma_restore_image on the same node — it can regenerate the original.',
       ],
       parameters: Type.Object({
         prompt: Type.String({

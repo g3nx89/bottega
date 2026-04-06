@@ -32,24 +32,34 @@ vi.mock('../../../../src/main/subagent/context-prefetch.js', () => ({
 import { determineTier } from '../../../../src/main/subagent/judge-harness.js';
 
 describe('determineTier', () => {
-  it('figma_create_child → full', () => {
-    expect(determineTier(['figma_create_child'])).toBe('full');
+  // Complexity-based: structural tool COUNT determines tier
+  it('1 structural tool → minimal', () => {
+    expect(determineTier(['figma_create_child'])).toBe('minimal');
   });
 
-  it('figma_execute → full', () => {
-    expect(determineTier(['figma_execute'])).toBe('full');
+  it('1 execute → minimal', () => {
+    expect(determineTier(['figma_execute'])).toBe('minimal');
   });
 
-  it('figma_render_jsx → full', () => {
-    expect(determineTier(['figma_render_jsx'])).toBe('full');
+  it('1 render_jsx → minimal', () => {
+    expect(determineTier(['figma_render_jsx'])).toBe('minimal');
   });
 
-  it('figma_clone → full', () => {
-    expect(determineTier(['figma_clone'])).toBe('full');
+  it('1 clone → minimal', () => {
+    expect(determineTier(['figma_clone'])).toBe('minimal');
   });
 
-  it('figma_instantiate → full', () => {
-    expect(determineTier(['figma_instantiate'])).toBe('full');
+  it('1 instantiate → minimal', () => {
+    expect(determineTier(['figma_instantiate'])).toBe('minimal');
+  });
+
+  it('3 structural tools → standard', () => {
+    expect(determineTier(['figma_create_child', 'figma_clone', 'figma_render_jsx'])).toBe('standard');
+  });
+
+  it('9+ structural tools → full', () => {
+    const tools = Array.from({ length: 9 }, () => 'figma_create_child');
+    expect(determineTier(tools)).toBe('full');
   });
 
   it('figma_set_fills → visual', () => {
@@ -72,8 +82,8 @@ describe('determineTier', () => {
     expect(determineTier(['figma_rename', 'figma_set_fills'])).toBe('visual');
   });
 
-  it('mixed tools: figma_set_fills + figma_create_child → full (highest wins)', () => {
-    expect(determineTier(['figma_set_fills', 'figma_create_child'])).toBe('full');
+  it('mixed: figma_set_fills + figma_create_child → minimal (1 structural)', () => {
+    expect(determineTier(['figma_set_fills', 'figma_create_child'])).toBe('minimal');
   });
 
   it('mixed: figma_screenshot + figma_set_fills → visual', () => {
@@ -82,5 +92,49 @@ describe('determineTier', () => {
 
   it('discovery-only → narrow', () => {
     expect(determineTier(['figma_get_file_data', 'figma_screenshot'])).toBe('narrow');
+  });
+
+  // ── Boundary edge cases ─────────────────────────────────────────────
+
+  it('exactly 2 structural tools → minimal (boundary)', () => {
+    expect(determineTier(['figma_create_child', 'figma_clone'])).toBe('minimal');
+  });
+
+  it('exactly 8 structural tools → standard (boundary, < 9)', () => {
+    const tools = Array.from({ length: 8 }, () => 'figma_create_child');
+    expect(determineTier(tools)).toBe('standard');
+  });
+
+  it('exactly 9 structural tools → full (boundary)', () => {
+    const tools = Array.from({ length: 9 }, () => 'figma_clone');
+    expect(determineTier(tools)).toBe('full');
+  });
+
+  it('mix of structural + visual + rename → tier determined by structural count only', () => {
+    // 2 structural + 1 visual + 1 rename = minimal (structural count = 2)
+    const tools = ['figma_create_child', 'figma_clone', 'figma_set_fills', 'figma_rename'];
+    expect(determineTier(tools)).toBe('minimal');
+  });
+
+  it('3 structural + visual mutations → standard (structural count = 3)', () => {
+    const tools = [
+      'figma_create_child',
+      'figma_clone',
+      'figma_render_jsx',
+      'figma_set_fills',
+      'figma_set_text',
+      'figma_rename',
+    ];
+    expect(determineTier(tools)).toBe('standard');
+  });
+
+  it('figma_execute counts as structural', () => {
+    // 3 execute calls = standard
+    expect(determineTier(['figma_execute', 'figma_execute', 'figma_execute'])).toBe('standard');
+  });
+
+  it('10 structural tools → full (well above boundary)', () => {
+    const tools = Array.from({ length: 10 }, (_, i) => (i % 2 === 0 ? 'figma_create_child' : 'figma_render_jsx'));
+    expect(determineTier(tools)).toBe('full');
   });
 });

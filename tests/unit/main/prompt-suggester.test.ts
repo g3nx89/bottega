@@ -157,19 +157,52 @@ describe('PromptSuggester', () => {
       await first;
     });
 
-    it('should return [] when no assistant text', async () => {
+    it('should return [] when no assistant text and no user prompts', async () => {
       const result = await suggester.suggest(makeModelConfig());
 
       expect(result).toEqual([]);
       expect(mockCompleteSimple).not.toHaveBeenCalled();
     });
 
-    it('should return [] when assistant text is only whitespace', async () => {
+    it('should return [] when assistant text is only whitespace and no user prompts', async () => {
       suggester.appendAssistantText('   \n\t  ');
       const result = await suggester.suggest(makeModelConfig());
 
       expect(result).toEqual([]);
       expect(mockCompleteSimple).not.toHaveBeenCalled();
+    });
+
+    it('B-009: should attempt API call on degraded turn (no assistant text but has user prompts)', async () => {
+      // Degraded turn: assistant produced no text, but user prompts exist
+      suggester.trackUserPrompt('Make the header bigger');
+      suggester.trackUserPrompt('Add a shadow to the card');
+      // Do NOT call appendAssistantText — simulates a degraded turn
+
+      mockCompleteSimple.mockResolvedValue(mockResponse('Try a different approach\nAdjust the layout'));
+
+      const result = await suggester.suggest(makeModelConfig());
+
+      // Should NOT return [] early — should call the API
+      expect(mockCompleteSimple).toHaveBeenCalled();
+      expect(result).toEqual(['Try a different approach', 'Adjust the layout']);
+    });
+
+    it('B-009: should return [] when both assistant text and user prompts are empty', async () => {
+      // Neither assistant text nor user prompts — truly nothing to suggest from
+      const result = await suggester.suggest(makeModelConfig());
+
+      expect(result).toEqual([]);
+      expect(mockCompleteSimple).not.toHaveBeenCalled();
+    });
+
+    it('B-009: normal turn with assistant text should call the API as before', async () => {
+      suggester.appendAssistantText('I created a blue button for you.');
+      mockCompleteSimple.mockResolvedValue(mockResponse('Make it larger\nChange the color'));
+
+      const result = await suggester.suggest(makeModelConfig());
+
+      expect(mockCompleteSimple).toHaveBeenCalled();
+      expect(result).toEqual(['Make it larger', 'Change the color']);
     });
 
     it('should return [] when no API key is available', async () => {

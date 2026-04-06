@@ -4161,7 +4161,9 @@ figma.ui.onmessage = async (msg) => {
         var effect = { type: e.type, visible: e.visible !== undefined ? e.visible : true };
         if (e.type === 'DROP_SHADOW' || e.type === 'INNER_SHADOW') {
           var rgb = e.color ? hexToFigmaRGB(e.color) : { r: 0, g: 0, b: 0, a: 0.25 };
-          effect.color = { r: rgb.r, g: rgb.g, b: rgb.b, a: rgb.a !== undefined ? rgb.a : 0.25 };
+          // opacity param takes precedence over hex alpha
+          var alpha = e.opacity !== undefined ? e.opacity : (rgb.a !== undefined ? rgb.a : 0.25);
+          effect.color = { r: rgb.r, g: rgb.g, b: rgb.b, a: alpha };
           effect.offset = { x: e.offsetX || 0, y: e.offsetY || 0 };
           effect.radius = e.radius || 0;
           effect.spread = e.spread || 0;

@@ -34,7 +34,7 @@ vi.mock('../../../../src/main/subagent/context-prefetch.js', () => ({
 import { DEFAULT_SUBAGENT_SETTINGS, type SubagentSettings } from '../../../../src/main/subagent/config.js';
 import { abortActiveJudge, runJudgeHarness } from '../../../../src/main/subagent/judge-harness.js';
 import { runMicroJudgeBatch } from '../../../../src/main/subagent/orchestrator.js';
-import type { MicroVerdict } from '../../../../src/main/subagent/types.js';
+import type { MicroJudgeId, MicroVerdict } from '../../../../src/main/subagent/types.js';
 
 const mockRunMicroBatch = vi.mocked(runMicroJudgeBatch);
 
@@ -129,17 +129,18 @@ function makePassVerdicts(): MicroVerdict[] {
 }
 
 function makeFailVerdicts(): MicroVerdict[] {
-  const pass = makePassVerdicts();
-  pass[0] = {
-    judgeId: 'alignment',
-    pass: false,
-    finding: 'bad',
-    evidence: 'off by 2px',
-    actionItems: ['Fix alignment'],
-    status: 'evaluated',
-    durationMs: 100,
-  };
-  return pass;
+  const verdicts = makePassVerdicts();
+  // Fail majority (5/7) to ensure FAIL under majority-pass aggregation regardless of tier
+  const failIds: MicroJudgeId[] = ['alignment', 'token_compliance', 'visual_hierarchy', 'consistency', 'naming'];
+  for (const v of verdicts) {
+    if (failIds.includes(v.judgeId)) {
+      v.pass = false;
+      v.finding = `bad ${v.judgeId}`;
+      v.evidence = `evidence for ${v.judgeId}`;
+      v.actionItems = [`Fix ${v.judgeId}`];
+    }
+  }
+  return verdicts;
 }
 
 describe('Judge Harness', () => {
@@ -235,14 +236,51 @@ describe('Judge Harness', () => {
     });
 
     it('retries on FAIL when autoRetry is enabled', async () => {
+      // First run: 5/7 fail. Retry fixes all 5 failed judges → PASS
       mockRunMicroBatch.mockResolvedValueOnce(makeFailVerdicts()).mockResolvedValueOnce([
         {
-          judgeId: 'alignment',
+          judgeId: 'alignment' as const,
           pass: true,
           finding: 'fixed',
           evidence: 'ok',
-          actionItems: [],
-          status: 'evaluated',
+          actionItems: [] as string[],
+          status: 'evaluated' as const,
+          durationMs: 100,
+        },
+        {
+          judgeId: 'token_compliance' as const,
+          pass: true,
+          finding: 'fixed',
+          evidence: 'ok',
+          actionItems: [] as string[],
+          status: 'evaluated' as const,
+          durationMs: 100,
+        },
+        {
+          judgeId: 'visual_hierarchy' as const,
+          pass: true,
+          finding: 'fixed',
+          evidence: 'ok',
+          actionItems: [] as string[],
+          status: 'evaluated' as const,
+          durationMs: 100,
+        },
+        {
+          judgeId: 'consistency' as const,
+          pass: true,
+          finding: 'fixed',
+          evidence: 'ok',
+          actionItems: [] as string[],
+          status: 'evaluated' as const,
+          durationMs: 100,
+        },
+        {
+          judgeId: 'naming' as const,
+          pass: true,
+          finding: 'fixed',
+          evidence: 'ok',
+          actionItems: [] as string[],
+          status: 'evaluated' as const,
           durationMs: 100,
         },
       ]);
@@ -268,7 +306,7 @@ describe('Judge Harness', () => {
       expect(result?.verdict).toBe('PASS');
       // Parent should have been prompted to fix
       expect(slot.session.prompt).toHaveBeenCalledTimes(1);
-      expect(slot.session.prompt).toHaveBeenCalledWith(expect.stringContaining('Fix alignment'));
+      expect(slot.session.prompt).toHaveBeenCalledWith(expect.stringContaining('[JUDGE_RETRY]'));
       // maxRetries=2 → 3 total attempts; retry callback fires for attempt 2
       expect(cbs.onRetryStart).toHaveBeenCalledWith(2, 3);
     });

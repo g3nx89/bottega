@@ -1059,6 +1059,25 @@ body {
   border-radius: 2px;
   transition: width 0.3s ease;
 }
+.task-group-toggle {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 4px;
+  margin-left: auto;
+  opacity: 0.6;
+}
+.task-group-toggle:hover {
+  opacity: 1;
+}
+.task-group-details {
+  padding-left: 20px;
+}
+.task-group-details.hidden {
+  display: none;
+}
 
 /* Elapsed time indicator for long-running tools (screenshots) */
 .tool-elapsed {
@@ -1094,6 +1113,13 @@ body {
   background: rgba(255, 59, 48, 0.12);
   color: #ff3b30;
   border: 1px solid rgba(255, 59, 48, 0.25);
+}
+
+.tool-fallback {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 4px 0 0;
+  font-style: italic;
 }
 
 /* ──────────────────────────────────────────
@@ -1195,8 +1221,8 @@ body {
 }
 
 .judge-verdict-card[data-verdict="FAIL"] {
-  background: rgba(255, 59, 48, 0.1);
-  border: 1px solid rgba(255, 59, 48, 0.25);
+  background: rgba(255, 179, 64, 0.08);
+  border: 1px solid rgba(255, 179, 64, 0.25);
 }
 
 .verdict-header {
@@ -1208,7 +1234,7 @@ body {
   color: #34c759;
 }
 .judge-verdict-card[data-verdict="FAIL"] .verdict-header {
-  color: #ff3b30;
+  color: #ffb340;
 }
 
 .verdict-criteria {
@@ -1225,13 +1251,13 @@ body {
   color: #34c759;
 }
 .criterion.fail {
-  color: #ff3b30;
+  color: #ffb340;
 }
 
 .verdict-actions {
   margin-top: 6px;
   padding: 6px 8px;
-  background: rgba(255, 59, 48, 0.05);
+  background: rgba(255, 179, 64, 0.05);
   border-radius: var(--radius-sm);
 }
 

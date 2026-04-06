@@ -319,12 +319,21 @@ export function createEventRouter(deps: EventRouterDeps) {
       safeSend(wc, 'agent:end', slot.id);
       persistSlotSession(slot);
       slotManager.persistState();
+
+      // B-011: Capture turn identity before async suggestion generation.
+      // If a session reset occurs while suggest() is in-flight, the turnIndex
+      // will have changed — we use this to suppress stale suggestions.
+      const turnAtSuggest = slot.turnIndex;
       const suggestStart = Date.now();
       slot.suggester
         .suggest(slot.modelConfig)
         .then((suggestions) => {
           usageTracker?.trackSuggestionsGenerated(suggestions.length, Date.now() - suggestStart);
-          if (suggestions.length > 0) safeSend(wc, 'agent:suggestions', slot.id, suggestions);
+          // B-011: Suppress suggestions if session was reset (turnIndex resets to 0)
+          // or a new turn started while we were generating
+          if (suggestions.length > 0 && slot.turnIndex === turnAtSuggest) {
+            safeSend(wc, 'agent:suggestions', slot.id, suggestions);
+          }
           slot.suggester.resetAssistantText();
         })
         .catch((err) => {

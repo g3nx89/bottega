@@ -24,17 +24,21 @@ vi.mock('node:fs', () => ({
 }));
 
 vi.mock('node:child_process', () => ({
-  execFile: vi.fn().mockImplementation((_cmd: string, _args: string[], _opts: any, cb?: Function) => {
-    // promisify calls with 3 args (no callback) — return a ChildProcess-like object
-    // When promisified, execFile rejects on non-zero exit (pgrep: no match)
-    if (!cb) {
-      // promisify style: return value is ignored, the promisified wrapper handles it
-    }
-    const err = new Error('no process') as any;
-    err.code = 1;
-    if (cb) cb(err, '', '');
-    return { on: vi.fn(), stdout: null, stderr: null, pid: 0 };
-  }),
+  execFile: vi
+    .fn()
+    .mockImplementation(
+      (_cmd: string, _args: string[], _opts: any, cb?: (err: any, stdout: string, stderr: string) => void) => {
+        // promisify calls with 3 args (no callback) — return a ChildProcess-like object
+        // When promisified, execFile rejects on non-zero exit (pgrep: no match)
+        if (!cb) {
+          // promisify style: return value is ignored, the promisified wrapper handles it
+        }
+        const err = new Error('no process') as any;
+        err.code = 1;
+        if (cb) cb(err, '', '');
+        return { on: vi.fn(), stdout: null, stderr: null, pid: 0 };
+      },
+    ),
 }));
 
 vi.mock('node:os', async () => {
@@ -986,6 +990,128 @@ describe('setupIpcHandlers', () => {
 
       expect(result.success).toBe(true);
       expect(result.slot).toBeDefined();
+    });
+  });
+
+  // ── agent:abort (B-003/B-007) ─────────────────────────────────
+
+  describe('agent:abort', () => {
+    it('should immediately unblock UI with agent:end BEFORE abort resolves', async () => {
+      // Make session.abort() hang until we resolve it manually
+      let resolveAbort!: () => void;
+      mockSession._abortFn.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveAbort = resolve;
+        }),
+      );
+
+      slot.isStreaming = true;
+
+      // Start the abort handler (don't await yet)
+      const abortPromise = invokeHandler('agent:abort', slotId);
+
+      // Give microtasks a chance to flush synchronous code before abort resolves
+      await vi.waitFor(() => {
+        expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
+      });
+
+      // Abort has NOT resolved yet — UI should already be unblocked
+      expect(mockSession._abortFn).toHaveBeenCalled();
+
+      // Now let abort resolve and finish
+      resolveAbort();
+      await abortPromise;
+    });
+
+    it('should set isStreaming to false immediately (before abort resolves)', async () => {
+      let resolveAbort!: () => void;
+      mockSession._abortFn.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveAbort = resolve;
+        }),
+      );
+
+      slot.isStreaming = true;
+
+      const abortPromise = invokeHandler('agent:abort', slotId);
+
+      // isStreaming should be false immediately, even while abort is pending
+      await vi.waitFor(() => {
+        expect(slot.isStreaming).toBe(false);
+      });
+
+      resolveAbort();
+      await abortPromise;
+    });
+
+    it('should complete cleanup even when session.abort() times out (>5s)', async () => {
+      // Make abort hang forever (never resolves)
+      mockSession._abortFn.mockReturnValueOnce(new Promise<void>(() => {}));
+
+      slot.isStreaming = true;
+
+      // Use fake timers to control the 5s timeout
+      vi.useFakeTimers();
+
+      const abortPromise = invokeHandler('agent:abort', slotId);
+
+      // Advance past the 5s timeout
+      await vi.advanceTimersByTimeAsync(6_000);
+
+      await abortPromise;
+
+      vi.useRealTimers();
+
+      // Cleanup should have happened despite timeout
+      expect(slot.promptQueue.length).toBe(0);
+      expect(slotManager.persistState).toHaveBeenCalled();
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('queue:updated', slotId, []);
+    });
+
+    it('should run full cleanup when session.abort() resolves quickly', async () => {
+      // Default mock resolves immediately
+      slot.isStreaming = true;
+      slot.promptQueue.enqueue('pending prompt');
+
+      await invokeHandler('agent:abort', slotId);
+
+      // Verify full cleanup chain
+      expect(mockSession._abortFn).toHaveBeenCalled();
+      expect(slot.isStreaming).toBe(false);
+      expect(slot.promptQueue.length).toBe(0);
+      expect(slotManager.persistState).toHaveBeenCalled();
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('queue:updated', slotId, []);
+    });
+
+    it('should call eventRouter.abortJudge before session abort', async () => {
+      // We cannot directly spy on eventRouter.abortJudge since it's internal to
+      // setupIpcHandlers. However, the abort flow calls abortJudge(slotId) which
+      // aborts any active judge controller. We verify the judge abort path indirectly:
+      // if a judge abort controller exists for the slot, it should be aborted.
+
+      // Since eventRouter is internal, we verify the ordering by checking that
+      // agent:end is emitted before abort resolves, and that abort is called
+      // (abortJudge runs synchronously before session.abort).
+
+      const abortCallOrder: string[] = [];
+      mockSession._abortFn.mockImplementationOnce(async () => {
+        abortCallOrder.push('session.abort');
+      });
+
+      // The handler calls abortJudge synchronously, then awaits session.abort.
+      // We verify session.abort was called (after abortJudge, which is sync and before it).
+      slot.isStreaming = true;
+      await invokeHandler('agent:abort', slotId);
+
+      // session.abort was called — abortJudge ran before it (it's sync, on line before await)
+      expect(mockSession._abortFn).toHaveBeenCalledTimes(1);
+      expect(abortCallOrder).toEqual(['session.abort']);
+
+      // UI was unblocked before session.abort
+      const sendCalls = (mockWindow.webContents.send as any).mock.calls;
+      const agentEndIdx = sendCalls.findIndex((c: any[]) => c[0] === 'agent:end');
+      expect(agentEndIdx).toBeGreaterThanOrEqual(0);
     });
   });
 

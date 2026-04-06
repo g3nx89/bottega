@@ -93,7 +93,9 @@ export class PromptSuggester {
   /** Generate suggestions after agent_end. Returns [] on failure or no suggestions. */
   async suggest(modelConfig: ModelConfig): Promise<string[]> {
     if (this.generating) return [];
-    if (!this.lastAssistantText.trim()) return [];
+    // B-009: Generate suggestions even when assistant text is empty (degraded turns).
+    // Use recent user prompts as context — there's always a follow-up to suggest.
+    if (!this.lastAssistantText.trim() && this.recentUserPrompts.length === 0) return [];
 
     this.generating = true;
     try {

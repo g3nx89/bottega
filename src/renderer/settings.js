@@ -313,6 +313,10 @@ modelSelect.addEventListener('change', async () => {
   const modelId = modelSelect.value.slice(sepIdx + 1);
   localStorage.setItem('bottega:provider', sdkProvider);
   localStorage.setItem('bottega:model', modelId);
+
+  // B-004: Sync toolbar model label immediately
+  syncBarModelLabel();
+
   if (!activeTabId) return;
   const result = await window.api.switchModel(activeTabId, { provider: sdkProvider, modelId });
   if (!result.success) {

@@ -86,13 +86,20 @@ export class FigmaAPI {
   private consecutive403Count = 0;
   private apiDisabled = false;
   private static readonly MAX_403_BEFORE_DISABLE = 3;
+  /** W-002: Transient HTTP codes eligible for retry with backoff. */
+  private static readonly RETRYABLE_CODES = new Set([429, 500, 502, 503]);
+  private static readonly MAX_RETRIES = 2;
+  private static readonly BACKOFF_BASE_MS = 1_000;
+  private static readonly BACKOFF_MAX_MS = 10_000;
+  private static readonly BACKOFF_JITTER_MS = 500;
 
   constructor(accessToken?: string) {
     this.accessToken = accessToken || '';
   }
 
   /**
-   * Make authenticated request to Figma API
+   * Make authenticated request to Figma API.
+   * W-002: Retries transient errors (429, 5xx) with exponential backoff.
    */
   private async request(endpoint: string, options: RequestInit = {}): Promise<any> {
     if (this.apiDisabled) {
@@ -100,18 +107,7 @@ export class FigmaAPI {
     }
 
     const url = `${FIGMA_API_BASE}${endpoint}`;
-
     const isOAuthToken = this.accessToken.startsWith('figu_');
-
-    logger.info(
-      {
-        url,
-        hasToken: !!this.accessToken,
-        isOAuthToken,
-        authMethod: isOAuthToken ? 'Bearer' : 'X-Figma-Token',
-      },
-      'Making Figma API request',
-    );
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -124,13 +120,45 @@ export class FigmaAPI {
       headers['X-Figma-Token'] = this.accessToken;
     }
 
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
+    for (let attempt = 0; attempt <= FigmaAPI.MAX_RETRIES; attempt++) {
+      logger.info(
+        {
+          url,
+          hasToken: !!this.accessToken,
+          isOAuthToken,
+          authMethod: isOAuthToken ? 'Bearer' : 'X-Figma-Token',
+          ...(attempt > 0 && { retry: attempt }),
+        },
+        'Making Figma API request',
+      );
 
-    if (!response.ok) {
+      const response = await fetch(url, {
+        ...options,
+        headers,
+      });
+
+      if (response.ok) {
+        // Reset 403 counter on success
+        this.consecutive403Count = 0;
+        return await response.json();
+      }
+
       const errorText = await response.text();
+
+      // W-002: Retry transient errors with exponential backoff + jitter
+      if (FigmaAPI.RETRYABLE_CODES.has(response.status) && attempt < FigmaAPI.MAX_RETRIES) {
+        const baseDelay = Math.min(FigmaAPI.BACKOFF_BASE_MS * 2 ** attempt, FigmaAPI.BACKOFF_MAX_MS);
+        const jitter = Math.random() * FigmaAPI.BACKOFF_JITTER_MS;
+        const delay = baseDelay + jitter;
+        logger.warn(
+          { status: response.status, attempt, delay: Math.round(delay) },
+          'Figma API transient error — retrying with backoff',
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+
+      // Non-retryable or exhausted retries — log and throw
       logger.error(
         { status: response.status, statusText: response.statusText, body: errorText },
         'Figma API request failed',
@@ -150,10 +178,8 @@ export class FigmaAPI {
       throw new Error(`Figma API error (${response.status}): ${errorText}`);
     }
 
-    // Reset 403 counter on success
-    this.consecutive403Count = 0;
-    const data = await response.json();
-    return data;
+    // Should not be reached, but satisfies TypeScript
+    throw new Error(`Figma API error: max retries exceeded for ${endpoint}`);
   }
 
   /**

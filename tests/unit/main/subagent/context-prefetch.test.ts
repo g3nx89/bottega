@@ -3,8 +3,10 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
+const mockLog = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
+
 vi.mock('../../../../src/figma/logger.js', () => ({
-  createChildLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+  createChildLogger: () => mockLog,
 }));
 
 import { formatBriefing, prefetchCommonContext } from '../../../../src/main/subagent/context-prefetch.js';
@@ -92,6 +94,25 @@ describe('Context Pre-fetch', () => {
       expect(result.designSystem).toBeNull();
     });
 
+    it('W-001: logs tool-not-found at debug level, not warn', async () => {
+      mockLog.debug.mockClear();
+      mockLog.warn.mockClear();
+
+      // Empty tools array triggers "tool not found" path for each expected tool
+      await prefetchCommonContext([] as any);
+
+      // Should use debug (not warn) for missing tools — these are expected for subagent read-only tool sets
+      expect(mockLog.debug).toHaveBeenCalledWith(
+        expect.objectContaining({ toolName: expect.any(String) }),
+        expect.stringContaining('not found'),
+      );
+      // warn should NOT have been called for missing tools
+      const warnCalls = mockLog.warn.mock.calls.filter(
+        (call: any[]) => typeof call[1] === 'string' && call[1].includes('not found'),
+      );
+      expect(warnCalls).toHaveLength(0);
+    });
+
     it('extracts text content from tool results', async () => {
       const tools = makeMockTools({
         figma_get_file_data: { content: [{ type: 'text', text: 'file data here' }] },
@@ -102,11 +123,14 @@ describe('Context Pre-fetch', () => {
   });
 
   describe('formatBriefing', () => {
+    const nullExtras = { lint: null, libraryComponents: null, componentAnalysis: null };
+
     it('formats full context into briefing string', () => {
       const context: PrefetchedContext = {
-        screenshot: 'base64...',
+        screenshot: { type: 'image', data: 'base64...', mimeType: 'image/png' },
         fileData: '{"pages":[]}',
         designSystem: '{"tokens":[]}',
+        ...nullExtras,
       };
       const briefing = formatBriefing(context);
       expect(briefing).toContain('Pre-fetched Briefing');
@@ -121,6 +145,7 @@ describe('Context Pre-fetch', () => {
         screenshot: null,
         fileData: null,
         designSystem: null,
+        ...nullExtras,
       };
       const briefing = formatBriefing(context);
       expect(briefing).toContain('No pre-fetched data available');
@@ -131,6 +156,7 @@ describe('Context Pre-fetch', () => {
         screenshot: null,
         fileData: '{"pages":[]}',
         designSystem: null,
+        ...nullExtras,
       };
       const briefing = formatBriefing(context);
       expect(briefing).toContain('File Structure');
@@ -140,9 +166,10 @@ describe('Context Pre-fetch', () => {
 
     it('does not include raw screenshot data as text', () => {
       const context: PrefetchedContext = {
-        screenshot: 'iVBORw0KGgoAAAANSUhEUg==',
+        screenshot: { type: 'image', data: 'iVBORw0KGgoAAAANSUhEUg==', mimeType: 'image/png' },
         fileData: null,
         designSystem: null,
+        ...nullExtras,
       };
       const briefing = formatBriefing(context);
       expect(briefing).not.toContain('iVBORw0KGgo');

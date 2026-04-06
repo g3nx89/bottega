@@ -77,5 +77,42 @@ export function createBatchTools(deps: ToolDeps): ToolDefinition[] {
         });
       },
     },
+    {
+      name: 'figma_batch_rename',
+      label: 'Batch Rename',
+      description:
+        'Rename multiple nodes in a single call. Much faster than calling figma_rename repeatedly. Use semantic slash naming (e.g. "Card/Body").',
+      promptSnippet: 'figma_batch_rename: rename multiple layers at once (use semantic slash naming)',
+      parameters: Type.Object({
+        updates: Type.Array(
+          Type.Object({
+            nodeId: Type.String({ description: 'Node ID' }),
+            name: Type.String({ description: 'New name' }),
+          }),
+          { description: 'Array of rename updates to apply', maxItems: 200 },
+        ),
+      }),
+      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+        return operationQueue.execute(async () => {
+          const results: Array<{ nodeId: string; name: string; success: boolean; error?: string }> = [];
+          for (const update of params.updates) {
+            try {
+              await connector.renameNode(update.nodeId, update.name);
+              results.push({ nodeId: update.nodeId, name: update.name, success: true });
+            } catch (err: any) {
+              results.push({
+                nodeId: update.nodeId,
+                name: update.name,
+                success: false,
+                error: err.message ?? String(err),
+              });
+            }
+          }
+          const succeeded = results.filter((r) => r.success).length;
+          const failed = results.filter((r) => !r.success).length;
+          return textResult({ succeeded, failed, total: results.length, results });
+        });
+      },
+    },
   ];
 }

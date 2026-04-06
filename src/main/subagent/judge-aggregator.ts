@@ -73,11 +73,19 @@ export function aggregateVerdicts(verdicts: MicroVerdict[], allJudgeIds: MicroJu
     }
   }
 
-  const verdict: 'PASS' | 'FAIL' = failCount > 0 ? 'FAIL' : 'PASS';
+  // Majority-pass aggregation: PASS if majority of evaluated criteria pass.
+  // For minimal tier (1 judge), must pass 1/1.
+  // For standard tier (2-3 judges), must pass all but 1.
+  // For full tier (5-7 judges), must pass majority (>50%).
+  const passThreshold = evaluatedCount <= 1 ? evaluatedCount : Math.ceil(evaluatedCount / 2);
+  const passCount = evaluatedCount - failCount;
+  const verdict: 'PASS' | 'FAIL' = passCount >= passThreshold ? 'PASS' : 'FAIL';
 
   let summary: string;
   if (failCount === 0) {
     summary = `PASS: All ${evaluatedCount}/${allJudgeIds.length} evaluated criteria pass.`;
+  } else if (verdict === 'PASS') {
+    summary = `PASS (${passCount}/${evaluatedCount}): ${failedNames.join(', ')} flagged as suggestions. ${allActionItems.length} suggestion${allActionItems.length === 1 ? '' : 's'}.`;
   } else {
     summary = `FAIL: ${failCount}/${evaluatedCount} criteria failed (${failedNames.join(', ')}). ${allActionItems.length} action item${allActionItems.length === 1 ? '' : 's'}.`;
   }

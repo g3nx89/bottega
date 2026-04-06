@@ -236,6 +236,8 @@ describe('Agent pipeline with ScriptedSession', () => {
       }),
     );
     await invokeHandler('agent:prompt', slotId, 'create a rectangle');
+    // agent_end handler is async (fire-and-forget) — flush microtasks
+    await new Promise((r) => process.nextTick(r));
 
     const channels = mockWindow.webContents.send.mock.calls.map((c: any[]) => c[0]);
     expect(channels).toContain('agent:thinking');

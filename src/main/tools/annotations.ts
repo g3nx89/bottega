@@ -42,7 +42,10 @@ export function createAnnotationTools(deps: ToolDeps): ToolDefinition[] {
             properties: Type.Optional(
               Type.Array(
                 Type.Object({
-                  type: Type.String({ description: 'Pinned design property type' }),
+                  type: Type.String({
+                    description:
+                      'Pinned property type. Valid values: "width", "height", "maxWidth", "minWidth", "maxHeight", "minHeight", "fills", "strokes", "effects", "opacity", "cornerRadius", "strokeWeight", "fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "itemSpacing", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft"',
+                  }),
                 }),
               ),
             ),
@@ -66,8 +69,9 @@ export function createAnnotationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_get_annotation_categories',
       label: 'Get Annotation Categories',
-      description: 'List available annotation categories defined in the Figma file.',
-      promptSnippet: 'figma_get_annotation_categories: list available annotation categories',
+      description:
+        'List available annotation categories defined in the Figma file. Returns both category ID and human-readable name. ALWAYS call this before figma_set_annotations to get valid category IDs.',
+      promptSnippet: 'figma_get_annotation_categories: list categories (id + name). Call BEFORE set_annotations.',
       parameters: Type.Object({}),
       async execute(_toolCallId, _params: any, _signal, _onUpdate, _ctx) {
         const result = await connector.getAnnotationCategories();

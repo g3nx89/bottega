@@ -352,13 +352,35 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     persistSlotSession(slot);
   });
 
+  const ABORT_TIMEOUT_MS = 5_000;
+
   ipcMain.handle('agent:abort', async (_event, slotId: string) => {
     const slot = requireSlot(slotId);
+
+    // B-003/B-007: Immediately reset streaming state so UI unblocks
+    slot.isStreaming = false;
+    safeSend(mainWindow.webContents, 'agent:end', slot.id);
+
+    // Abort judge first (fast, no await)
     eventRouter.abortJudge(slotId);
-    await slot.session.abort();
+
+    // Abort session with timeout — Pi SDK abort can hang for 30-60s
+    let timer: ReturnType<typeof setTimeout>;
+    try {
+      await Promise.race([
+        slot.session.abort(),
+        new Promise<void>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('abort timeout')), ABORT_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (err: any) {
+      log.warn({ slotId, err: err.message }, 'Abort timed out or failed, forcing cleanup');
+    } finally {
+      clearTimeout(timer!);
+    }
+
     eventRouter.finalizeTurn(slot);
     slot.promptQueue.clear();
-    slot.isStreaming = false;
     safeSend(mainWindow.webContents, 'queue:updated', slot.id, []);
     slotManager.persistState();
   });

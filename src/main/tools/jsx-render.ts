@@ -5,6 +5,48 @@ import { loadIconSvg, resolveIcons } from '../icon-loader.js';
 import { parseJsx } from '../jsx-parser.js';
 import { type ToolDeps, textResult } from './index.js';
 
+const CSS_NAMED_COLORS: Record<string, string> = {
+  black: '#000000',
+  white: '#FFFFFF',
+  red: '#FF0000',
+  green: '#008000',
+  blue: '#0000FF',
+  gray: '#808080',
+  grey: '#808080',
+  silver: '#C0C0C0',
+  navy: '#000080',
+  teal: '#008080',
+  purple: '#800080',
+  orange: '#FFA500',
+  yellow: '#FFFF00',
+  pink: '#FFC0CB',
+  brown: '#A52A2A',
+  cyan: '#00FFFF',
+  magenta: '#FF00FF',
+  lime: '#00FF00',
+  maroon: '#800000',
+  olive: '#808000',
+  coral: '#FF7F50',
+  salmon: '#FA8072',
+  gold: '#FFD700',
+  indigo: '#4B0082',
+  violet: '#EE82EE',
+};
+
+/** Normalize a color value to hex. Passes through valid hex; converts known CSS names. */
+function normalizeHexColor(color: string): string {
+  if (color.startsWith('#')) return color;
+  const lower = color.toLowerCase().trim();
+  const named = CSS_NAMED_COLORS[lower];
+  if (named) return named;
+  // "dark gray" → gray, "light blue" → blue (best-effort fallback)
+  const words = lower.split(/\s+/);
+  for (const w of words) {
+    if (CSS_NAMED_COLORS[w]) return CSS_NAMED_COLORS[w];
+  }
+  return '#000000'; // safe fallback
+}
+
 export function createJsxRenderTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
 
@@ -68,7 +110,13 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
       parameters: Type.Object({
         name: Type.String({ description: 'Iconify icon name (e.g. "mdi:home", "lucide:star")' }),
         size: Type.Optional(Type.Number({ description: 'Icon size in px (default: 24)', default: 24 })),
-        color: Type.Optional(Type.String({ description: 'Icon color as hex (default: #000000)', default: '#000000' })),
+        color: Type.Optional(
+          Type.String({
+            description:
+              'Icon color as hex (#RRGGBB). Named CSS colors are NOT supported — always use hex. Default: #000000',
+            default: '#000000',
+          }),
+        ),
         x: Type.Optional(Type.Number({ description: 'X position' })),
         y: Type.Optional(Type.Number({ description: 'Y position' })),
         parentId: Type.Optional(Type.String({ description: 'Parent node ID' })),
@@ -76,7 +124,8 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const svg = await loadIconSvg(params.name, params.size ?? 24);
-          const result = await connector.createIcon(svg, params.size ?? 24, params.color ?? '#000000', {
+          const color = normalizeHexColor(params.color ?? '#000000');
+          const result = await connector.createIcon(svg, params.size ?? 24, color, {
             x: params.x,
             y: params.y,
             parentId: params.parentId,

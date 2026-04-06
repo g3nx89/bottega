@@ -47,12 +47,12 @@ describe('System Prompts', () => {
       }
     });
 
-    it('judge prompt contains anti-leniency language', () => {
+    it('judge prompt contains fair evaluation language', () => {
       const prompt = getSystemPrompt('judge');
-      expect(prompt).toContain('demanding design critic');
-      expect(prompt).toContain('borderline');
+      expect(prompt).toContain('design quality reviewer');
+      expect(prompt).toContain('FAIL only when there is a clear');
       expect(prompt).toContain('FAIL');
-      expect(prompt).toContain('Do not justify defects');
+      expect(prompt).toContain('Evidence MUST include specific node IDs');
     });
 
     it('judge prompt contains JSON output format', () => {

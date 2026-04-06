@@ -20,6 +20,7 @@ import { createDsPageTools } from './ds-page.js';
 import { createImageGenTools } from './image-gen.js';
 import { createJsxRenderTools } from './jsx-render.js';
 import { createLayoutTools } from './layout.js';
+import { createLayoutSizingTools } from './layout-sizing.js';
 import { createLintTools } from './lint.js';
 import { createManipulationTools } from './manipulation.js';
 import { createStyleTools } from './style.js';
@@ -116,6 +117,7 @@ export function createFigmaTools(deps: ToolDeps): ToolDefinition[] {
     ...createLintTools(deps),
     ...createDsPageTools(deps),
     ...createLayoutTools(deps),
+    ...createLayoutSizingTools(deps),
     ...createStyleTools(deps),
     ...createJsxRenderTools(deps),
     ...createAnnotationTools(deps),

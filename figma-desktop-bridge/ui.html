@@ -1005,7 +1005,18 @@
           handleResult('SET_VARIABLE_DESCRIPTION', 'variable');
           break;
         case 'ADD_MODE_RESULT':
-          handleResult('ADD_MODE', 'collection');
+          // Include newMode alongside collection so callers can get the new mode ID
+          if (msg.success && msg.newMode) {
+            const request = window.__figmaPendingRequests.get(msg.requestId);
+            if (request) {
+              if (request.timeoutId) clearTimeout(request.timeoutId);
+              request.resolve({ success: true, collection: msg.collection, newMode: msg.newMode });
+              window.__figmaPendingRequests.delete(msg.requestId);
+              window.__pluginToWsId.delete(msg.requestId);
+            }
+          } else {
+            handleResult('ADD_MODE', 'collection');
+          }
           break;
         case 'RENAME_MODE_RESULT':
           handleResult('RENAME_MODE', 'collection');

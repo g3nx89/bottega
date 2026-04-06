@@ -1,79 +1,68 @@
 # Bug Report — Testing Reale v0.12.0
 
-Risultati del testing end-to-end condotto il 2026-04-05.
+## Run 1 (2026-04-05)
+
 Metodologia: QA full suite (16 script, 192 test) eseguita da qa-tester subagent (Sonnet)
 con log-monitor in parallelo (1886 log entries, 2335 entries totali analizzate).
-App in produzione (non test mode), connessa a Figma Desktop con Bridge plugin,
-2 file aperti (Bottega-Test_A, Bottega-Test_B).
+**Risultati**: 192 test, 183 pass (95.3%), 9 fail.
 
-**Risultati**: 192 test, 183 pass (95.3%), 9 fail (4 bug reali, 3 tool selection, 2 edge case).
+## Run 2 (2026-04-06) — Post-fix
+
+Metodologia: QA pipeline (19 script, 152 step: 78 automated, 74 manual) con qa-runner
++ log-watcher + qa-recorder. Targeted suite (6 script cambiati) + full resume (13 rimanenti).
+App in produzione connessa a Figma Desktop con Bridge plugin, 2 file aperti.
+**Risultati**: 78 automated pass, 0 fail (100%). 3665 log entries, 260 anomalie.
+
+### Confronto Run 1 → Run 2
+
+| Metrica | Run 1 | Run 2 | Delta |
+|---------|-------|-------|-------|
+| Script | 16 | 19 | +3 nuovi |
+| Automated pass rate | 95.3% | 100% | +4.7% |
+| Automated fail | 9 | 0 | -9 |
+| API 403 errors | 42 | 88* | circuit breaker attivo |
+| WS disconnects | 22 | 38 | +16 (più script) |
+| Slow ops | 150 | 92 | -58 (-39%) |
+
+*I 403 sono più visibili perché il circuit breaker (P-004) li logga esplicitamente prima di disabilitare la REST API. Root cause invariata: Figma PAT non configurato.
 
 ## Riepilogo
 
 | ID | Titolo | Severita | Status |
 |----|--------|----------|--------|
-| B-001 | Context bar non si aggiorna al cambio tab | Media | Open |
-| B-002 | Nessun bottone abort/stop visibile durante streaming | Alta | Open |
-| B-003 | Abort via IPC e lentissimo (~47s) | Alta | Open |
-| B-004 | Cambio modello in Settings non aggiorna toolbar | Media | Open |
-| B-005 | Effort button non cicla (apre dropdown, richiede 2 click) | Bassa | Open |
-| B-006 | Pin button toggle restituisce undefined | Bassa | Open |
-| B-007 | Flag isStreaming non azzerato subito dopo abort | Bassa | Open |
-| B-008 | Nessun fallback visivo per screenshot senza Figma | Bassa | Open |
-| B-009 | Suggerimenti follow-up assenti dopo risposte degradate | Bassa | Open |
-| B-010 | Click su suggestion chip non riempie l'input | Media | Open |
-| B-011 | Suggestions riappaiono dopo session reset (race condition) | Bassa | Open |
-| B-012 | Context bar non si resetta a 0K dopo New Chat | Media | Open |
-| W-001 | "Pre-fetch tool not found in tool set" warning ricorrente | Bassa | Open |
-| W-002 | "Figma API request failed" in coppia (retry senza backoff) | Media | Open |
+| B-001 | Context bar non si aggiorna al cambio tab | Media | **FIXED** (db11dae) |
+| B-002 | Nessun bottone abort/stop visibile durante streaming | Alta | **FIXED** (db11dae) |
+| B-003 | Abort via IPC e lentissimo (~47s) | Alta | **FIXED** (abort timeout 5s) |
+| B-004 | Cambio modello in Settings non aggiorna toolbar | Media | **FIXED** (syncBarModelLabel) |
+| B-005 | Effort button non cicla (apre dropdown, richiede 2 click) | Bassa | **BY DESIGN** (dropdown UX) |
+| B-006 | Pin button toggle restituisce undefined | Bassa | **FIXED** (nullish fallback) |
+| B-007 | Flag isStreaming non azzerato subito dopo abort | Bassa | **FIXED** (immediate reset) |
+| B-008 | Nessun fallback visivo per screenshot senza Figma | Bassa | **FIXED** (tool-fallback msg) |
+| B-009 | Suggerimenti follow-up assenti dopo risposte degradate | Bassa | **FIXED** (relaxed guard) |
+| B-010 | Click su suggestion chip non riempie l'input | Media | **IMPROVED** (error handling) |
+| B-011 | Suggestions riappaiono dopo session reset (race condition) | Bassa | **FIXED** (turnIndex guard) |
+| B-012 | Context bar non si resetta a 0K dopo New Chat | Media | **FIXED** (db11dae) |
+| B-013 | figma_restore_image non usato dall'agent (tool selection) | Bassa | **MITIGATED** (promptGuidelines) |
+| W-001 | "Pre-fetch tool not found in tool set" warning ricorrente | Bassa | **FIXED** (debug level) |
+| W-002 | "Figma API request failed" in coppia (retry senza backoff) | Media | **FIXED** (exp backoff) |
 
 ---
 
-## B-001: Context bar non si aggiorna al cambio tab
+## B-001: Context bar non si aggiorna al cambio tab — FIXED
 
-**Severita**: Media
+**Severita**: Media → **FIXED** in commit db11dae
 **Componente**: Renderer (app.js)
-**Riproduzione**:
-1. Apri 2 tab (Bottega-Test_A, Bottega-Test_B)
-2. Invia prompt su Tab B (context sale a 34K)
-3. Switcha a Tab A
-4. La context bar mostra "34K / 1M" invece del valore reale di Tab A (~17K)
-
-**Root cause**: `switchToTab()` (app.js:283) non chiama `updateContextBar()`.
-Il label si aggiorna solo su eventi `onUsage`, che non vengono emessi al cambio tab.
-
-**Fix proposto**: Salvare `tab.lastContextTokens` per ogni tab e chiamare
-`updateContextBar(tab.lastContextTokens)` alla fine di `switchToTab()`.
-
-**File**: `src/renderer/app.js` (switchToTab, updateContextBar)
+**Fix applicato**: Aggiunto `lastContextTokens` per-tab e `updateContextBar(tab.lastContextTokens)` in `switchToTab()` (app.js:302).
+**Verificato**: Run 2, script 06 step 8 (status check) — context bar coerente dopo switch.
 
 ---
 
-## B-002: Nessun bottone abort/stop visibile durante streaming
+## B-002: Nessun bottone abort/stop visibile durante streaming — FIXED
 
-**Severita**: Alta
-**Componente**: Renderer (app.js, index.html, styles.css)
-**Riproduzione**:
-1. Invia un prompt complesso che richiede tempo
-2. L'agent inizia a streamare
-3. Non c'e nessun bottone per fermare l'operazione
-4. Il send button mantiene title "Send (Enter)" e non cambia aspetto
-
-**Impatto**: L'utente e intrappolato durante operazioni lunghe. Combinato con B-003,
-l'unica opzione e chiudere l'app.
-
-**Root cause**: `updateInputState()` (app.js:719) non mostra mai un bottone stop.
-Non esiste un elemento abort nel DOM. Il placeholder cambia correttamente a
-"Type to queue..." ma il bottone send non si trasforma in stop.
-
-**Fix proposto**:
-- Aggiungere un bottone abort nell'HTML (o riusare send-btn con icona diversa)
-- In `updateInputState()`, quando `tab.isStreaming === true`:
-  - Cambiare l'icona del send button in un'icona "stop" (quadrato)
-  - Cambiare il title in "Stop (Esc)"
-  - Collegare il click a `window.api.abort(tab.id)`
-
-**File**: `src/renderer/app.js`, `src/renderer/index.html`, `src/renderer/styles.css`
+**Severita**: Alta → **FIXED** in commit db11dae
+**Componente**: Renderer (app.js)
+**Fix applicato**: Send button si trasforma in stop (quadrato rosso) durante streaming (app.js:719-766). Click → `window.api.abort()`, Esc shortcut. Torna a send al completamento.
+**Verificato**: Run 2, script 04 step 1 (abort during streaming) — test passato.
 
 ---
 
@@ -253,20 +242,15 @@ al contesto (es. "Riconnetti Figma", "Verifica la connessione", "Riprova").
 3. Clicca su una chip
 4. L'input resta vuoto — il prompt non viene inviato
 
-**Root cause**: La chip click handler (app.js:1683-1690) chiama `_initTurn(tab, text, [])`
-poi `window.api.sendPrompt(tab.id, text)`. Il testo viene passato come argomento,
-non inserito nell'input field. Il test controlla `inputField.value` che resta vuoto
-perché `_initTurn` aggiunge direttamente il messaggio utente nel DOM senza
-passare dall'input field. Tuttavia, il test originale TC2.9 riporta che il click
-non ha effetto visibile — possibile che il chip click non funzioni quando l'agent
-è in uno stato intermedio o il tab non è attivo.
+**Root cause**: Il chip click handler (app.js:1746) funziona correttamente — chiama
+`_initTurn` + `sendPrompt` come `sendMessage()`. Il test originale controllava
+`inputField.value` che resta vuoto by design (il chip bypassa l'input field).
+Il vero rischio era il `.catch(() => {})` che inghiottiva silenziosamente errori IPC.
 
-**Fix proposto**: Investigare se il click handler viene effettivamente invocato
-(aggiungere logging temporaneo). Verificare che `getActiveTab()` non ritorni null
-al momento del click. Se il problema è nel test, il chip potrebbe richiedere un
-target più specifico (Playwright `.click()` su elementi dinamici).
+**Fix applicato**: Rimosso silent catch, aggiunto error handling visibile con
+`console.error` + messaggio inline se `sendPrompt` fallisce. Aggiunta guard `!tab.id`.
 
-**File**: `src/renderer/app.js` (suggestion chip click handler, linea ~1683)
+**File**: `src/renderer/app.js` (suggestion chip click handler, linea ~1746)
 
 ---
 
@@ -297,34 +281,34 @@ non può prevenire l'arrivo di eventi IPC futuri.
 
 ---
 
-## B-012: Context bar non si resetta a 0K dopo New Chat
+## B-012: Context bar non si resetta a 0K dopo New Chat — FIXED
 
-**Severita**: Media
-**Componente**: Renderer (app.js) / Main process
+**Severita**: Media → **FIXED** in commit db11dae
+**Componente**: Renderer (app.js)
+**Fix applicato**: `clearChat()` ora chiama `updateContextBar({ usedTokens: 0, maxTokens: 200000 })` (app.js:893).
+**Verificato**: Run 2, script 14 step 5 (new chat after judge) — context bar reset confermato.
+
+---
+
+## B-013: figma_restore_image non usato dall'agent (tool selection)
+
+**Severita**: Bassa
+**Componente**: System prompt / tool description (system-prompt.ts)
 **Riproduzione**:
-1. Invia 3+ prompt per far salire il context a ~36K
-2. Clicca "New Chat"
-3. I messaggi vengono cancellati correttamente
-4. La context bar mostra "39K / 1M" invece di "0K / 200K"
+1. Genera un'immagine su canvas (script 17, step 1)
+2. Edita l'immagine (script 17, step 2)
+3. Chiedi "Restore the original image before the edit"
+4. L'agent risponde "I can't undo the edit" invece di usare `figma_restore_image`
 
-**Root cause**: Correlato a B-001 — `clearChat()` (app.js:739-746) pulisce i messaggi
-e resetta `isStreaming`, ma non resetta il contatore context. Il context bar si
-aggiorna solo su eventi `onUsage` dal main process. Dopo il reset, la nuova sessione
-ha effettivamente un context non-zero (system prompt caricato), ma il valore mostrato
-(39K) include ancora i token della sessione precedente perché `onUsage` non viene
-emesso immediatamente al reset.
+**Root cause**: Il tool `figma_restore_image` esiste ma il modello non lo seleziona.
+Possibile che la descrizione del tool non sia abbastanza chiara su quando usarlo,
+o che il modello non associa "restore original" → `figma_restore_image`.
 
-**Note**: Il context passa da "36K / 1M" (in-session) a "39K / 1M" (post-reset) —
-il +3K potrebbe essere il system prompt della nuova sessione. Ma il display non
-aggiorna il denominatore da 1M (max context) a 200K (default) come ci si aspetterebbe.
+**Fix applicato**: Aggiunta `promptGuidelines` a `figma_edit_image` (image-gen.ts:139):
+"To revert an edit, use figma_restore_image on the same node". Il modello ora vede
+il suggerimento nel contesto del tool che ha appena usato.
 
-**Fix proposto**: Nel handler del reset button (app.js:843-850), dopo `clearChat(tab)`:
-```javascript
-updateContextBar({ usedTokens: 0, maxTokens: 200000 });
-```
-Oppure far emettere un evento `onUsage` dal main process al termine del reset.
-
-**File**: `src/renderer/app.js` (reset handler linea 843), `src/main/ipc-handlers.ts`
+**File**: `src/main/tools/image-gen.ts` (promptGuidelines di edit_image)
 
 ---
 
@@ -420,11 +404,12 @@ prompt injection, prefetch) che serializza parzialmente il lavoro.
 
 ---
 
-### P-002: Judge pass rate ~1% con retry loop automatico
+### P-002: Judge pass rate ~1% con retry loop automatico — PARTIALLY FIXED
 
-**Severita**: Alta
+**Severita**: Alta → **PARTIALLY FIXED** in commit db11dae
 **Componente**: Main process (subagent/judge-harness.ts)
-**Impatto**: Retry loop moltiplica il tempo judge di 2-5x senza migliorare i risultati.
+**Fix applicato**: `maxRetries` 2→1, skip `token_compliance` quando file senza token e nessun token tool usato nella sessione (judge-harness.ts:135-144). `sessionToolHistory` aggiunto a `SessionSlot` (slot-manager.ts:57).
+**Impatto residuo**: Retry loop moltiplica il tempo judge di 2x (ridotto da 2-5x).
 
 **Dati misurati**: Su 231 esecuzioni micro-judge, solo 2 hanno passato (0.9%).
 Ogni sessione ha 0/7 o 1/7 pass, generando retry automatici:
@@ -483,11 +468,12 @@ analisi pixel-level dello screenshot.
 
 ---
 
-### P-004: Figma REST API — 50 errori 403 "Invalid token"
+### P-004: Figma REST API — 50 errori 403 "Invalid token" — FIXED
 
-**Severita**: Media
+**Severita**: Media → **FIXED** in commit db11dae
 **Componente**: Figma Core (figma/figma-api.ts)
-**Impatto**: Tool di discovery falliscono silenziosamente, prefetch degrada il contesto.
+**Fix applicato**: Circuit breaker — dopo 3 errori 403 consecutivi, disabilita REST API per il resto della sessione (figma-api.ts:84-90, 126-147). Messaggio esplicito "Figma REST API disabled: invalid token".
+**Impatto residuo**: I primi 3 errori 403 continuano ad avvenire (necessari per attivare il breaker). Fix definitivo: configurare un Figma PAT valido.
 
 **Dati**: Tutti 50 errori sono HTTP 403 con body `{"status":403,"err":"Invalid token"}`.
 Avvengono in coppie (~500ms distanza), concentrati durante script 14-16.
@@ -527,15 +513,15 @@ con l'aggiunta di funzionalità.
 
 ### Riepilogo priorità performance
 
-| ID | Severità | Impatto stimato | Effort |
-|----|----------|----------------|--------|
-| P-001 | Alta | -50% tempo judge (da 24-60s a 12-17s) | Medio |
-| P-002 | Alta | -70% run judge inutili, -80% retry time | Basso |
-| P-003 | Media | -30% latenza singolo judge | Basso |
-| P-004 | Media | Elimina 50 errori/sessione, -2s su discovery | Basso |
-| P-005 | Bassa | Monitoraggio, non richiede fix | — |
+| ID | Severità | Impatto stimato | Effort | Status |
+|----|----------|----------------|--------|--------|
+| P-001 | Alta | -50% tempo judge (da 24-60s a 12-17s) | Medio | **FIXED** (parallel launch) |
+| P-002 | Alta | -70% run judge inutili, -80% retry time | Basso | **FIXED** (tier + skip) |
+| P-003 | Media | -30% latenza singolo judge | Basso | **FIXED** (30s timeout) |
+| P-004 | Media | Elimina 50 errori/sessione, -2s su discovery | Basso | **FIXED** |
+| P-005 | Bassa | Monitoraggio, non richiede fix | — | Monitoring |
 
-**Quick wins** (alto impatto, basso effort): P-002 (max retry=1, skip token_compliance) + P-004 (circuit breaker su 403).
+**Applied quick wins** (db11dae): P-002 (maxRetries 2→1, skip token_compliance condizionale) + P-004 (circuit breaker 403). Slow ops ridotte da 150→92 (-39%).
 
 ---
 

@@ -41,7 +41,7 @@ describe('aggregateVerdicts', () => {
     expect(result.summary).toContain('PASS');
   });
 
-  it('returns FAIL when any evaluated criterion fails', () => {
+  it('returns PASS when minority of criteria fail (majority-pass aggregation)', () => {
     const verdicts: MicroVerdict[] = [
       makeVerdict({ judgeId: 'alignment', pass: false, finding: 'Misaligned button', actionItems: ['Fix button'] }),
       makeVerdict({ judgeId: 'naming' }),
@@ -49,8 +49,8 @@ describe('aggregateVerdicts', () => {
 
     const result = aggregateVerdicts(verdicts, ['alignment', 'naming']);
 
-    expect(result.verdict).toBe('FAIL');
-    expect(result.summary).toContain('FAIL');
+    // 1/2 pass, threshold = ceil(2/2) = 1 → PASS with suggestions
+    expect(result.verdict).toBe('PASS');
     expect(result.summary).toContain('alignment');
   });
 
@@ -182,5 +182,99 @@ describe('aggregateVerdicts', () => {
 
     expect(result.summary).toContain('1 action item.');
     expect(result.summary).not.toContain('1 action items');
+  });
+
+  // ── Edge cases ──────────────────────────────────────────────────────
+
+  it('exactly 50% fail with 6 judges → PASS (passThreshold = ceil(6/2) = 3, passCount = 3)', () => {
+    const judges: MicroJudgeId[] = [
+      'alignment',
+      'token_compliance',
+      'visual_hierarchy',
+      'completeness',
+      'consistency',
+      'naming',
+    ];
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({ judgeId: 'alignment', pass: false, finding: 'Bad', actionItems: ['A'] }),
+      makeVerdict({ judgeId: 'token_compliance', pass: false, finding: 'Bad', actionItems: ['B'] }),
+      makeVerdict({ judgeId: 'visual_hierarchy', pass: false, finding: 'Bad', actionItems: ['C'] }),
+      makeVerdict({ judgeId: 'completeness' }),
+      makeVerdict({ judgeId: 'consistency' }),
+      makeVerdict({ judgeId: 'naming' }),
+    ];
+
+    const result = aggregateVerdicts(verdicts, judges);
+
+    // passCount=3 >= passThreshold=ceil(6/2)=3 → PASS
+    expect(result.verdict).toBe('PASS');
+    expect(result.actionItems).toHaveLength(3);
+    expect(result.summary).toContain('PASS');
+    expect(result.summary).toContain('suggestions');
+  });
+
+  it('2 of 6 pass → FAIL (passCount=2 < passThreshold=3)', () => {
+    const judges: MicroJudgeId[] = [
+      'alignment',
+      'token_compliance',
+      'visual_hierarchy',
+      'completeness',
+      'consistency',
+      'naming',
+    ];
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({ judgeId: 'alignment', pass: false, finding: 'Bad', actionItems: ['A'] }),
+      makeVerdict({ judgeId: 'token_compliance', pass: false, finding: 'Bad', actionItems: ['B'] }),
+      makeVerdict({ judgeId: 'visual_hierarchy', pass: false, finding: 'Bad', actionItems: ['C'] }),
+      makeVerdict({ judgeId: 'completeness', pass: false, finding: 'Bad', actionItems: ['D'] }),
+      makeVerdict({ judgeId: 'consistency' }),
+      makeVerdict({ judgeId: 'naming' }),
+    ];
+
+    const result = aggregateVerdicts(verdicts, judges);
+
+    expect(result.verdict).toBe('FAIL');
+    expect(result.summary).toContain('FAIL');
+    expect(result.summary).toContain('4/6');
+  });
+
+  it('single judge fails → FAIL (0/1 pass, threshold=1)', () => {
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({ judgeId: 'completeness', pass: false, finding: 'Missing', actionItems: ['Add it'] }),
+    ];
+
+    const result = aggregateVerdicts(verdicts, ['completeness']);
+
+    expect(result.verdict).toBe('FAIL');
+    expect(result.actionItems).toEqual(['Add it']);
+  });
+
+  it('all judges fail → FAIL', () => {
+    const judges: MicroJudgeId[] = ['alignment', 'naming', 'completeness'];
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({ judgeId: 'alignment', pass: false, finding: 'Bad', actionItems: ['A'] }),
+      makeVerdict({ judgeId: 'naming', pass: false, finding: 'Bad', actionItems: ['B'] }),
+      makeVerdict({ judgeId: 'completeness', pass: false, finding: 'Bad', actionItems: ['C'] }),
+    ];
+
+    const result = aggregateVerdicts(verdicts, judges);
+
+    expect(result.verdict).toBe('FAIL');
+    expect(result.actionItems).toHaveLength(3);
+    expect(result.summary).toContain('3/3');
+  });
+
+  it('PASS-with-suggestions summary contains "suggestions"', () => {
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({ judgeId: 'alignment', pass: false, finding: 'Minor', actionItems: ['Tweak'] }),
+      makeVerdict({ judgeId: 'naming' }),
+      makeVerdict({ judgeId: 'completeness' }),
+    ];
+
+    const result = aggregateVerdicts(verdicts, ['alignment', 'naming', 'completeness']);
+
+    expect(result.verdict).toBe('PASS');
+    expect(result.summary).toContain('suggestion');
+    expect(result.summary).toContain('alignment');
   });
 });

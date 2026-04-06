@@ -43,8 +43,9 @@ export function createStyleTools(deps: ToolDeps): ToolDefinition[] {
       name: 'figma_set_effects',
       label: 'Set Effects',
       description:
-        'Set effects (shadows and blurs) on a node. Supports DROP_SHADOW, INNER_SHADOW, LAYER_BLUR, and BACKGROUND_BLUR.',
-      promptSnippet: 'figma_set_effects: set shadows and blurs on a node',
+        'Set effects (shadows and blurs) on a node. Supports DROP_SHADOW, INNER_SHADOW, LAYER_BLUR, and BACKGROUND_BLUR. For shadow opacity, use the opacity param (0-1) OR 8-char hex (#RRGGBBAA).',
+      promptSnippet:
+        'figma_set_effects: set shadows/blurs. Shadow example: { type:"DROP_SHADOW", color:"#000000", opacity:0.2, offsetY:4, radius:8 }',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID' }),
         effects: Type.Array(
@@ -52,7 +53,10 @@ export function createStyleTools(deps: ToolDeps): ToolDefinition[] {
             type: StringEnum(['DROP_SHADOW', 'INNER_SHADOW', 'LAYER_BLUR', 'BACKGROUND_BLUR'] as const, {
               description: 'Effect type',
             }),
-            color: Type.Optional(Type.String({ description: 'Hex color (for shadows)' })),
+            color: Type.Optional(Type.String({ description: 'Hex color for shadows (#RRGGBB or #RRGGBBAA)' })),
+            opacity: Type.Optional(
+              Type.Number({ description: 'Shadow opacity 0-1 (default: 0.25). Overrides alpha from hex color.' }),
+            ),
             offsetX: Type.Optional(Type.Number({ description: 'X offset in pixels (for shadows)' })),
             offsetY: Type.Optional(Type.Number({ description: 'Y offset in pixels (for shadows)' })),
             radius: Type.Number({ description: 'Blur radius in pixels' }),

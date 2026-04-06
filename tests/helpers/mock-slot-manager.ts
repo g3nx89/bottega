@@ -29,6 +29,7 @@ export function createMockSlotManager(session: any, opts?: { fileKey?: string; f
     promptStartTime: null,
     lastCompletedPromptId: null,
     lastCompletedTurnIndex: 0,
+    sessionToolHistory: new Set<string>(),
   };
 
   const slotManager = {

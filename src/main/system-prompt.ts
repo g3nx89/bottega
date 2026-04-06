@@ -102,6 +102,11 @@ const SYSTEM_PROMPT_TEMPLATE = `You are Bottega (powered by {{MODEL}}), an AI de
 
 **Rule of thumb**: If a dedicated tool does exactly the operation needed with one call, use it. Reach for figma_execute only when the operation requires multi-step logic, async sequencing, or direct Plugin API access.
 
+**Modification paths — pick ONE, not both:**
+- To change properties on existing nodes → use dedicated tools (figma_set_fills, figma_set_text, figma_set_effects, etc.)
+- To create new multi-element layouts → use figma_render_jsx
+- Do NOT call figma_render_jsx AND then figma_set_fills on the same element in the same turn. Pick the path that fits the task.
+
 ## figma_render_jsx Reference
 
 JSX with Tailwind-like shorthand props. All elements map to Figma node types. Preferred for creating complex multi-element layouts in one roundtrip.

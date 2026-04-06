@@ -286,7 +286,11 @@ function parseJudgeVerdict(output: string): import('./types.js').JudgeVerdict {
 /**
  * Run a batch of micro-judges in parallel.
  * Each judge is a zero-tool, single-turn session that evaluates one criterion.
+ * P-001: All judges launch simultaneously — no sequential stagger.
+ * P-003: Per-judge timeout of 15s prevents slow judges from blocking the batch.
  */
+const PER_JUDGE_TIMEOUT_MS = 30_000;
+
 /** Create a skip/error verdict for a micro-judge that didn't evaluate. */
 function makeSkipVerdict(
   judgeId: MicroJudgeId,
@@ -319,6 +323,9 @@ export async function runMicroJudgeBatch(
       return makeSkipVerdict(judgeId, 'timeout', 'Aborted', start);
     }
 
+    // P-003: Per-judge timeout — declared outside try for catch access
+    const judgeSignal = AbortSignal.any([signal, AbortSignal.timeout(PER_JUDGE_TIMEOUT_MS)]);
+
     try {
       const def = getJudgeDefinition(judgeId);
       const modelConfig = settings.microJudges[judgeId]?.model ?? {
@@ -339,7 +346,7 @@ export async function runMicroJudgeBatch(
       // Collect output
       let output = '';
       session.subscribe((event: any) => {
-        if (signal.aborted) return;
+        if (judgeSignal.aborted) return;
         if (event.assistantMessageEvent?.type === 'text_delta') {
           output += event.assistantMessageEvent.delta;
         }
@@ -378,22 +385,22 @@ export async function runMicroJudgeBatch(
 
       const userPrompt = [criterionPrompt, `\n## Task Context\n${taskContext}`, ...dataSections].join('\n\n');
 
-      // Abort propagation
+      // P-003: Abort propagation using per-judge signal (includes timeout)
       const abortHandler = () => {
         session.abort().catch(() => {});
       };
-      signal.addEventListener('abort', abortHandler, { once: true });
+      judgeSignal.addEventListener('abort', abortHandler, { once: true });
 
       try {
         const promptOptions = hasScreenshot ? { images: [prefetchedData.screenshot!] } : undefined;
         await session.prompt(userPrompt, promptOptions);
       } finally {
-        signal.removeEventListener('abort', abortHandler);
+        judgeSignal.removeEventListener('abort', abortHandler);
         session.abort().catch(() => {});
       }
 
-      if (signal.aborted) {
-        return makeSkipVerdict(judgeId, 'timeout', 'Aborted', start);
+      if (judgeSignal.aborted) {
+        return makeSkipVerdict(judgeId, 'timeout', 'Timed out or aborted', start);
       }
 
       // Parse JSON micro-verdict
@@ -411,8 +418,9 @@ export async function runMicroJudgeBatch(
 
       return { ...parsed, durationMs };
     } catch (err: unknown) {
-      if ((err as Error)?.name === 'AbortError' || signal.aborted) {
-        return makeSkipVerdict(judgeId, 'timeout', 'Aborted', start);
+      if ((err as Error)?.name === 'AbortError' || judgeSignal.aborted || signal.aborted) {
+        const reason = judgeSignal.aborted && !signal.aborted ? 'Per-judge timeout (30s)' : 'Aborted';
+        return makeSkipVerdict(judgeId, 'timeout', reason, start);
       }
       log.error({ err, judgeId, batchId }, 'Micro-judge error');
       onProgress({ batchId, subagentId, role: 'judge', type: 'error', summary: (err as Error)?.message });

@@ -88,6 +88,110 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
       },
     },
     {
+      name: 'figma_create_component',
+      label: 'Create Component',
+      description:
+        'Create a new Figma COMPONENT node, or convert an existing frame to a component. When converting, children and visual properties are preserved.',
+      promptSnippet:
+        'figma_create_component: create a component from scratch or convert an existing frame to a component',
+      parameters: Type.Object({
+        name: Type.String({ description: 'Component name' }),
+        fromFrameId: Type.Optional(
+          Type.String({ description: 'If provided, converts this frame to a component (preserves children)' }),
+        ),
+        width: Type.Optional(Type.Number({ description: 'Width in px (ignored when converting from frame)' })),
+        height: Type.Optional(Type.Number({ description: 'Height in px (ignored when converting from frame)' })),
+        parentId: Type.Optional(
+          Type.String({ description: 'Parent node ID (ignored when converting — component stays in same parent)' }),
+        ),
+      }),
+      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+        return operationQueue.execute(async () => {
+          const name = String(params.name);
+          const fromFrameId = params.fromFrameId ? String(params.fromFrameId).replace(/[^0-9:;]/g, '') : undefined;
+          const parentId = params.parentId ? String(params.parentId).replace(/[^0-9:;]/g, '') : undefined;
+          const width = params.width ?? 100;
+          const height = params.height ?? 100;
+
+          // nosemgrep: missing-template-string-indicator — code generation: builds plugin code sent to Figma
+          const code = fromFrameId
+            ? `
+              return (async () => {
+                try {
+                  const frame = await figma.getNodeByIdAsync(${JSON.stringify(fromFrameId)});
+                  if (!frame) {
+                    return JSON.stringify({ success: false, error: 'Frame not found' });
+                  }
+                  if (frame.type !== 'FRAME' && frame.type !== 'GROUP') {
+                    return JSON.stringify({ success: false, error: 'Node is not a FRAME or GROUP, type: ' + frame.type });
+                  }
+                  const component = figma.createComponent();
+                  component.name = ${JSON.stringify(name)};
+                  component.resize(frame.width, frame.height);
+                  component.x = frame.x;
+                  component.y = frame.y;
+                  if (frame.parent) {
+                    const idx = frame.parent.children.indexOf(frame);
+                    frame.parent.insertChild(idx, component);
+                  }
+                  // Copy auto-layout properties if present
+                  if ('layoutMode' in frame && frame.layoutMode !== 'NONE') {
+                    component.layoutMode = frame.layoutMode;
+                    component.primaryAxisSizingMode = frame.primaryAxisSizingMode;
+                    component.counterAxisSizingMode = frame.counterAxisSizingMode;
+                    component.paddingTop = frame.paddingTop;
+                    component.paddingRight = frame.paddingRight;
+                    component.paddingBottom = frame.paddingBottom;
+                    component.paddingLeft = frame.paddingLeft;
+                    component.itemSpacing = frame.itemSpacing;
+                    if (frame.primaryAxisAlignItems) component.primaryAxisAlignItems = frame.primaryAxisAlignItems;
+                    if (frame.counterAxisAlignItems) component.counterAxisAlignItems = frame.counterAxisAlignItems;
+                  }
+                  // Copy fills, strokes, effects, corner radius
+                  if (frame.fills) component.fills = JSON.parse(JSON.stringify(frame.fills));
+                  if (frame.strokes) component.strokes = JSON.parse(JSON.stringify(frame.strokes));
+                  if (frame.effects) component.effects = JSON.parse(JSON.stringify(frame.effects));
+                  if ('cornerRadius' in frame) component.cornerRadius = frame.cornerRadius;
+                  // Move children from frame to component
+                  const children = [...frame.children];
+                  for (const child of children) {
+                    component.appendChild(child);
+                  }
+                  frame.remove();
+                  return JSON.stringify({ success: true, componentId: component.id, name: component.name, converted: true });
+                } catch (e) {
+                  return JSON.stringify({ success: false, error: e.message });
+                }
+              })()
+            `
+            : `
+              return (async () => {
+                try {
+                  const component = figma.createComponent();
+                  component.name = ${JSON.stringify(name)};
+                  component.resize(${width}, ${height});
+                  ${
+                    parentId
+                      ? `
+                  const parent = await figma.getNodeByIdAsync(${JSON.stringify(parentId)});
+                  if (parent && 'appendChild' in parent) {
+                    parent.appendChild(component);
+                  }
+                  `
+                      : ''
+                  }
+                  return JSON.stringify({ success: true, componentId: component.id, name: component.name, width: ${width}, height: ${height} });
+                } catch (e) {
+                  return JSON.stringify({ success: false, error: e.message });
+                }
+              })()
+            `;
+          const result = await connector.executeCodeViaUI(code, 15000);
+          return textResult(typeof result === 'string' ? JSON.parse(result) : result);
+        });
+      },
+    },
+    {
       name: 'figma_set_variant',
       label: 'Set Component Variant',
       description:

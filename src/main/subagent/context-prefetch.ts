@@ -21,7 +21,8 @@ async function callTool(
 ): Promise<string | null> {
   const tool = tools.find((t) => t.name === toolName);
   if (!tool) {
-    log.warn({ toolName }, 'Pre-fetch tool not found in tool set');
+    // W-001: Expected for subagent read-only tool sets — downgrade from warn to debug
+    log.debug({ toolName }, 'Pre-fetch tool not found in tool set');
     return null;
   }
   try {
@@ -52,7 +53,8 @@ async function callToolForImage(
 ): Promise<ScreenshotImage | null> {
   const tool = tools.find((t) => t.name === toolName);
   if (!tool) {
-    log.warn({ toolName }, 'Pre-fetch image tool not found');
+    // W-001: Expected for subagent read-only tool sets — downgrade from warn to debug
+    log.debug({ toolName }, 'Pre-fetch image tool not found');
     return null;
   }
   try {

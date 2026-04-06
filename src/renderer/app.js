@@ -667,6 +667,8 @@ function addScreenshot(tab, base64, opts) {
   if (lazy) img.loading = 'lazy';
   tab.currentAssistantBubble.appendChild(img);
   tab._turnHasScreenshot = true;
+  // Scroll after image loads (dimensions unknown until then)
+  img.addEventListener('load', () => scrollToBottom(), { once: true });
   scrollToBottom();
 }
 
@@ -911,7 +913,10 @@ sendBtn.addEventListener('click', () => {
 /** Handle keyboard navigation within the slash command menu. Returns true if the event was consumed. */
 
 function handleInputEscape() {
-  if (!slashHelpEl.classList.contains('hidden')) { hideSlashHelp(); return; }
+  if (!slashHelpEl.classList.contains('hidden')) {
+    hideSlashHelp();
+    return;
+  }
   // Abort streaming on Escape
   const tab = getActiveTab();
   if (tab && tab.isStreaming) {
@@ -1000,11 +1005,22 @@ window.api.onThinking((slotId, _text) => withTab(slotId, (tab) => showThinkingIn
 window.api.onToolStart((slotId, toolName, toolCallId) =>
   withTab(slotId, (tab) => addToolCard(tab, toolName, toolCallId)),
 );
-window.api.onToolEnd((slotId, _toolName, toolCallId, success) =>
+window.api.onToolEnd((slotId, toolName, toolCallId, success) =>
   withTab(slotId, (tab) => {
     completeToolCard(tab, toolCallId, success);
     tab._turnToolCount = (tab._turnToolCount || 0) + 1;
     if (!success) tab._turnToolErrors = (tab._turnToolErrors || 0) + 1;
+
+    // B-008: Show fallback message when screenshot fails (no image will arrive)
+    if (toolName === 'figma_screenshot' && !success) {
+      const card = tab.chatContainer.querySelector('[data-tool-call-id="' + CSS.escape(toolCallId) + '"]');
+      if (card) {
+        const fallback = document.createElement('div');
+        fallback.className = 'tool-fallback';
+        fallback.textContent = 'Screenshot unavailable \u2014 Figma not connected';
+        card.appendChild(fallback);
+      }
+    }
   }),
 );
 window.api.onScreenshot((slotId, base64) => withTab(slotId, (tab) => addScreenshot(tab, base64)));
@@ -1029,6 +1045,10 @@ function renderTaskPanel(tab) {
   }
   panel.classList.remove('hidden');
 
+  // Separate judge remediation tasks from regular tasks
+  const judgeTasks = tasks.filter((t) => t.metadata?.source === 'judge');
+  const regularTasks = tasks.filter((t) => !t.metadata?.source || t.metadata.source !== 'judge');
+
   const completed = tasks.filter((t) => t.status === 'completed').length;
   const taskById = new Map(tasks.map((t) => [t.id, t]));
 
@@ -1045,35 +1065,84 @@ function renderTaskPanel(tab) {
   progressOuter.appendChild(progressInner);
   panel.appendChild(progressOuter);
 
-  for (const t of tasks) {
-    const row = document.createElement('div');
-    row.className = `task-row ${t.status}`;
+  // Render regular tasks individually
+  for (const t of regularTasks) {
+    panel.appendChild(createTaskRow(t, taskById));
+  }
+
+  // Render judge tasks as a single collapsed group
+  if (judgeTasks.length > 0) {
+    const judgeCompleted = judgeTasks.filter((t) => t.status === 'completed').length;
+    const judgeInProgress = judgeTasks.some((t) => t.status === 'in_progress');
+    const groupStatus =
+      judgeCompleted === judgeTasks.length ? 'completed' : judgeInProgress ? 'in_progress' : 'pending';
+
+    const group = document.createElement('div');
+    group.className = `task-row task-group ${groupStatus}`;
 
     const dot = document.createElement('span');
     dot.className = 'task-dot';
-    if (t.status === 'completed') dot.textContent = '\u2714';
-    else if (t.status === 'pending') dot.textContent = '\u25FB';
+    if (groupStatus === 'completed') dot.textContent = '\u2714';
+    else if (groupStatus === 'pending') dot.textContent = '\u25FB';
 
     const subject = document.createElement('span');
     subject.className = 'task-subject';
-    subject.textContent = `#${t.id} ${t.status === 'in_progress' && t.activeForm ? t.activeForm + '\u2026' : t.subject}`;
+    subject.textContent = `Quality check (${judgeCompleted}/${judgeTasks.length} items)`;
 
-    row.appendChild(dot);
-    row.appendChild(subject);
+    const toggle = document.createElement('button');
+    toggle.className = 'task-group-toggle';
+    toggle.textContent = '\u25B6';
+    toggle.title = 'Expand';
 
-    const openBlockers = (t.blockedBy || []).filter((bid) => {
-      const b = taskById.get(bid);
-      return b && b.status !== 'completed';
-    });
-    if (openBlockers.length > 0) {
-      const blocker = document.createElement('span');
-      blocker.className = 'task-blocker';
-      blocker.textContent = `blocked by ${openBlockers.map((b) => '#' + b).join(', ')}`;
-      row.appendChild(blocker);
+    const details = document.createElement('div');
+    details.className = 'task-group-details hidden';
+    for (const t of judgeTasks) {
+      details.appendChild(createTaskRow(t, taskById));
     }
 
-    panel.appendChild(row);
+    toggle.addEventListener('click', () => {
+      const expanded = !details.classList.contains('hidden');
+      details.classList.toggle('hidden');
+      toggle.textContent = expanded ? '\u25B6' : '\u25BC';
+      toggle.title = expanded ? 'Expand' : 'Collapse';
+    });
+
+    group.appendChild(dot);
+    group.appendChild(subject);
+    group.appendChild(toggle);
+    panel.appendChild(group);
+    panel.appendChild(details);
   }
+}
+
+function createTaskRow(t, taskById) {
+  const row = document.createElement('div');
+  row.className = `task-row ${t.status}`;
+
+  const dot = document.createElement('span');
+  dot.className = 'task-dot';
+  if (t.status === 'completed') dot.textContent = '\u2714';
+  else if (t.status === 'pending') dot.textContent = '\u25FB';
+
+  const subject = document.createElement('span');
+  subject.className = 'task-subject';
+  subject.textContent = `#${t.id} ${t.status === 'in_progress' && t.activeForm ? t.activeForm + '\u2026' : t.subject}`;
+
+  row.appendChild(dot);
+  row.appendChild(subject);
+
+  const openBlockers = (t.blockedBy || []).filter((bid) => {
+    const b = taskById.get(bid);
+    return b && b.status !== 'completed';
+  });
+  if (openBlockers.length > 0) {
+    const blocker = document.createElement('span');
+    blocker.className = 'task-blocker';
+    blocker.textContent = `blocked by ${openBlockers.map((b) => '#' + b).join(', ')}`;
+    row.appendChild(blocker);
+  }
+
+  return row;
 }
 
 window.api.onAgentEnd((slotId) => {
@@ -1272,7 +1341,7 @@ function createJudgeVerdictCard(tab, verdict, attempt, maxAttempts) {
   const header = document.createElement('div');
   header.className = 'verdict-header';
   header.textContent =
-    verdict.verdict === 'PASS' ? 'Quality Check \u00B7 PASS \u2713' : 'Quality Check \u00B7 FAIL \u2717';
+    verdict.verdict === 'PASS' ? 'Quality Check \u00B7 PASS \u2713' : 'Quality Check \u00B7 Suggestions';
   card.appendChild(header);
 
   const criteria = document.createElement('div');
@@ -1533,7 +1602,9 @@ document.addEventListener('keydown', (e) => {
 // ── Pin (always-on-top) ─────────────────
 
 pinBtn.addEventListener('click', async () => {
-  const pinned = await window.api.togglePin();
+  // B-006: Guard against undefined IPC return — fallback to toggling current state
+  const result = await window.api.togglePin();
+  const pinned = typeof result === 'boolean' ? result : !pinBtn.classList.contains('pinned');
   pinBtn.classList.toggle('pinned', pinned);
   pinBtn.title = pinned ? 'Unpin from top' : 'Keep on top';
 });
@@ -1746,10 +1817,21 @@ function showSuggestions(suggestions) {
     chip.addEventListener('click', () => {
       window.api.trackSuggestionClicked(index);
       const tab = getActiveTab();
-      if (!tab) return;
+      if (!tab || !tab.id) return;
       hideSuggestions();
-      if (!tab.isStreaming) _initTurn(tab, text, []);
-      window.api.sendPrompt(tab.id, text).catch(() => {});
+      if (!tab.isStreaming) {
+        _initTurn(tab, text, []);
+      }
+      window.api.sendPrompt(tab.id, text).catch((err) => {
+        console.error('[suggestion-chip] sendPrompt failed:', err);
+        // Show the error inline so the user knows the click didn't work
+        if (tab.currentAssistantBubble) {
+          const errEl = document.createElement('div');
+          errEl.className = 'tool-error';
+          errEl.textContent = 'Failed to send prompt. Please try again.';
+          tab.currentAssistantBubble.appendChild(errEl);
+        }
+      });
     });
     suggestionsContainer.appendChild(chip);
   });
@@ -1763,7 +1845,12 @@ function hideSuggestions() {
 }
 
 window.api.onSuggestions((slotId, suggestions) => {
-  if (slotId === activeTabId) showSuggestions(suggestions);
+  // B-011: Only show suggestions if this is the active tab AND has messages.
+  // Prevents stale suggestions from appearing in a freshly-cleared chat.
+  const tab = tabs.get(slotId);
+  if (slotId === activeTabId && tab && tab.chatContainer.childElementCount > 0) {
+    showSuggestions(suggestions);
+  }
 });
 
 // Focus input on load

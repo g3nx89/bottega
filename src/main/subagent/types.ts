@@ -115,8 +115,8 @@ export interface MicroVerdict {
   durationMs: number;
 }
 
-/** Activation tier — determines which judges run based on tool usage. */
-export type ActivationTier = 'full' | 'visual' | 'narrow';
+/** Activation tier — determines which judges run based on complexity. */
+export type ActivationTier = 'full' | 'standard' | 'minimal' | 'visual' | 'narrow';
 
 /** Data keys available for selective prefetch. */
 export type PrefetchDataKey = 'screenshot' | 'fileData' | 'lint' | 'designSystem' | 'libraryComponents';
