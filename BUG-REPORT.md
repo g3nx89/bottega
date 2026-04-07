@@ -42,9 +42,19 @@ App in produzione connessa a Figma Desktop con Bridge plugin, 2 file aperti.
 | B-010 | Click su suggestion chip non riempie l'input | Media | **IMPROVED** (error handling) |
 | B-011 | Suggestions riappaiono dopo session reset (race condition) | Bassa | **FIXED** (turnIndex guard) |
 | B-012 | Context bar non si resetta a 0K dopo New Chat | Media | **FIXED** (db11dae) |
-| B-013 | figma_restore_image non usato dall'agent (tool selection) | Bassa | **MITIGATED** (promptGuidelines) |
+| B-013 | figma_restore_image non usato dall'agent (tool selection) | Bassa | **REOPENED** (mitigation inefficace) |
 | W-001 | "Pre-fetch tool not found in tool set" warning ricorrente | Bassa | **FIXED** (debug level) |
 | W-002 | "Figma API request failed" in coppia (retry senza backoff) | Media | **FIXED** (exp backoff) |
+| B-014 | Annotation categories senza label leggibili | Media | Open |
+| B-015 | Error recovery narrato all'utente (retry interni visibili) | Media | Open |
+| B-016 | Immagini generate non auto-piazzate su canvas | Media | Open |
+| B-017 | App close timeout dopo operazioni DS pesanti | Bassa | Open |
+| UX-001 | Istruzioni disconnessione ripetute verbatim | Media | Open |
+| UX-002 | Clarification loop eccessivo per annotazioni | Media | Open |
+| UX-003 | Judge false positive su contenuto canvas non correlato | Media | Open |
+| UX-004 | Tool retry cards visibili all'utente (noise) | Bassa | Open |
+| UX-005 | Risposta vuota dopo image fill timeout | Bassa | Open |
+| P-006 | figma_set_image_fill timeout 60s costante | Media | Open |
 
 ---
 
@@ -304,11 +314,16 @@ non può prevenire l'arrivo di eventi IPC futuri.
 Possibile che la descrizione del tool non sia abbastanza chiara su quando usarlo,
 o che il modello non associa "restore original" → `figma_restore_image`.
 
-**Fix applicato**: Aggiunta `promptGuidelines` a `figma_edit_image` (image-gen.ts:139):
-"To revert an edit, use figma_restore_image on the same node". Il modello ora vede
-il suggerimento nel contesto del tool che ha appena usato.
+**Fix applicato (inefficace)**: Aggiunta `promptGuidelines` a `figma_edit_image` (image-gen.ts:139):
+"To revert an edit, use figma_restore_image on the same node". Il modello continua
+a non usare il tool — confermato in Run 3 (Script 17 Step 3, Script 11 Step 7).
 
-**File**: `src/main/tools/image-gen.ts` (promptGuidelines di edit_image)
+**Status**: REOPENED — la mitigation via promptGuidelines non funziona. Serve un
+approccio più diretto: aggiungere il tool esplicitamente nel system prompt section
+"Image Generation Workflow" con un esempio di quando usarlo, oppure forzare il tool
+come suggestion automatica quando l'utente dice "restore"/"undo"/"revert".
+
+**File**: `src/main/system-prompt.ts` (image generation section), `src/main/tools/image-gen.ts`
 
 ---
 
@@ -522,6 +537,666 @@ con l'aggiunta di funzionalità.
 | P-005 | Bassa | Monitoraggio, non richiede fix | — | Monitoring |
 
 **Applied quick wins** (db11dae): P-002 (maxRetries 2→1, skip token_compliance condizionale) + P-004 (circuit breaker 403). Slow ops ridotte da 150→92 (-39%).
+
+---
+
+## Run 3 (2026-04-07) — Full Pipeline + UX Review
+
+Metodologia: Three-pass QA pipeline (19 script, 152 step: 78 automated, 74 manual).
+Pass 1 (qa-runner, Sonnet) + Log Monitor (log-watcher) + Pass 2 (UX reviewer, Opus).
+QA recorder attivo per test generation. Bridge disconnesso durante test.
+**Risultati**: 78/78 automated pass (100%). UX score 4.0/5. 260 anomalie log. 18 UX issue.
+
+### Confronto Run 2 → Run 3
+
+| Metrica | Run 2 | Run 3 | Delta |
+|---------|-------|-------|-------|
+| Automated pass rate | 100% | 100% | = |
+| UX score | — | 4.0/5 | (primo UX review) |
+| API 403 errors | 88 | 88 | = (PAT non configurato) |
+| WS disconnects | 38 | 38 | = (Bridge off) |
+| Slow ops | 92 | 92 | = |
+| UX issues found | — | 18 (7 Media, 11 Bassa) | (nuovo) |
+
+### Nuovi finding Run 3
+
+| ID | Titolo | Severita | Status | Source |
+|----|--------|----------|--------|--------|
+| B-014 | Annotation categories senza label leggibili | Media | Open | Pass 1+2 |
+| B-015 | Error recovery narrato all'utente (retry interni visibili) | Media | Open | Pass 2 |
+| B-016 | Immagini generate non auto-piazzate su canvas | Media | Open | Pass 2 |
+| B-017 | App close timeout dopo operazioni DS pesanti | Bassa | Open | Pass 1 |
+| UX-001 | Istruzioni disconnessione ripetute verbatim | Media | Open | Pass 2 |
+| UX-002 | Clarification loop eccessivo per annotazioni | Media | Open | Pass 2 |
+| UX-003 | Judge false positive su contenuto canvas non correlato | Media | Open | Pass 2 |
+| UX-004 | Tool retry cards visibili all'utente (noise) | Bassa | Open | Pass 2 |
+| UX-005 | Risposta vuota dopo image fill timeout | Bassa | Open | Pass 1+2 |
+| P-006 | figma_set_image_fill timeout 60s costante | Media | Open | Log+Timing |
+| B-018 | Judge auto-trigger non si attiva dopo mutazioni Figma | Alta | Open | Manual Batch 3 |
+| B-019 | Judge enable checkboxes senza id (accessibilità) | Bassa | Open | Manual Batch 3 |
+| B-020 | figma_analyze/arrange_component_set non selezionati dall'agent | Media | Open | Manual Batch 3 |
+| B-021 | Suggestion chips non appaiono dopo risposte agent | Media | Open | Manual Batch 2 |
+| B-022 | Task panel count non resettato su New Chat | Bassa | Open | Manual Batch 2 |
+| B-023 | Cross-tab file context mismatch (Tab B riporta file di Tab A) | Bassa | Open | Manual Batch 2 |
+| B-024 | Toolbar dropdown senza ARIA role (accessibilità) | Bassa | Open | Manual Batch 1 |
+| B-025 | Per-tab model selection non persistito al restart | Media | Open | Manual Batch 4 |
+| B-026 | Tab B context bar mostra 0K con conversazione esistente | Bassa | Open | Manual Batch 4 |
+| UX-006 | Lint report 80+ warnings non riassunto | Bassa | Open | Pass 2 |
+| UX-007 | Tool card noise su JSX retry (3-5 card per render) | Bassa | Open | Pass 2 |
+| UX-008 | figma_execute usato al posto di tool specifici (workaround) | Bassa | Open | Pass 2 |
+| UX-009 | Screenshot verbosity in multi-step (16+ tool card in un turno) | Bassa | Open | Pass 2 |
+| UX-010 | Agent narra "Let me zoom in" come narrazione intermedia | Bassa | Open | Pass 2 |
+| UX-011 | figma_set_image_fill retry silenzioso (2x stessa URL) | Bassa | Open | Pass 2 |
+
+---
+
+## B-014: Annotation categories senza label leggibili
+
+**Severita**: Media
+**Componente**: Tools (annotations.ts) / Plugin (code.js)
+**Riproduzione**:
+1. Chiedi "What annotation categories are available?"
+2. `figma_get_annotation_categories` restituisce IDs grezzi: "51:0", "51:1", "51:2", "51:3"
+3. Nessun nome leggibile (Development, Interaction, Content, Visual)
+4. L'agent è costretto a chiedere all'utente quale ID corrisponde alla categoria
+
+**Root cause**: Il plugin command GET_ANNOTATION_CATEGORIES restituisce solo gli ID
+delle categorie Figma senza i nomi corrispondenti. L'API Figma plugin espone
+`figma.codegen.annotationCategories` che include sia ID che nome.
+
+**Fix proposto**: Modificare il plugin handler in `figma-desktop-bridge/code.js`
+per restituire `{ id, name }` pairs, oppure arricchire la risposta tool nel
+compression extension o nel tool stesso.
+
+**File**: `figma-desktop-bridge/code.js` (GET_ANNOTATION_CATEGORIES handler), `src/main/tools/annotations.ts`
+
+---
+
+## B-015: Error recovery narrato all'utente (retry interni visibili)
+
+**Severita**: Media
+**Componente**: Agent behavior / System prompt
+**Riproduzione**:
+1. Chiedi "Create a card with shadow, gradient fill, and rounded corners"
+2. L'agent tenta figma_render_jsx → fallisce parzialmente
+3. L'agent riprova con parametri diversi
+4. Nel testo risposta: "The shadow format changed", "The grow caused an issue"
+5. 13 tool card visibili in un singolo turno
+
+**Root cause**: Il modello espone il suo processo di retry all'utente. Il system prompt
+non istruisce esplicitamente l'agent a nascondere i tentativi falliti e presentare
+solo il risultato finale.
+
+**Fix proposto**: Aggiungere guidance nel system prompt:
+"When a tool call fails and you retry with different parameters, do not mention the
+failed attempt to the user. Present only the final successful result. If all attempts
+fail, explain the limitation without exposing internal error details."
+
+**File**: `src/main/system-prompt.ts`
+
+---
+
+## B-016: Immagini generate non auto-piazzate su canvas
+
+**Severita**: Media
+**Componente**: Agent behavior / Image gen tools
+**Riproduzione**:
+1. Usa `/icon`, `/pattern`, o `/diagram`
+2. L'agent genera l'immagine con successo
+3. Invece di piazzarla automaticamente, chiede "Where would you like me to place it?"
+4. Friction inutile — l'utente si aspetta il piazzamento automatico
+
+**Root cause**: I tool di image generation restituiscono il risultato ma non forzano
+il piazzamento. Il modello interpreta la mancanza di un target esplicito come
+necessità di chiedere conferma.
+
+**Fix proposto**: Aggiungere `promptGuidelines` ai tool di image generation:
+"After generating an image/icon/pattern/diagram, always place it on the current page
+at a reasonable position (next to existing content or centered on viewport) without
+asking the user. Mention where you placed it in the response."
+
+**File**: `src/main/tools/image-gen.ts` (promptGuidelines per generate_icon, generate_pattern, generate_diagram)
+
+---
+
+## B-017: App close timeout dopo operazioni DS pesanti
+
+**Severita**: Bassa
+**Componente**: Main process (agent.ts / index.ts)
+**Riproduzione**:
+1. Esegui script 10 (Design System) — 6 step con token setup, DS page, lint
+2. Al termine, `app.close()` va in timeout
+3. Il QA runner forza `pkill`
+
+**Root cause**: Dopo heavy token/DS operations, l'Electron app accumula stato
+che rallenta il graceful shutdown. Probabile race condition tra cleanup della
+session agent e chiusura del WebSocket server.
+
+**Fix proposto**: Aggiungere timeout al graceful shutdown con force exit:
+```typescript
+app.on('before-quit', async () => {
+  const cleanup = Promise.all([closeAllSessions(), wsServer.close()]);
+  await Promise.race([cleanup, sleep(5000)]);
+});
+```
+
+**File**: `src/main/index.ts` (app quit handler)
+
+---
+
+## UX-001: Istruzioni disconnessione ripetute verbatim
+
+**Severita**: Media
+**Componente**: Agent behavior / System prompt
+**Descrizione**: Quando Figma è disconnesso, l'agent ripete le stesse istruzioni
+di riconnessione identiche ad ogni turno, senza riconoscere che le ha già date.
+**Fix proposto**: System prompt guidance: "If you already provided connection
+instructions in this session, acknowledge that ('As I mentioned earlier...') and
+offer alternative actions instead of repeating the full setup steps."
+
+---
+
+## UX-002: Clarification loop eccessivo per annotazioni
+
+**Severita**: Media
+**Componente**: Agent behavior / System prompt
+**Descrizione**: Per ogni operazione di annotazione, l'agent chiede sia la categoria
+che il nodo target, anche quando il contesto li rende evidenti. Script 13 steps 2-3-5
+tutti bloccati da clarification.
+**Fix proposto**: System prompt guidance: "When setting annotations, default to the
+most recently discussed element. For category, pick the most contextually appropriate
+one or use 'Development' as default."
+
+---
+
+## UX-003: Judge false positive su contenuto canvas non correlato
+
+**Severita**: Media
+**Componente**: Subagent (judge-harness.ts)
+**Descrizione**: La Quality Check valuta contenuto canvas non correlato al task corrente.
+Es. dopo creare un bottone, il judge lamenta "[DS::colors] frame not visible" perché
+vede l'intero canvas, non solo l'elemento appena creato.
+**Fix proposto**: Passare al judge solo lo screenshot/contesto dell'elemento appena
+creato/modificato, non l'intero canvas. Usare `nodeId` nel screenshot se disponibile.
+
+---
+
+## UX-004: Tool retry cards visibili all'utente (noise)
+
+**Severita**: Bassa
+**Componente**: Renderer (app.js)
+**Descrizione**: Quando un tool fallisce e viene ritentato, l'utente vede tutte
+le tool card intermedie (fino a 13 in un singolo turno). I retry interni dovrebbero
+essere compressi o nascosti.
+**Fix proposto**: Nel renderer, collassare tool card consecutive con lo stesso nome
+che hanno status error, mostrando solo "Tool X (N retries)" + la card finale.
+
+---
+
+## UX-005: Risposta vuota dopo image fill timeout
+
+**Severita**: Bassa
+**Componente**: Main process / Renderer
+**Descrizione**: Script 07 step 6 e Script 18 step 3 — dopo figma_set_image_fill
+timeout (60s), la risposta catturata è stringa vuota. Le tool card mostrano esecuzione
+ma l'utente non riceve spiegazione testuale.
+**Root cause**: Il timeout di 60s del WS command esaurisce il budget tempo del turno,
+l'agent non ha spazio per generare testo di risposta.
+**Fix proposto**: Ridurre il timeout di SET_IMAGE_FILL a 30s per lasciare margine
+al modello di rispondere.
+
+---
+
+## P-006: figma_set_image_fill timeout 60s costante
+
+**Severita**: Media
+**Componente**: Figma Core (websocket-server.ts)
+**Dati misurati**: 4 chiamate, tutte timeout a 60002-60010ms. Nessun successo.
+Il tool tenta di scaricare un'immagine da URL e applicarla via plugin, ma il
+Bridge disconnesso causa timeout WS invece di errore immediato.
+
+**Root cause**: `figma_set_image_fill` non verifica la connessione WS prima di
+inviare il comando. Senza Bridge, aspetta il timeout completo di 60s.
+
+**Fix proposto**: Aggiungere check di connessione WS prima di inviare SET_IMAGE_FILL.
+Se disconnesso, restituire errore immediato: "Figma Bridge not connected".
+
+**File**: `src/main/tools/manipulation.ts`, `src/figma/websocket-server.ts`
+
+---
+
+## B-018: Judge auto-trigger non si attiva dopo mutazioni Figma
+
+**Severita**: Alta
+**Componente**: Main process (session-events.ts, judge-harness.ts)
+**Riproduzione**:
+1. Attiva il judge toggle (`#bar-judge-btn` → `active`)
+2. Invia un prompt complesso: "Create a professional pricing card with title, price, features, CTA"
+3. L'agent crea il componente con successo (8 tool calls: render_jsx, set_effects, execute, screenshot)
+4. Il turno si completa — NESSUN "Quality Check" appare nella risposta
+5. Il manual re-judge (chiedendo "Run a quality check") funziona correttamente
+
+**Root cause verificata**: Il flusso IPC funziona correttamente:
+- `app.js:1749` → `window.api.setJudgeOverride(slotId, true)` ✓
+- `preload.ts:185` → `ipcRenderer.invoke('judge:set-override', slotId, true)` ✓
+- `ipc-handlers.ts:679` → `slot.judgeOverride = true` ✓
+- `session-events.ts:247` → `shouldRun = slot.judgeOverride === true` → true ✓
+
+Il break è a `session-events.ts:250`: `if (connector && hasMutations)`.
+`getConnectorForSlot` (ipc-handlers.ts:290-291) restituisce:
+```typescript
+slot.fileKey ? new ScopedConnector(infra.wsServer, slot.fileKey) : null
+```
+Quando `slot.fileKey` è null (slot creato senza connessione Figma stabilita,
+o connessione persa), `connector` è null e il judge è **silently skipped** —
+nessun log message, nessun feedback all'utente.
+
+Il QA runner lancia l'app con `testMode`, che potrebbe non ripristinare i fileKey
+dal disco, oppure il WS handshake non è completato quando il turno finisce.
+
+**Fix proposto**:
+1. Aggiungere log warn quando il judge è skippato per connector null:
+   ```typescript
+   if (!connector) {
+     log.warn({ slotId: slot.id, fileKey: slot.fileKey }, 'Judge skipped: no connector (fileKey missing or WS disconnected)');
+     safeSend(wc, 'judge:skipped', slot.id, 'no-connector');
+   }
+   ```
+2. Nel renderer, mostrare un messaggio "Judge skipped — no Figma connection" nel
+   footer della risposta quando riceve `judge:skipped`.
+3. Verificare che `slot.fileKey` venga settato dal `fileConnected` event anche
+   per slot creati prima della connessione WS.
+
+**File**: `src/main/session-events.ts` (linea 250), `src/main/ipc-handlers.ts` (linea 290-291), `src/renderer/app.js` (judge:skipped handler)
+
+---
+
+## B-019: Judge enable checkboxes senza id (accessibilità)
+
+**Severita**: Bassa
+**Componente**: Renderer (settings.js)
+**Descrizione**: I 7 checkbox per abilitare/disabilitare i singoli micro-judge
+nel settings panel hanno attributo `id` vuoto. Questo impedisce l'associazione
+`<label for="">`, rende i checkbox inaccessibili a screen reader, e complica
+l'automazione dei test.
+**Fix proposto**: Assegnare id univoci: `judge-enable-alignment`, `judge-enable-naming`, etc.
+**File**: `src/renderer/settings.js`
+
+---
+
+## B-020: figma_analyze/arrange_component_set non selezionati dall'agent
+
+**Severita**: Media
+**Componente**: System prompt / Tool descriptions
+**Descrizione**: Quando l'utente chiede esplicitamente di "analyze component set" o
+"arrange components in a grid", l'agent usa `figma_search_components` + `figma_execute`
++ `figma_batch_transform` invece dei tool dedicati `figma_analyze_component_set` e
+`figma_arrange_component_set`. I risultati sono corretti ma i tool specializzati
+vengono ignorati.
+**Fix proposto**: Rafforzare le descrizioni TypeBox dei tool in `tools/components.ts`
+e aggiungere guidance nel system prompt: "When the user asks to analyze or arrange
+component sets, prefer figma_analyze_component_set and figma_arrange_component_set."
+**File**: `src/main/system-prompt.ts`, `src/main/tools/components.ts`
+
+---
+
+## B-021: Suggestion chips non appaiono dopo risposte agent
+
+**Severita**: Media
+**Componente**: Main process (prompt-suggester.ts, session-events.ts)
+**Riproduzione**:
+1. Invia un prompt con risposta completa (es. "Create a blue rectangle")
+2. L'agent completa il turno con successo
+3. `#suggestions` container resta hidden, 0 `.suggestion-chip`
+
+**Root cause probabile**: `prompt-suggester.ts` potrebbe non triggerare in modalità
+reale, o l'IPC `agent:suggestions` non raggiunge il renderer. Da verificare se
+il suggester è disabilitato quando il modello non è Claude.
+
+**File**: `src/main/prompt-suggester.ts`, `src/main/session-events.ts`
+
+---
+
+## B-022: Task panel count non resettato su New Chat
+
+**Severita**: Bassa
+**Componente**: Renderer (app.js) / Main (session-store.ts)
+**Descrizione**: Dopo `resetSession()`, il task panel mostra "8 tasks (0/8 done)"
+dalla sessione precedente. Il task store non viene pulito dal reset.
+**Fix proposto**: In `clearChat()`, aggiungere `taskPanel.reset()` o equivalente IPC.
+**File**: `src/renderer/app.js` (clearChat), `src/main/ipc-handlers.ts`
+
+---
+
+## B-023: Cross-tab file context mismatch
+
+**Severita**: Bassa
+**Componente**: Main process (scoped-connector.ts)
+**Descrizione**: Su Tab B (label "Bottega-Test_B"), l'agent risponde "You're on
+Bottega-Test_A" perché il ScopedConnector usa la connessione attiva del plugin
+(che è su Test_A) invece del file associato al tab.
+**Fix proposto**: Il ScopedConnector dovrebbe filtrare in base al `fileKey` assegnato
+allo slot, non usare il file attualmente attivo nel plugin.
+**File**: `src/main/scoped-connector.ts`
+
+---
+
+## UX Backlog (da Pass 2 — UX Quality Review)
+
+Le 18 issue UX trovate dal Pass 2 (Opus reviewer) sono raggruppate qui in **9 task
+implementabili** con priorità, effort, file di riferimento e acceptance criteria.
+Ogni task copre uno o più finding UX e linka i bug entry esistenti.
+
+### Riepilogo backlog
+
+| ID | Task | Priorità | Effort | Bug correlati | Status |
+|----|------|----------|--------|---------------|--------|
+| **UX-T1** | Fix `figma_restore_image` tool awareness | P1 | S | B-013, UX (script 11/17) | Open |
+| **UX-T2** | Auto-place generated images on canvas | P1 | S | B-016 | Open |
+| **UX-T3** | Suppress internal error narration durante retry | P2 | M | B-015, UX-007 | Open |
+| **UX-T4** | Collapse retry tool cards nel renderer | P2 | M | UX-004, UX-007, UX-009, UX-011 | Open |
+| **UX-T5** | Reduce annotation clarification friction | P2 | S | UX-002, B-014 | Open |
+| **UX-T6** | De-duplicate disconnected state guidance | P2 | S | UX-001 | Open |
+| **UX-T7** | Human-readable annotation categories | P3 | S | B-014 | Open |
+| **UX-T8** | Lint report summarization (top-N expandable) | P3 | M | UX-006 | Open |
+| **UX-T9** | Strengthen tool descriptions per tool selection | P3 | S | B-020, UX-008 | Open |
+
+**Legenda effort**: S = ≤1 giorno, M = 1-3 giorni, L = >3 giorni
+
+---
+
+### UX-T1: Fix `figma_restore_image` tool awareness
+
+**Priorità**: P1 (Functional Fix)
+**Effort**: S
+**Bug correlati**: B-013 (REOPENED), Pass 2 script 11 step 7, script 17 step 3
+
+**Problema**: L'agent risponde "I don't have the ability to undo edits or restore"
+quando l'utente chiede di ripristinare un'immagine, anche se `figma_restore_image`
+esiste nel toolkit. La mitigation precedente via `promptGuidelines` su `edit_image`
+non ha funzionato.
+
+**Acceptance criteria**:
+- [ ] Quando l'utente dice "restore"/"undo"/"revert" su un'immagine, l'agent invoca `figma_restore_image`
+- [ ] Se il nodo target non è chiaro, l'agent chiede UNA volta per il nodo, non rifiuta
+- [ ] Test playbook: `when("restore the original image", [calls("figma_restore_image", ...)])`
+- [ ] Manual test: Script 17 Step 3 e Script 11 Step 7 devono PASS
+
+**File da modificare**:
+- `src/main/system-prompt.ts` — sezione "Image Workflow", aggiungere esempio esplicito di restore
+- `src/main/tools/image-gen.ts` — `figma_restore_image` tool description rinforzata
+
+---
+
+### UX-T2: Auto-place generated images on canvas
+
+**Priorità**: P1 (Functional Fix)
+**Effort**: S
+**Bug correlati**: B-016, Pass 2 script 11 steps 2-4
+
+**Problema**: I comandi `/generate`, `/icon`, `/pattern`, `/diagram` generano l'immagine
+ma poi l'agent chiede "Where would you like me to place it?" invece di piazzarla
+automaticamente. Friction inutile su ogni comando image.
+
+**Acceptance criteria**:
+- [ ] Dopo `figma_generate_image/icon/pattern/diagram/story`, il risultato è piazzato automaticamente sul canvas
+- [ ] La risposta menziona la posizione: "placed at (x, y)" o "placed at viewport center"
+- [ ] L'agent non chiede conferma di placement a meno che l'utente non specifichi un target
+- [ ] Manual test: Script 11 step 1 deve mostrare placement automatico nella risposta
+
+**File da modificare**:
+- `src/main/tools/image-gen.ts` — aggiungere `promptGuidelines` a tutti i tool image-gen:
+  ```
+  "After generating, always place the result on the current page at viewport center
+   (or next to existing content). Mention the placement in your response. Do NOT ask
+   the user where to place it."
+  ```
+
+---
+
+### UX-T3: Suppress internal error narration durante retry
+
+**Priorità**: P2 (UX Improvement)
+**Effort**: M
+**Bug correlati**: B-015, UX-007, UX-010, UX-011
+
+**Problema**: Quando un tool fallisce e l'agent riprova con parametri diversi, espone
+i tentativi falliti all'utente nel testo: "The shadow format changed", "The grow caused
+an issue", "Let me zoom in", "Let me try again". L'utente vede dettagli implementativi
+invece del risultato finale.
+
+**Acceptance criteria**:
+- [ ] L'agent non menziona retry interni nel testo della risposta
+- [ ] Solo il risultato finale è presentato
+- [ ] Se TUTTI i tentativi falliscono, l'agent spiega la limitazione SENZA dettagli interni
+- [ ] Frasi vietate nel testo: "Let me adjust", "format changed", "caused an issue", "Let me try again"
+
+**File da modificare**:
+- `src/main/system-prompt.ts` — sezione "Error Handling", aggiungere:
+  ```
+  When a tool call fails and you retry with different parameters:
+  1. Do NOT mention the failed attempt in your response text
+  2. Present only the final successful result
+  3. If all attempts fail, explain the user-facing limitation in simple terms
+     (e.g., "I couldn't apply the shadow due to a Figma API constraint") without
+     exposing implementation details
+  ```
+
+---
+
+### UX-T4: Collapse retry tool cards nel renderer
+
+**Priorità**: P2 (UX Improvement)
+**Effort**: M
+**Bug correlati**: UX-004, UX-007, UX-009, UX-011, B-015
+
+**Problema**: Quando l'agent riprova un tool, l'utente vede tutte le tool card
+intermedie (fino a 13-16 in un singolo turno). I retry interni dovrebbero essere
+collapsed mostrando solo il risultato finale.
+
+**Acceptance criteria**:
+- [ ] Tool card consecutive con lo stesso nome che hanno status `error` sono collapsed
+- [ ] Mostrato come "Tool X (3 retries)" + la card finale espandibile
+- [ ] Click espande la lista completa delle tentativi
+- [ ] Tool card screenshot multiple in un turno sono raggruppate sotto "N screenshots"
+
+**File da modificare**:
+- `src/renderer/app.js` — funzione di rendering tool card (cercare `addToolCard` o equivalente)
+- `src/renderer/styles.css` — stili per `.tool-card-group`, `.tool-card-collapsed`
+
+**Nota implementativa**: Considerare di usare un `<details>` HTML element nativo per
+l'espansione, evita JavaScript custom.
+
+---
+
+### UX-T5: Reduce annotation clarification friction
+
+**Priorità**: P2 (UX Improvement)
+**Effort**: S
+**Bug correlati**: UX-002, B-014, Pass 2 script 13 steps 2-3-5
+
+**Problema**: Per ogni operazione di annotazione, l'agent chiede sia la categoria che
+il nodo target, anche quando il contesto li rende evidenti. Script 13 ha 3 step
+bloccati da clarification loop.
+
+**Acceptance criteria**:
+- [ ] Quando l'utente dice "add annotation to X", l'agent default al last-discussed element
+- [ ] Per la category, picking automatico della prima disponibile o "General"
+- [ ] Solo se l'utente vuole una category specifica e nessuna matcha → chiede
+- [ ] Manual test: 3 prompt consecutive di annotation senza clarification
+
+**File da modificare**:
+- `src/main/system-prompt.ts` — sezione "Annotations":
+  ```
+  When setting annotations:
+  1. Default the target node to the most recently created or discussed element
+  2. Default the category to "Development" or the first available
+  3. Only ask for clarification if the user explicitly mentions both elements without
+     making the target clear
+  ```
+
+---
+
+### UX-T6: De-duplicate disconnected state guidance
+
+**Priorità**: P2 (UX Improvement)
+**Effort**: S
+**Bug correlati**: UX-001, Pass 2 script 02 steps 4-6
+
+**Problema**: Quando Figma è disconnesso, l'agent ripete le stesse identiche istruzioni
+di setup ad ogni turno, senza riconoscere che le ha già date. Frustrante e ridondante.
+
+**Acceptance criteria**:
+- [ ] Se il setup Bridge è già stato spiegato in questa sessione, l'agent acknowledge ("As I mentioned earlier...")
+- [ ] L'agent offre alternative actionable invece di ripetere ("Let me know once it's connected and I'll continue")
+- [ ] Test: 3 prompt consecutivi con Bridge disconnesso → 3 risposte distinte, non identiche
+
+**File da modificare**:
+- `src/main/system-prompt.ts` — sezione "Connection Guidance":
+  ```
+  If you've already provided Bridge connection instructions earlier in this session,
+  do not repeat the full setup steps. Instead:
+  - Acknowledge ("As I mentioned earlier, the Bridge plugin needs to be running")
+  - Offer to continue once connected ("Let me know when it's ready")
+  ```
+
+---
+
+### UX-T7: Human-readable annotation categories
+
+**Priorità**: P3 (Polish)
+**Effort**: S
+**Bug correlati**: B-014, Pass 2 script 13 step 1
+
+**Problema**: `figma_get_annotation_categories` restituisce IDs grezzi ("51:0", "51:1")
+senza nomi leggibili. L'agent è costretto a esporli all'utente.
+
+**Acceptance criteria**:
+- [ ] Il tool restituisce `{ id, name }` pairs invece di solo ID
+- [ ] L'agent presenta i nomi leggibili all'utente: "Development", "Interaction", etc.
+- [ ] Backward compat: il tool accetta ancora `id` come input nelle altre API
+
+**File da modificare**:
+- `figma-desktop-bridge/code.js` — handler `GET_ANNOTATION_CATEGORIES`:
+  ```javascript
+  // Restituire { id, name } invece di solo id
+  return categories.map(c => ({ id: c.id, name: c.label || c.id }));
+  ```
+- `src/main/tools/annotations.ts` — aggiornare schema TypeBox di output
+- `src/figma/types.ts` — aggiornare type `AnnotationCategory`
+
+---
+
+### UX-T8: Lint report summarization (top-N expandable)
+
+**Priorità**: P3 (Polish)
+**Effort**: M
+**Bug correlati**: UX-006, Pass 2 script 14 step 6
+
+**Problema**: Il lint report con 80+ warnings è overwhelming. L'utente non sa da dove
+cominciare. Manca priorizzazione.
+
+**Acceptance criteria**:
+- [ ] Per report con >10 warnings, mostrare top-10 by impact
+- [ ] Seguire con "... and N more (expand to see all)"
+- [ ] Click espande la lista completa
+- [ ] Top-N criteria: severity (critical > warning > info) poi count
+
+**File da modificare**:
+- `src/main/tools/tokens.ts` — `figma_lint` tool, aggiungere logica di summarization nel result formatting
+- `src/main/compression/extension-factory.ts` — assicurarsi che il lint result non sia compresso troppo aggressivamente
+
+---
+
+### UX-T9: Strengthen tool descriptions per tool selection
+
+**Priorità**: P3 (Polish)
+**Effort**: S
+**Bug correlati**: B-020, UX-008, Pass 2 script 08 step 6, script 09 step 8, script 19 step 4
+
+**Problema**: L'agent usa `figma_execute` come fallback generico invece dei tool
+specializzati (`figma_analyze_component_set`, `figma_arrange_component_set`,
+`figma_batch_transform`, `figma_get_library_components`). Risultati corretti ma path
+roundabout.
+
+**Acceptance criteria**:
+- [ ] Le TypeBox descriptions dei tool specializzati menzionano "Prefer this over figma_execute when..."
+- [ ] System prompt ha sezione "Tool Selection Hierarchy" con priorità esplicite
+- [ ] Manual test: Script 08 step 6 deve usare `figma_get_library_components`
+
+**File da modificare**:
+- `src/main/tools/components.ts` — descriptions di `analyze_component_set`, `arrange_component_set`
+- `src/main/tools/discovery.ts` — description di `get_library_components`
+- `src/main/system-prompt.ts` — sezione "Tool Selection Priorities":
+  ```
+  When the user explicitly asks to:
+  - "analyze component set" → figma_analyze_component_set (NOT figma_execute)
+  - "arrange components" → figma_arrange_component_set (NOT figma_batch_transform)
+  - "list libraries" → figma_get_library_components (NOT figma_design_system)
+  Use figma_execute only when no specialized tool fits.
+  ```
+
+---
+
+### Backlog stats
+
+- **Totale task**: 9
+- **Per priorità**: 2 P1, 4 P2, 3 P3
+- **Effort totale**: 7 S + 2 M ≈ **9-15 giorni di lavoro**
+- **Quick wins** (P1 + S): UX-T1, UX-T2 — risolvibili in 1 giorno e portano UX score da 4.0 a ~4.3
+- **High impact** (riduce UX issues): UX-T3 + UX-T4 risolvono 6 finding combinati
+
+### Cosa NON è in questo backlog
+
+I bug Alta/Media tracciati come B-* (es. B-018 judge auto-trigger, B-021 suggestion
+chips, B-025 model persistence) non sono qui — sono **bug funzionali** e vanno fixati
+nelle entries B-NNN già esistenti, prima di lavorare su questo backlog UX.
+
+---
+
+## Note tecniche Run 3
+
+### Circuit breaker 88 errori 403
+
+Il circuit breaker (P-004) è **instance-scoped** (`FigmaAPI.consecutive403Count`).
+Ogni relaunch dell'app (1 per script QA) crea una nuova istanza, resettando il contatore.
+19 script × ~4-5 errori prima del breaker = ~88 errori totali. Comportamento atteso.
+Fix definitivo: configurare un Figma PAT valido.
+
+### Playbook drafts vuoti
+
+Il qa-recorder produce `playbook-drafts.json: []` perché `generatePlaybookDrafts()`
+filtra su `t.prompt` (truthy), ma i log pino non includono il testo del prompt utente
+nei log entry delle tool call. Il recorder cattura le sequenze tool (`tool-sequences.json`)
+ma senza il prompt associato non può generare stub DSL. Fix: arricchire il log
+`session-events.ts` con il prompt text nel log entry iniziale del turno, oppure
+fare join sui timestamp tra log di prompt e log di tool call nel recorder.
+
+### B-013 riapertura
+
+La mitigation via `promptGuidelines` su `figma_edit_image` non funziona.
+Run 3 Script 17 Step 3 e Script 11 Step 7 confermano: l'agent risponde
+"I can't undo edits" senza invocare `figma_restore_image`. Il tool esiste
+nel toolkit ma il modello non lo associa a "restore"/"undo"/"revert".
+Serve menzione esplicita nel system prompt o keyword-triggered suggestion.
+
+## Timing Baselines (Run 3)
+
+Misurate da qa-recorder su 265 tool call durante la sessione full.
+
+| Tool | Count | p50 (ms) | p90 (ms) | Max (ms) | Note |
+|------|-------|----------|----------|----------|------|
+| figma_screenshot | 89 | 224 | 396 | 586 | Stabile |
+| figma_get_file_data | 51 | 271 | 364 | 413 | Stabile |
+| figma_render_jsx | 21 | 386 | 583 | 1314 | p99 alto |
+| figma_design_system | 20 | 348 | 367 | 384 | Stabile |
+| figma_execute | 14 | 44 | 243 | 304 | Varianza alta |
+| figma_setup_tokens | 3 | 451 | 604 | 604 | Lento |
+| figma_update_ds_page | 5 | 361 | 457 | 457 | Lento |
+| figma_generate_image | 3 | 23757 | 24795 | 24795 | Gemini latency |
+| figma_generate_pattern | 4 | 24825 | 29208 | 29208 | Gemini latency |
+| figma_generate_story | 1 | 75987 | — | 75987 | Gemini heavy |
+| figma_set_image_fill | 4 | 60009 | 60010 | 60010 | 100% timeout |
 
 ---
 
