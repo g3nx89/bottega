@@ -40,14 +40,16 @@ Send: "Style the first item as a heading: 32px, bold, uppercase, with 1.2 line h
 
 ```assert
 # figma_set_text_style is the canonical typography tool.
-# Calibration (2026-04-08) found the agent legitimately calls figma_set_text
-# once to write the content before applying the style — so the cap=0 was too
-# strict. Relaxed to cap=1 (one content write + one style application).
+# Calibration round 3 (2026-04-08) found 1/3 runs called figma_set_text twice
+# (the agent occasionally re-writes the content as part of the styling chain).
+# Relaxed cap from 1 to 2 — still blocks the "sequential rewrite N items"
+# anti-pattern (which would call set_text 3+ times for the 3-item frame)
+# while accepting normal content-write variance.
 # Token tightening: replaced bare "32" (matched 32px, 0.32, node ids, etc.) with
 # "32px" — the unit suffix anchors it to a font-size value.
 tools_called: [figma_set_text_style]
 tools_NOT_called_more_than:
-  figma_set_text: 1
+  figma_set_text: 2
 response_contains:
   any_of: [bold, heading, 32px, uppercase, style]
   case_sensitive: false

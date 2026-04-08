@@ -84,11 +84,14 @@ Send: "/edit change the sky to a night sky with stars"
 # agent in any natural reply, making any_of: [night, stars, sky, ...] a
 # tautology that adds noise without signal. The tools_called + cap on
 # generate_image carry the substantive check.
+# Calibration round 3 (2026-04-08) found p95 = 123s on Gemini latency
+# (image edit + screenshot loop). Bumped duration cap from 120s to 200s
+# per the canonical p95 × 1.5 = 184s formula, rounded up to 200s.
 tools_called: [figma_edit_image]
 tools_NOT_called_more_than:
   figma_generate_image: 0
 screenshots_min: 1
-duration_max_ms: 120000
+duration_max_ms: 200000
 ```
 
 ### 7. /restore — Image enhancement
