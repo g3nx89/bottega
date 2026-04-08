@@ -153,9 +153,9 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       name: 'figma_get_library_components',
       label: 'Get Library Components',
       description:
-        'Get all published components and component sets from an external library file. Requires the library file key. Use this to discover available components before instantiating with figma_instantiate.',
+        'Get all published components and component sets from an external library file. Requires the library file key. PREFER this tool over figma_execute or figma_design_system when the user asks to "list library components", "show library contents", or "what is in this library".',
       promptSnippet:
-        'figma_get_library_components: list all components in an external library file (requires file key)',
+        'figma_get_library_components: list components in a library file (prefer over figma_design_system / figma_execute)',
       parameters: Type.Object({
         fileKey: Type.String({ description: 'File key of the library' }),
       }),
@@ -203,8 +203,9 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       name: 'figma_analyze_component_set',
       label: 'Analyze Component Set',
       description:
-        'Analyze a COMPONENT_SET to extract variant state machine, CSS pseudo-class mappings, and cross-variant visual diffs. Essential for understanding how component variants map to interactive states in code.',
-      promptSnippet: 'figma_analyze_component_set: extract variant states, CSS pseudo-class mappings, and visual diffs',
+        'Analyze a COMPONENT_SET to extract variant state machine, CSS pseudo-class mappings, and cross-variant visual diffs. PREFER this tool over figma_execute or figma_search_components when the user asks to "analyze", "inspect variants", or "compare states" of a component set — it produces a structured state-machine answer in one call.',
+      promptSnippet:
+        'figma_analyze_component_set: extract variant states + visual diffs (prefer over figma_execute / figma_search_components)',
       parameters: Type.Object({
         nodeId: Type.String({ description: 'COMPONENT_SET node ID (e.g., "214:274")' }),
       }),

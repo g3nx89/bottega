@@ -84,7 +84,7 @@ function makeInfra(overrides: Partial<any> = {}): any {
     designSystemCache: { invalidate: vi.fn() },
     metricsCollector: { finalize: vi.fn() },
     compressionExtensionFactory: vi.fn(),
-    wsServer: { getConnectedFiles: vi.fn().mockReturnValue([]) },
+    wsServer: { getConnectedFiles: vi.fn().mockReturnValue([]), isFileConnected: vi.fn().mockReturnValue(false) },
     figmaAPI: {},
     queueManager: {
       getQueue: vi.fn().mockReturnValue({ execute: vi.fn() }),
@@ -102,7 +102,7 @@ describe('SlotManager', () => {
   let tmpDir: string;
   let appState: AppStatePersistence;
   let sessionStore: SessionStore;
-  let wsServer: { getConnectedFiles: ReturnType<typeof vi.fn> };
+  let wsServer: { getConnectedFiles: ReturnType<typeof vi.fn>; isFileConnected: ReturnType<typeof vi.fn> };
   let infra: any;
   let manager: SlotManager;
 
@@ -111,7 +111,7 @@ describe('SlotManager', () => {
     tmpDir = makeTmpDir();
     appState = new AppStatePersistence(join(tmpDir, 'app-state.json'));
     sessionStore = new SessionStore(join(tmpDir, 'file-sessions.json'));
-    wsServer = { getConnectedFiles: vi.fn().mockReturnValue([]) };
+    wsServer = { getConnectedFiles: vi.fn().mockReturnValue([]), isFileConnected: vi.fn().mockReturnValue(false) };
     infra = makeInfra({ wsServer });
 
     // Re-apply mocks cleared by vi.clearAllMocks()

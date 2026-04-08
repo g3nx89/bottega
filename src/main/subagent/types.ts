@@ -90,6 +90,12 @@ export interface PrefetchedContext {
   lint: string | null;
   libraryComponents: string | null;
   componentAnalysis: ComponentAnalysis | null;
+  /**
+   * UX-003: the node ID the prefetch screenshot was scoped to. When set,
+   * judges must frame their findings as "about this target node" to avoid
+   * false positives on unrelated canvas content.
+   */
+  targetNodeId?: string | null;
 }
 
 // ── Micro-Judge Types ────────────────────────────────────────────────

@@ -63,7 +63,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         'Provide detailed prompts: subject, style, mood, lighting, composition, camera angle.',
         'Use styles (photorealistic, watercolor, oil-painting, sketch, pixel-art, anime, vintage, modern, abstract, minimalist) for artistic control.',
         'Use variations (lighting, angle, color-palette, composition, mood, season, time-of-day) for creative exploration.',
-        'Set nodeIds to auto-apply the first image as fill. Without nodeIds, the agent must use figma_set_image_fill manually.',
+        'ALWAYS set nodeIds to auto-apply the image. If the user did not provide a target, create a Frame at the current viewport first (via figma_render_jsx) and pass its id. Never ask the user "where should I place it?" — pick a sensible default.',
       ],
       parameters: Type.Object({
         prompt: Type.String({
@@ -156,11 +156,14 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
       name: 'figma_restore_image',
       label: 'Restore Image',
       description:
-        'Restore or enhance an image in Figma using AI. Upscale, denoise, fix artifacts, or improve overall quality.',
-      promptSnippet: 'figma_restore_image: AI-enhance/restore an image on a Figma node (upscale, denoise, fix)',
+        'Restore, revert, or enhance an image on a Figma node using AI. USE THIS TOOL when the user says "restore", "undo", "revert", "bring back the original", or asks to undo a prior figma_edit_image. Also upscales, denoises, and fixes artifacts. Do NOT refuse undo/revert requests for images — this is the correct tool.',
+      promptSnippet:
+        'figma_restore_image: AI restore / revert / undo an image edit, or enhance quality on a Figma node',
       promptGuidelines: [
+        'THIS is the correct tool when the user wants to undo, revert, restore, or bring back the original of an edited image. Do not answer "I can\'t undo edits" — call this tool.',
         'Works on any node with an image fill or exportable content.',
-        'Describe restoration goals: "enhance quality", "remove noise", "sharpen details", "fix compression artifacts".',
+        'Describe restoration goals: "restore to the original look", "remove the recent edit", "enhance quality", "remove noise", "sharpen details".',
+        'If the user says "restore/undo" without naming a node, default to the most recently edited node (the target of the last figma_edit_image call in this session).',
       ],
       parameters: Type.Object({
         prompt: Type.String({
@@ -185,7 +188,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         'Describe the icon subject clearly: "a mountain landscape", "a chat bubble", "a shopping cart".',
         'Choose style (flat/skeuomorphic/minimal/modern) to match the app aesthetic.',
         'For app store icons, use type: app-icon with rounded corners.',
-        'Set nodeId to auto-apply the icon as image fill on a Figma node.',
+        'ALWAYS set nodeId to auto-apply. If no target exists, create a square Frame at viewport center via figma_render_jsx or figma_create_child first, then pass its id. Never ask "where should I place it?".',
       ],
       parameters: Type.Object({
         prompt: Type.String({
@@ -248,7 +251,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
       promptGuidelines: [
         'Describe the pattern: "geometric triangles", "floral watercolor", "tech circuit board".',
         'Use type: seamless for tileable backgrounds, texture for surfaces, wallpaper for full-bleed.',
-        'Set nodeIds with scaleMode: TILE for seamless repeating fills.',
+        'ALWAYS set nodeIds with scaleMode: TILE for seamless repeating fills. If no target exists, create a Frame at viewport center first and pass its id. Never ask "where should I place it?".',
       ],
       parameters: Type.Object({
         prompt: Type.String({ minLength: 1, description: 'Pattern description' }),
@@ -445,6 +448,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         'Describe diagram content and relationships clearly.',
         'Choose appropriate type: flowchart, architecture, network, database, wireframe, mindmap, sequence.',
         'For technical accuracy, list specific components and their connections.',
+        'ALWAYS set nodeId to auto-apply. If no target exists, create a wide Frame at viewport center first and pass its id. Never ask "where should I place it?".',
       ],
       parameters: Type.Object({
         prompt: Type.String({ minLength: 1, description: 'Diagram description with components and relationships' }),

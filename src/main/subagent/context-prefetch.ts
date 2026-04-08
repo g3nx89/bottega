@@ -137,6 +137,12 @@ export async function prefetchForMicroJudges(
   neededData: Set<PrefetchDataKey>,
   signal?: AbortSignal,
   fileKey?: string,
+  /**
+   * UX-003: when provided, the prefetch screenshot is scoped to this node
+   * instead of the viewport. This prevents judges from flagging unrelated
+   * pre-existing canvas content as "missing" or "misaligned".
+   */
+  targetNodeId?: string,
 ): Promise<PrefetchedContext> {
   const result: PrefetchedContext = {
     screenshot: null,
@@ -145,12 +151,17 @@ export async function prefetchForMicroJudges(
     lint: null,
     libraryComponents: null,
     componentAnalysis: null,
+    targetNodeId: targetNodeId ?? null,
   };
 
   // Fetch screenshot separately (returns image, not text)
   let screenshotPromise: Promise<ScreenshotImage | null> | null = null;
   if (neededData.has('screenshot')) {
-    screenshotPromise = callToolForImage(tools, 'figma_screenshot', { zoom: 2 }, signal);
+    // UX-003: pass nodeId when we know the affected target so the bridge
+    // returns a cropped image of that node only. `zoom` is deliberately
+    // omitted when scoped — the tool auto-fits the node to the frame.
+    const screenshotParams = targetNodeId ? { nodeId: targetNodeId } : { zoom: 2 };
+    screenshotPromise = callToolForImage(tools, 'figma_screenshot', screenshotParams, signal);
   }
 
   // Build parallel fetch list for text-based data

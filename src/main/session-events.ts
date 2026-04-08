@@ -54,6 +54,8 @@ export function createEventRouter(deps: EventRouterDeps) {
   // ── Per-turn accumulators (keyed by slotId) ──
   const turnToolNames = new Map<string, string[]>();
   const turnResponseLength = new Map<string, number>();
+  // UX-003: nodeIds mutated/created during this turn, used to scope the judge screenshot.
+  const turnMutatedNodeIds = new Map<string, string[]>();
 
   /** Get prompt correlation context from the slot's current turn. */
   function turnContext(slot: SessionSlot): { promptId: string | undefined; slotId: string; turnIndex: number } {
@@ -62,6 +64,17 @@ export function createEventRouter(deps: EventRouterDeps) {
       slotId: slot.id,
       turnIndex: slot.turnIndex,
     };
+  }
+
+  /**
+   * Capture the slot's turn identity at this moment. The returned `isStale()`
+   * returns true if the user has reset the session or started a new turn —
+   * use it inside async .then/.catch handlers to drop IPC events that would
+   * otherwise leak across turns (B-011 family).
+   */
+  function captureTurnGuard(slot: SessionSlot): { isStale: () => boolean } {
+    const captured = slot.turnIndex;
+    return { isStale: () => slot.turnIndex !== captured };
   }
 
   function handleMessageUpdate(wc: Electron.WebContents, slot: SessionSlot, event: any) {
@@ -81,6 +94,45 @@ export function createEventRouter(deps: EventRouterDeps) {
   // Store tool inputs for screenshot metadata (captured at start, used at end)
   const toolInputs = new Map<string, any>();
 
+  /**
+   * UX-003: Extract a node ID from a mutation tool's input shape. Mutation tools
+   * in Bottega take one of: `nodeId` (string), `nodeIds` (string[]), or `parentId`
+   * (string, for create-type tools like figma_render_jsx / figma_create_child /
+   * figma_create_icon). Read-only tools like figma_screenshot are skipped by caller.
+   */
+  function extractNodeIdsFromInput(input: any): string[] {
+    if (!input || typeof input !== 'object') return [];
+    const out: string[] = [];
+    if (typeof input.nodeId === 'string' && input.nodeId) out.push(input.nodeId);
+    if (Array.isArray(input.nodeIds)) {
+      for (const id of input.nodeIds) if (typeof id === 'string' && id) out.push(id);
+    }
+    // parentId is a good fallback for create-* tools: scoping to the parent frame
+    // shows the newly created child in context.
+    if (typeof input.parentId === 'string' && input.parentId) out.push(input.parentId);
+    return out;
+  }
+
+  /**
+   * UX-003: Extract created node IDs from a tool result's text content.
+   * Bottega wraps results via `textResult(...)` which JSON-serializes plugin
+   * responses. Create/clone/instantiate tools return `{ id: "N:M", ... }` or
+   * `{ nodeId: "N:M", ... }` in their payload — match both.
+   */
+  const NODE_ID_IN_RESULT = /"(?:id|nodeId)"\s*:\s*"(\d+:\d+)"/g;
+  function extractNodeIdsFromResult(result: any): string[] {
+    const content = result?.content;
+    if (!Array.isArray(content)) return [];
+    const out: string[] = [];
+    for (const c of content) {
+      if (c?.type !== 'text' || typeof c.text !== 'string') continue;
+      for (const match of c.text.matchAll(NODE_ID_IN_RESULT)) {
+        if (match[1]) out.push(match[1]);
+      }
+    }
+    return out;
+  }
+
   function handleToolStart(wc: Electron.WebContents, slot: SessionSlot, event: any) {
     if (judgeInProgress.has(slot.id)) return;
     log.info({ tool: event.toolName, callId: event.toolCallId, slotId: slot.id }, 'Tool start');
@@ -93,6 +145,17 @@ export function createEventRouter(deps: EventRouterDeps) {
     const names = turnToolNames.get(slot.id) ?? [];
     names.push(event.toolName);
     turnToolNames.set(slot.id, names);
+
+    // UX-003: capture nodeIds from mutation tool inputs (non read-only tools only)
+    // so the judge harness can scope its screenshot to the affected nodes.
+    if (!READ_ONLY_CATEGORIES.has(categorizeToolName(event.toolName))) {
+      const ids = extractNodeIdsFromInput(event.toolInput);
+      if (ids.length > 0) {
+        const existing = turnMutatedNodeIds.get(slot.id) ?? [];
+        existing.push(...ids);
+        turnMutatedNodeIds.set(slot.id, existing);
+      }
+    }
   }
 
   function handleToolEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
@@ -148,6 +211,18 @@ export function createEventRouter(deps: EventRouterDeps) {
       const tasks = slot.taskStore.list();
       safeSend(wc, 'task:updated', slot.id, tasks);
     }
+
+    // UX-003: also capture node IDs produced by create-type tools (figma_create_child,
+    // figma_render_jsx, figma_instantiate, figma_clone, figma_create_icon), which only
+    // appear in the result payload, not the input.
+    if (!event.isError && !READ_ONLY_CATEGORIES.has(category)) {
+      const createdIds = extractNodeIdsFromResult(event.result);
+      if (createdIds.length > 0) {
+        const existing = turnMutatedNodeIds.get(slot.id) ?? [];
+        existing.push(...createdIds);
+        turnMutatedNodeIds.set(slot.id, existing);
+      }
+    }
   }
 
   function handleMessageEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
@@ -175,6 +250,8 @@ export function createEventRouter(deps: EventRouterDeps) {
       // Skip UI updates during judge retries — hidden turns should not update the chat
       if (judgeInProgress.has(slot.id)) return;
 
+      // B-026: track last context tokens on the slot so it can be persisted + restored.
+      slot.lastContextTokens = contextTokens;
       const usage = { input: contextTokens, output: u.output, total: u.totalTokens };
       log.info(
         {
@@ -220,6 +297,7 @@ export function createEventRouter(deps: EventRouterDeps) {
     // Reset per-turn state
     turnToolNames.delete(slot.id);
     turnResponseLength.delete(slot.id);
+    turnMutatedNodeIds.delete(slot.id);
     slot.currentPromptId = null;
     slot.promptStartTime = null;
   }
@@ -230,11 +308,15 @@ export function createEventRouter(deps: EventRouterDeps) {
     if (judgeInProgress.has(slot.id)) return;
 
     const toolNames = turnToolNames.get(slot.id) ?? [];
+    // UX-003: dedupe while preserving insertion order — first mutated node is
+    // the most "focused" target for the judge screenshot.
+    const mutatedNodeIds = Array.from(new Set(turnMutatedNodeIds.get(slot.id) ?? []));
 
     // Save tool names for force re-run — only overwrite when turn had tools,
     // so subsequent no-tool turns don't clear the list needed by re-judge
     if (toolNames.length > 0) {
       slot.lastTurnToolNames = [...toolNames];
+      slot.lastTurnMutatedNodeIds = mutatedNodeIds;
       for (const t of toolNames) slot.sessionToolHistory.add(t);
     }
 
@@ -247,6 +329,16 @@ export function createEventRouter(deps: EventRouterDeps) {
       const shouldRun = slot.judgeOverride === true || (slot.judgeOverride !== false && settings.judgeMode === 'auto');
       if (shouldRun) {
         const connector = deps.getConnectorForSlot(slot);
+        if (!connector && hasMutations) {
+          // B-018: Judge was requested but we have no connector (slot.fileKey missing or WS disconnected).
+          // Previously this was silently skipped. Now we log and notify the renderer so the user
+          // understands why the Quality Check footer never appeared.
+          log.warn(
+            { slotId: slot.id, fileKey: slot.fileKey, judgeOverride: slot.judgeOverride },
+            'Judge skipped: no connector (fileKey missing or WS disconnected)',
+          );
+          safeSend(wc, 'judge:skipped', slot.id, 'no-connector');
+        }
         if (connector && hasMutations) {
           judgeInProgress.add(slot.id);
           const judgeStart = Date.now();
@@ -255,25 +347,34 @@ export function createEventRouter(deps: EventRouterDeps) {
             // Store controller for external abort (e.g., user closes slot)
             const judgeController = new AbortController();
             judgeAbortControllers.set(slot.id, judgeController);
-            await runJudgeHarness(deps.infra, connector, slot, settings, toolNames, judgeController.signal, {
-              onProgress: (event) => safeSend(wc, 'subagent:status', slot.id, event),
-              onVerdict: (v, attempt, max) => {
-                safeSend(wc, 'judge:verdict', slot.id, v, attempt, max);
-                // Judge FAIL creates remediation tasks directly in TaskStore — notify renderer
-                if (v.verdict === 'FAIL' && slot.taskStore?.size > 0) {
-                  safeSend(wc, 'task:updated', slot.id, slot.taskStore.list());
-                }
-                usageTracker?.trackJudgeVerdict({
-                  batchId: slot.id,
-                  verdict: v.verdict,
-                  attempt,
-                  maxAttempts: max,
-                  failedCriteria: v.criteria.filter((c) => !c.pass).map((c) => c.name),
-                  durationMs: Date.now() - judgeStart,
-                });
+            await runJudgeHarness(
+              deps.infra,
+              connector,
+              slot,
+              settings,
+              toolNames,
+              mutatedNodeIds,
+              judgeController.signal,
+              {
+                onProgress: (event) => safeSend(wc, 'subagent:status', slot.id, event),
+                onVerdict: (v, attempt, max) => {
+                  safeSend(wc, 'judge:verdict', slot.id, v, attempt, max);
+                  // Judge FAIL creates remediation tasks directly in TaskStore — notify renderer
+                  if (v.verdict === 'FAIL' && slot.taskStore?.size > 0) {
+                    safeSend(wc, 'task:updated', slot.id, slot.taskStore.list());
+                  }
+                  usageTracker?.trackJudgeVerdict({
+                    batchId: slot.id,
+                    verdict: v.verdict,
+                    attempt,
+                    maxAttempts: max,
+                    failedCriteria: v.criteria.filter((c) => !c.pass).map((c) => c.name),
+                    durationMs: Date.now() - judgeStart,
+                  });
+                },
+                onRetryStart: (attempt, max) => safeSend(wc, 'judge:retry-start', slot.id, attempt, max),
               },
-              onRetryStart: (attempt, max) => safeSend(wc, 'judge:retry-start', slot.id, attempt, max),
-            });
+            );
           } catch (err) {
             log.warn({ err, slotId: slot.id }, 'Judge harness error in agent_end');
           } finally {
@@ -298,6 +399,10 @@ export function createEventRouter(deps: EventRouterDeps) {
     const next = slot.promptQueue.dequeue();
     if (next) {
       beginTurn(slot, next.text, true, usageTracker);
+      // B-021: queued prompts must also feed the suggester, otherwise follow-up
+      // chips never appear after a dequeued turn (direct prompts already track this).
+      slot.suggester.trackUserPrompt(next.text);
+      slot.suggester.resetAssistantText();
       deps.infra?.setWorkflowContext?.(next.text, slot.fileKey ?? '');
 
       safeSend(wc, 'queue:updated', slot.id, slot.promptQueue.list());
@@ -305,8 +410,16 @@ export function createEventRouter(deps: EventRouterDeps) {
       usageTracker?.trackPromptDequeued(slot.promptQueue.length);
       persistSlotSession(slot);
       slotManager.persistState();
+      // B-011 variant on the error path: drop the error if the session has
+      // been reset while prompt() was running, otherwise we'd pollute the new
+      // chat with the previous turn's failure.
+      const guard = captureTurnGuard(slot);
       slot.session.prompt(next.text).catch((err: any) => {
         log.error({ err, slotId: slot.id }, 'Queued prompt failed');
+        if (guard.isStale()) {
+          log.debug({ slotId: slot.id, currentTurn: slot.turnIndex }, 'Suppressing queued-prompt error: turn changed');
+          return;
+        }
         finalizeTurn(slot);
         slot.isStreaming = false;
         slot.promptQueue.clear();
@@ -320,18 +433,14 @@ export function createEventRouter(deps: EventRouterDeps) {
       persistSlotSession(slot);
       slotManager.persistState();
 
-      // B-011: Capture turn identity before async suggestion generation.
-      // If a session reset occurs while suggest() is in-flight, the turnIndex
-      // will have changed — we use this to suppress stale suggestions.
-      const turnAtSuggest = slot.turnIndex;
+      // B-011: drop suggestions if the session was reset while suggest() ran.
+      const suggestGuard = captureTurnGuard(slot);
       const suggestStart = Date.now();
       slot.suggester
         .suggest(slot.modelConfig)
         .then((suggestions) => {
           usageTracker?.trackSuggestionsGenerated(suggestions.length, Date.now() - suggestStart);
-          // B-011: Suppress suggestions if session was reset (turnIndex resets to 0)
-          // or a new turn started while we were generating
-          if (suggestions.length > 0 && slot.turnIndex === turnAtSuggest) {
+          if (suggestions.length > 0 && !suggestGuard.isStale()) {
             safeSend(wc, 'agent:suggestions', slot.id, suggestions);
           }
           slot.suggester.resetAssistantText();

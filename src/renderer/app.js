@@ -358,7 +358,9 @@ function createTabState(slotInfo) {
     thinkingBubble: null,
     queuedPrompts: [],
     judgeOverride: null,
-    lastContextTokens: 0,
+    // B-026: restore last known token count from the server so the context bar
+    // reflects saved sessions instead of showing 0K until the next usage event.
+    lastContextTokens: slotInfo.lastContextTokens ?? 0,
   };
 }
 
@@ -507,10 +509,28 @@ function appendToAssistant(tab, text) {
 // Tool execution cards
 function addToolCard(tab, toolName, toolCallId) {
   if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
+
+  // UX-004: Collapse retry noise. If the last child of the bubble is an errored
+  // tool-card for the SAME tool, remove it and carry over a retry counter so the
+  // user sees only the latest attempt + a small badge.
+  let retryCount = 0;
+  const parent = tab.currentAssistantBubble;
+  const lastChild = parent.lastElementChild;
+  if (lastChild && lastChild.classList?.contains('tool-card')) {
+    const prevName = lastChild.querySelector('.tool-name')?.textContent;
+    const prevStatus = lastChild.querySelector('.tool-status');
+    const wasError = prevStatus?.classList.contains('tool-error');
+    if (prevName === toolName && wasError) {
+      retryCount = (Number(lastChild.dataset.retryCount) || 0) + 1;
+      lastChild.remove();
+    }
+  }
+
   const card = document.createElement('div');
   card.className = 'tool-card';
   card.dataset.testid = 'tool-card';
   card.dataset.toolCallId = toolCallId;
+  if (retryCount > 0) card.dataset.retryCount = String(retryCount);
   // Build with DOM methods — no untrusted content set via innerHTML
   const spinner = document.createElement('span');
   spinner.className = 'tool-spinner';
@@ -521,6 +541,13 @@ function addToolCard(tab, toolName, toolCallId) {
   nameEl.textContent = toolName; // textContent: safe
   card.appendChild(spinner);
   card.appendChild(nameEl);
+  if (retryCount > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'tool-retry-badge';
+    badge.textContent = `retry ×${retryCount}`;
+    badge.title = `${retryCount} previous attempt(s) failed and were collapsed`;
+    card.appendChild(badge);
+  }
   // Screenshot progress indicator — show elapsed time after 3s
   if (toolName === 'figma_screenshot') {
     const startTime = Date.now();
@@ -791,6 +818,16 @@ function clearChat(tab) {
   tab.isStreaming = false;
   hideSuggestions();
   updateInputState();
+  // B-022: Reset task panel state on new chat — otherwise stale "8 tasks (0/8 done)"
+  // from the previous session lingers after reset.
+  tab._tasks = [];
+  if (tab.id === activeTabId) {
+    const panel = document.getElementById('task-panel');
+    if (panel) {
+      while (panel.firstChild) panel.removeChild(panel.firstChild);
+      panel.classList.add('hidden');
+    }
+  }
 }
 
 // Test helpers: slot-scoped access to chat state (only when agent test oracle is available).

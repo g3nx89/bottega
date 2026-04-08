@@ -687,6 +687,16 @@ export class FigmaWebSocketServer extends EventEmitter {
   // Multi-client methods
   // ============================================================================
 
+  /**
+   * Returns true if the given fileKey has an OPEN websocket client.
+   * Used by ScopedConnector for fail-fast precheck — avoids waiting the full
+   * timeout (60-120s) when the Bridge plugin is not running for the slot's file.
+   */
+  isFileConnected(fileKey: string): boolean {
+    const client = this.clients.get(fileKey);
+    return !!client && client.ws.readyState === WebSocket.OPEN;
+  }
+
   getConnectedFiles(): (ConnectedFileInfo & { isActive: boolean })[] {
     const files: (ConnectedFileInfo & { isActive: boolean })[] = [];
     for (const [fileKey, client] of this.clients) {

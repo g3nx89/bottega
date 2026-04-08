@@ -269,7 +269,9 @@ export class WebSocketConnector implements IFigmaConnector {
   // ============================================================================
 
   async setImageFill(nodeIds: string[], imageData: string, scaleMode = 'FILL'): Promise<any> {
-    return this.wsServer.sendCommand('SET_IMAGE_FILL', { nodeIds, imageData, scaleMode }, 60000);
+    // 30s leaves enough turn budget for the agent to generate a user-facing response
+    // when the image upload is slow (UX-005 / P-006). Was 60s.
+    return this.wsServer.sendCommand('SET_IMAGE_FILL', { nodeIds, imageData, scaleMode }, 30000);
   }
 
   // ============================================================================

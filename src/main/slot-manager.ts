@@ -53,8 +53,15 @@ export interface SessionSlot extends TurnTracking {
   judgeOverride: boolean | null;
   /** Tool names from the last completed turn — used for force re-run judge. */
   lastTurnToolNames: string[];
+  /**
+   * Node IDs mutated/created during the last completed turn — used by the judge harness
+   * to scope its screenshot to the target node instead of the whole canvas (UX-003).
+   */
+  lastTurnMutatedNodeIds: string[];
   /** Accumulates all tool names ever called in this session — used for conditional judge skipping. */
   sessionToolHistory: Set<string>;
+  /** Last known input-token count for this slot (for restoring context bar after restart). B-026. */
+  lastContextTokens?: number;
 }
 
 export interface SlotInfo {
@@ -65,6 +72,8 @@ export interface SlotInfo {
   isConnected: boolean;
   modelConfig: ModelConfig;
   queueLength: number;
+  /** Last known input-token count, so the renderer's context bar reflects restored sessions. B-026. */
+  lastContextTokens?: number;
 }
 
 export class SlotManager {
@@ -141,6 +150,7 @@ export class SlotManager {
       lastCompletedTurnIndex: 0,
       judgeOverride: null,
       lastTurnToolNames: [],
+      lastTurnMutatedNodeIds: [],
       sessionToolHistory: new Set<string>(),
     };
 
@@ -178,8 +188,7 @@ export class SlotManager {
   getSlotInfo(slotId: string): SlotInfo | undefined {
     const slot = this.slots.get(slotId);
     if (!slot) return undefined;
-    const isConnected =
-      slot.fileKey !== null && this.wsServer.getConnectedFiles().some((f) => f.fileKey === slot.fileKey);
+    const isConnected = slot.fileKey !== null && this.wsServer.isFileConnected(slot.fileKey);
     return {
       id: slot.id,
       fileKey: slot.fileKey,
@@ -304,6 +313,10 @@ export class SlotManager {
         try {
           const slot = await this.createSlot(persisted.fileKey, persisted.fileName, persisted.modelConfig);
           slot.promptQueue.restore(persisted.promptQueue);
+          // B-026: restore last known context token count so the UI doesn't show 0K on the restarted tab
+          if (typeof persisted.lastContextTokens === 'number') {
+            slot.lastContextTokens = persisted.lastContextTokens;
+          }
           slotsCount++;
           totalQueued += persisted.promptQueue.length;
         } catch (err) {
@@ -349,6 +362,7 @@ export class SlotManager {
       isConnected: slot.fileKey !== null && connectedKeys.has(slot.fileKey),
       modelConfig: slot.modelConfig,
       queueLength: slot.promptQueue.length,
+      lastContextTokens: slot.lastContextTokens,
     };
   }
 
@@ -363,6 +377,7 @@ export class SlotManager {
           fileName: s.fileName || '',
           modelConfig: s.modelConfig,
           promptQueue: s.promptQueue.list(),
+          lastContextTokens: s.lastContextTokens,
         })),
     );
   }

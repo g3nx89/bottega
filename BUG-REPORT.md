@@ -42,19 +42,19 @@ App in produzione connessa a Figma Desktop con Bridge plugin, 2 file aperti.
 | B-010 | Click su suggestion chip non riempie l'input | Media | **IMPROVED** (error handling) |
 | B-011 | Suggestions riappaiono dopo session reset (race condition) | Bassa | **FIXED** (turnIndex guard) |
 | B-012 | Context bar non si resetta a 0K dopo New Chat | Media | **FIXED** (db11dae) |
-| B-013 | figma_restore_image non usato dall'agent (tool selection) | Bassa | **REOPENED** (mitigation inefficace) |
+| B-013 | figma_restore_image non usato dall'agent (tool selection) | Bassa | **FIXED** (Run 4 — Image Restore Workflow in system prompt) |
 | W-001 | "Pre-fetch tool not found in tool set" warning ricorrente | Bassa | **FIXED** (debug level) |
 | W-002 | "Figma API request failed" in coppia (retry senza backoff) | Media | **FIXED** (exp backoff) |
-| B-014 | Annotation categories senza label leggibili | Media | Open |
-| B-015 | Error recovery narrato all'utente (retry interni visibili) | Media | Open |
-| B-016 | Immagini generate non auto-piazzate su canvas | Media | Open |
-| B-017 | App close timeout dopo operazioni DS pesanti | Bassa | Open |
-| UX-001 | Istruzioni disconnessione ripetute verbatim | Media | Open |
-| UX-002 | Clarification loop eccessivo per annotazioni | Media | Open |
-| UX-003 | Judge false positive su contenuto canvas non correlato | Media | Open |
-| UX-004 | Tool retry cards visibili all'utente (noise) | Bassa | Open |
-| UX-005 | Risposta vuota dopo image fill timeout | Bassa | Open |
-| P-006 | figma_set_image_fill timeout 60s costante | Media | Open |
+| B-014 | Annotation categories senza label leggibili | Media | **FIXED** (Run 4 — bridge code.js mappa label/name/title) |
+| B-015 | Error recovery narrato all'utente (retry interni visibili) | Media | **FIXED** (Run 4 — Silent Retry Policy in system prompt) |
+| B-016 | Immagini generate non auto-piazzate su canvas | Media | **FIXED** (Run 4 — Auto-Placement Rule in image-gen tools) |
+| B-017 | App close timeout dopo operazioni DS pesanti | Bassa | **FIXED** (Run 4 — 5s graceful shutdown deadline) |
+| UX-001 | Istruzioni disconnessione ripetute verbatim | Media | **FIXED** (Run 4 — Connection Guidance section) |
+| UX-002 | Clarification loop eccessivo per annotazioni | Media | **FIXED** (Run 4 — Annotation Defaults section) |
+| UX-003 | Judge false positive su contenuto canvas non correlato | Media | **FIXED** (Run 5) |
+| UX-004 | Tool retry cards visibili all'utente (noise) | Bassa | **FIXED** (Run 4 — collapse retry cards + badge) |
+| UX-005 | Risposta vuota dopo image fill timeout | Bassa | **FIXED** (Run 4 — timeout 60s→30s + host-side fetch) |
+| P-006 | figma_set_image_fill timeout 60s costante | Media | **FIXED** (Run 4 — host-side URL fetch + WS check) |
 
 ---
 
@@ -300,7 +300,7 @@ non può prevenire l'arrivo di eventi IPC futuri.
 
 ---
 
-## B-013: figma_restore_image non usato dall'agent (tool selection)
+## B-013: figma_restore_image non usato dall'agent (tool selection) — FIXED (Run 4)
 
 **Severita**: Bassa
 **Componente**: System prompt / tool description (system-prompt.ts)
@@ -562,35 +562,115 @@ QA recorder attivo per test generation. Bridge disconnesso durante test.
 
 | ID | Titolo | Severita | Status | Source |
 |----|--------|----------|--------|--------|
-| B-014 | Annotation categories senza label leggibili | Media | Open | Pass 1+2 |
-| B-015 | Error recovery narrato all'utente (retry interni visibili) | Media | Open | Pass 2 |
-| B-016 | Immagini generate non auto-piazzate su canvas | Media | Open | Pass 2 |
-| B-017 | App close timeout dopo operazioni DS pesanti | Bassa | Open | Pass 1 |
-| UX-001 | Istruzioni disconnessione ripetute verbatim | Media | Open | Pass 2 |
-| UX-002 | Clarification loop eccessivo per annotazioni | Media | Open | Pass 2 |
-| UX-003 | Judge false positive su contenuto canvas non correlato | Media | Open | Pass 2 |
-| UX-004 | Tool retry cards visibili all'utente (noise) | Bassa | Open | Pass 2 |
-| UX-005 | Risposta vuota dopo image fill timeout | Bassa | Open | Pass 1+2 |
-| P-006 | figma_set_image_fill timeout 60s costante | Media | Open | Log+Timing |
-| B-018 | Judge auto-trigger non si attiva dopo mutazioni Figma | Alta | Open | Manual Batch 3 |
-| B-019 | Judge enable checkboxes senza id (accessibilità) | Bassa | Open | Manual Batch 3 |
-| B-020 | figma_analyze/arrange_component_set non selezionati dall'agent | Media | Open | Manual Batch 3 |
-| B-021 | Suggestion chips non appaiono dopo risposte agent | Media | Open | Manual Batch 2 |
-| B-022 | Task panel count non resettato su New Chat | Bassa | Open | Manual Batch 2 |
-| B-023 | Cross-tab file context mismatch (Tab B riporta file di Tab A) | Bassa | Open | Manual Batch 2 |
-| B-024 | Toolbar dropdown senza ARIA role (accessibilità) | Bassa | Open | Manual Batch 1 |
-| B-025 | Per-tab model selection non persistito al restart | Media | Open | Manual Batch 4 |
-| B-026 | Tab B context bar mostra 0K con conversazione esistente | Bassa | Open | Manual Batch 4 |
-| UX-006 | Lint report 80+ warnings non riassunto | Bassa | Open | Pass 2 |
-| UX-007 | Tool card noise su JSX retry (3-5 card per render) | Bassa | Open | Pass 2 |
-| UX-008 | figma_execute usato al posto di tool specifici (workaround) | Bassa | Open | Pass 2 |
-| UX-009 | Screenshot verbosity in multi-step (16+ tool card in un turno) | Bassa | Open | Pass 2 |
-| UX-010 | Agent narra "Let me zoom in" come narrazione intermedia | Bassa | Open | Pass 2 |
-| UX-011 | figma_set_image_fill retry silenzioso (2x stessa URL) | Bassa | Open | Pass 2 |
+| B-014 | Annotation categories senza label leggibili | Media | **FIXED** (Run 4) | Pass 1+2 |
+| B-015 | Error recovery narrato all'utente (retry interni visibili) | Media | **FIXED** (Run 4) | Pass 2 |
+| B-016 | Immagini generate non auto-piazzate su canvas | Media | **FIXED** (Run 4) | Pass 2 |
+| B-017 | App close timeout dopo operazioni DS pesanti | Bassa | **FIXED** (Run 4) | Pass 1 |
+| UX-001 | Istruzioni disconnessione ripetute verbatim | Media | **FIXED** (Run 4) | Pass 2 |
+| UX-002 | Clarification loop eccessivo per annotazioni | Media | **FIXED** (Run 4) | Pass 2 |
+| UX-003 | Judge false positive su contenuto canvas non correlato | Media | **FIXED** (Run 5) | Pass 2 |
+| UX-004 | Tool retry cards visibili all'utente (noise) | Bassa | **FIXED** (Run 4) | Pass 2 |
+| UX-005 | Risposta vuota dopo image fill timeout | Bassa | **FIXED** (Run 4) | Pass 1+2 |
+| P-006 | figma_set_image_fill timeout 60s costante | Media | **FIXED** (Run 4) | Log+Timing |
+| B-018 | Judge auto-trigger non si attiva dopo mutazioni Figma | Alta | **FIXED** (Run 4) | Manual Batch 3 |
+| B-019 | Judge enable checkboxes senza id (accessibilità) | Bassa | **FIXED** (Run 4) | Manual Batch 3 |
+| B-020 | figma_analyze/arrange_component_set non selezionati dall'agent | Media | **FIXED** (Run 4) | Manual Batch 3 |
+| B-021 | Suggestion chips non appaiono dopo risposte agent | Media | **FIXED** (Run 4) | Manual Batch 2 |
+| B-022 | Task panel count non resettato su New Chat | Bassa | **FIXED** (Run 4) | Manual Batch 2 |
+| B-023 | Cross-tab file context mismatch (Tab B riporta file di Tab A) | Bassa | **FIXED** (Run 4) | Manual Batch 2 |
+| B-024 | Toolbar dropdown senza ARIA role (accessibilità) | Bassa | **FIXED** (Run 4) | Manual Batch 1 |
+| B-025 | Per-tab model selection non persistito al restart | Media | **FIXED** (Run 4) | Manual Batch 4 |
+| B-026 | Tab B context bar mostra 0K con conversazione esistente | Bassa | **FIXED** (Run 4) | Manual Batch 4 |
+| UX-006 | Lint report 80+ warnings non riassunto | Bassa | **FIXED** (Run 4) | Pass 2 |
+| UX-007 | Tool card noise su JSX retry (3-5 card per render) | Bassa | **FIXED** (Run 4 — Silent Retry Policy) | Pass 2 |
+| UX-008 | figma_execute usato al posto di tool specifici (workaround) | Bassa | **FIXED** (Run 4) | Pass 2 |
+| UX-009 | Screenshot verbosity in multi-step (16+ tool card in un turno) | Bassa | **FIXED** (Run 4 — collapse retry cards) | Pass 2 |
+| UX-010 | Agent narra "Let me zoom in" come narrazione intermedia | Bassa | **FIXED** (Run 4 — Silent Retry Policy) | Pass 2 |
+| UX-011 | figma_set_image_fill retry silenzioso (2x stessa URL) | Bassa | **FIXED** (Run 4 — host-side fetch refactor) | Pass 2 |
 
 ---
 
-## B-014: Annotation categories senza label leggibili
+## Run 4 (2026-04-08) — Post-fix Session
+
+Sessione di remediation focalizzata sui 24 bug aperti dopo Run 3. Tutti i fix sono nel
+working tree (non ancora committati). Pattern adottato: ogni fix è tagged inline con il
+bug ID corrispondente (es. `// B-018:`, `// B-021:`, `// B-026:`) per audit trail.
+
+**Risultati**: 23 bug fixati su 24 (96%). Solo **UX-003** (judge false positive su canvas
+non correlato) resta aperto — richiede refactor del judge harness per scoping screenshot
+al solo nodo target, considerato fuori scope per questa sessione.
+
+### Confronto Run 3 → Run 4
+
+| Metrica | Run 3 | Run 4 | Delta |
+|---------|-------|-------|-------|
+| Bug aperti | 24 | 1 | -23 |
+| Severità Alta aperte | 1 (B-018) | 0 | -1 |
+| Severità Media aperte | 11 | 1 (UX-003) | -10 |
+| Severità Bassa aperte | 12 | 0 | -12 |
+| UX backlog (UX-T1..T9) | 9 open | 0 | -9 |
+
+### Mapping fix → file (Run 4)
+
+| Bug | File:linea (principale) | Tipo di fix |
+|-----|-------------------------|-------------|
+| B-013 | `system-prompt.ts:294-308` | Image Restore/Undo Workflow section |
+| B-014 | `figma-desktop-bridge/code.js:3818-3824` | Bridge ritorna `{ id, name }` con fallback "Category {id}" |
+| B-015 | `system-prompt.ts:234-240` | Silent Retry Policy (vieta narrazione retry) |
+| B-016 | `system-prompt.ts:300-306` + `tools/image-gen.ts:66,188,251,451` | Auto-Placement Rule + promptGuidelines |
+| B-017 | `main/index.ts:133-143` | 5s hard deadline + forceExit timer su `before-quit` |
+| B-018 | `session-events.ts:250-259` + `ipc-handlers.ts:290-297` | Log warn + `judge:skipped` IPC quando connector null; fallback `getConnectedFileInfo()` |
+| B-019 | `renderer/index.html:177-214` | id univoci `judge-enable-*` + `<label for>` |
+| B-020 | `tools/components.ts:52-59` + `tools/discovery.ts:156-159,206-210` | promptGuidelines + Tool Selection Priorities table |
+| B-021 | `session-events.ts:313-316` | Queued prompts ora chiamano `suggester.trackUserPrompt()` |
+| B-022 | `renderer/app.js:793-810` | `clearChat()` resetta `tab._tasks` e DOM del task panel |
+| B-023 | `tools/core.ts:97-104,111-118` | `figma_get_file_status` e `get_selection` usano `deps.fileKey` (slot-scoped) |
+| B-024 | `renderer/index.html:78-88` | `aria-haspopup`, `aria-expanded`, `aria-label`, `aria-pressed`, `aria-hidden` |
+| B-025 | `renderer/settings.js:352-358` | Rimosso force-switch a modello globale; slot modelConfig è source-of-truth |
+| B-026 | `app-state-persistence.ts:14-15` + `slot-manager.ts:58-59,311-313` + `session-events.ts:178-179` | `lastContextTokens` persistito nel PersistedSlot e ripristinato al reload |
+| P-006 | `figma/websocket-connector.ts:272-274` + `tools/manipulation.ts:124-159` | Timeout 60s→30s; URL fetch host-side (15s); fail-fast se Bridge non connesso |
+| UX-001 | `system-prompt.ts:318-323` | Connection Guidance section ("As I mentioned earlier...") |
+| UX-002 | `system-prompt.ts:311-317` | Annotation Defaults section (target=ultimo, category=Development) |
+| UX-004 | `renderer/app.js:512-530` + `styles.css:975-984` | Collapse error tool cards in badge `retry ×N` |
+| UX-005 | (vedi P-006) | Timeout reduction libera budget per response text |
+| UX-006 | `tools/lint.ts:275-310` | Lint truncation: top-N findings per severity con `hasMore` flag |
+| UX-007/009/010/011 | `system-prompt.ts` (varie sezioni) | Coperti da Silent Retry Policy + Tool Selection Priorities |
+| UX-008 | `system-prompt.ts:327-329` | Tool Selection Priorities — `figma_execute` solo come last resort |
+
+### Test aggiornati
+
+- `tests/unit/figma/websocket-connector.test.ts` — timeout 60s→30s (P-006)
+- `tests/unit/main/scoped-connector.test.ts` — timeout 60s→30s (P-006)
+- `tests/unit/tools/manipulation.test.ts` — `figma_set_image_fill` con host-side fetch (P-006/UX-011)
+- `tests/unit/main/agent-playbook-recorded.test.ts` — `imageUrl` param ora passa base64 (P-006 refactor)
+
+### UX-003: FIXED (Run 5 — 2026-04-08)
+
+Il judge harness ora estrae i nodeId mutati durante ogni turn e li passa come target
+a `figma_screenshot` nel prefetch. Lo screenshot risultante è cropato sul nodo appena
+creato/modificato, quindi i micro-judge non valutano più contenuto canvas non correlato.
+
+**Implementazione**:
+1. `session-events.ts:82-129` — `extractNodeIdsFromInput` (legge `nodeId`/`nodeIds`/`parentId` dagli input mutazione) + `extractNodeIdsFromResult` (regex `"(id|nodeId)":"N:M"` sui result JSON per i tool di creazione). Accumulati in `turnMutatedNodeIds` per turn.
+2. `slot-manager.ts:60-64` + `157` — nuovo campo `lastTurnMutatedNodeIds` persistito sullo slot per supportare force re-run del judge.
+3. `judge-harness.ts:118,187-199,392-406` — firma estesa con `turnMutatedNodeIds: string[]`; il primo id è passato a `prefetchForMicroJudges`. `forceRerunJudge` riusa `slot.lastTurnMutatedNodeIds`.
+4. `context-prefetch.ts:140-170` — `prefetchForMicroJudges` accetta `targetNodeId?`. Quando presente, chiama `figma_screenshot { nodeId }` invece di `{ zoom: 2 }` e lo propaga nel `PrefetchedContext.targetNodeId`.
+5. `orchestrator.ts:366-378` — quando `targetNodeId` è settato, il prompt del micro-judge include una sezione esplicita: *"The attached screenshot shows ONLY node X — do NOT flag elements absent from the screenshot as missing"*.
+6. `types.ts` — `PrefetchedContext.targetNodeId?: string | null`.
+
+**Test**: 4 nuovi test in `tests/unit/main/subagent/context-prefetch.test.ts` che verificano:
+- screenshot viewport (no targetNodeId)
+- screenshot scoped con `{ nodeId: "128:445" }`
+- propagazione di `targetNodeId` nel context
+- default null quando omesso
+
+Tutti i 206 test subagent passano, 1800 test unit totali passano, typecheck clean.
+
+**File**: `src/main/session-events.ts`, `src/main/slot-manager.ts`, `src/main/subagent/judge-harness.ts`, `src/main/subagent/context-prefetch.ts`, `src/main/subagent/orchestrator.ts`, `src/main/subagent/types.ts`, `tests/unit/main/subagent/context-prefetch.test.ts` + patch a `judge-harness.test.ts` e `judge-harness-integration.test.ts` per il nuovo parametro.
+
+---
+
+## B-014: Annotation categories senza label leggibili — FIXED (Run 4)
 
 **Severita**: Media
 **Componente**: Tools (annotations.ts) / Plugin (code.js)
@@ -612,7 +692,7 @@ compression extension o nel tool stesso.
 
 ---
 
-## B-015: Error recovery narrato all'utente (retry interni visibili)
+## B-015: Error recovery narrato all'utente (retry interni visibili) — FIXED (Run 4)
 
 **Severita**: Media
 **Componente**: Agent behavior / System prompt
@@ -636,7 +716,7 @@ fail, explain the limitation without exposing internal error details."
 
 ---
 
-## B-016: Immagini generate non auto-piazzate su canvas
+## B-016: Immagini generate non auto-piazzate su canvas — FIXED (Run 4)
 
 **Severita**: Media
 **Componente**: Agent behavior / Image gen tools
@@ -659,7 +739,7 @@ asking the user. Mention where you placed it in the response."
 
 ---
 
-## B-017: App close timeout dopo operazioni DS pesanti
+## B-017: App close timeout dopo operazioni DS pesanti — FIXED (Run 4)
 
 **Severita**: Bassa
 **Componente**: Main process (agent.ts / index.ts)
@@ -684,7 +764,7 @@ app.on('before-quit', async () => {
 
 ---
 
-## UX-001: Istruzioni disconnessione ripetute verbatim
+## UX-001: Istruzioni disconnessione ripetute verbatim — FIXED (Run 4)
 
 **Severita**: Media
 **Componente**: Agent behavior / System prompt
@@ -696,7 +776,7 @@ offer alternative actions instead of repeating the full setup steps."
 
 ---
 
-## UX-002: Clarification loop eccessivo per annotazioni
+## UX-002: Clarification loop eccessivo per annotazioni — FIXED (Run 4)
 
 **Severita**: Media
 **Componente**: Agent behavior / System prompt
@@ -721,7 +801,7 @@ creato/modificato, non l'intero canvas. Usare `nodeId` nel screenshot se disponi
 
 ---
 
-## UX-004: Tool retry cards visibili all'utente (noise)
+## UX-004: Tool retry cards visibili all'utente (noise) — FIXED (Run 4)
 
 **Severita**: Bassa
 **Componente**: Renderer (app.js)
@@ -733,7 +813,7 @@ che hanno status error, mostrando solo "Tool X (N retries)" + la card finale.
 
 ---
 
-## UX-005: Risposta vuota dopo image fill timeout
+## UX-005: Risposta vuota dopo image fill timeout — FIXED (Run 4)
 
 **Severita**: Bassa
 **Componente**: Main process / Renderer
@@ -747,7 +827,7 @@ al modello di rispondere.
 
 ---
 
-## P-006: figma_set_image_fill timeout 60s costante
+## P-006: figma_set_image_fill timeout 60s costante — FIXED (Run 4)
 
 **Severita**: Media
 **Componente**: Figma Core (websocket-server.ts)
@@ -765,7 +845,7 @@ Se disconnesso, restituire errore immediato: "Figma Bridge not connected".
 
 ---
 
-## B-018: Judge auto-trigger non si attiva dopo mutazioni Figma
+## B-018: Judge auto-trigger non si attiva dopo mutazioni Figma — FIXED (Run 4)
 
 **Severita**: Alta
 **Componente**: Main process (session-events.ts, judge-harness.ts)
@@ -811,7 +891,7 @@ dal disco, oppure il WS handshake non è completato quando il turno finisce.
 
 ---
 
-## B-019: Judge enable checkboxes senza id (accessibilità)
+## B-019: Judge enable checkboxes senza id (accessibilità) — FIXED (Run 4)
 
 **Severita**: Bassa
 **Componente**: Renderer (settings.js)
@@ -824,7 +904,7 @@ l'automazione dei test.
 
 ---
 
-## B-020: figma_analyze/arrange_component_set non selezionati dall'agent
+## B-020: figma_analyze/arrange_component_set non selezionati dall'agent — FIXED (Run 4)
 
 **Severita**: Media
 **Componente**: System prompt / Tool descriptions
@@ -840,7 +920,7 @@ component sets, prefer figma_analyze_component_set and figma_arrange_component_s
 
 ---
 
-## B-021: Suggestion chips non appaiono dopo risposte agent
+## B-021: Suggestion chips non appaiono dopo risposte agent — FIXED (Run 4)
 
 **Severita**: Media
 **Componente**: Main process (prompt-suggester.ts, session-events.ts)
@@ -857,7 +937,7 @@ il suggester è disabilitato quando il modello non è Claude.
 
 ---
 
-## B-022: Task panel count non resettato su New Chat
+## B-022: Task panel count non resettato su New Chat — FIXED (Run 4)
 
 **Severita**: Bassa
 **Componente**: Renderer (app.js) / Main (session-store.ts)
@@ -868,7 +948,7 @@ dalla sessione precedente. Il task store non viene pulito dal reset.
 
 ---
 
-## B-023: Cross-tab file context mismatch
+## B-023: Cross-tab file context mismatch — FIXED (Run 4)
 
 **Severita**: Bassa
 **Componente**: Main process (scoped-connector.ts)
@@ -891,15 +971,15 @@ Ogni task copre uno o più finding UX e linka i bug entry esistenti.
 
 | ID | Task | Priorità | Effort | Bug correlati | Status |
 |----|------|----------|--------|---------------|--------|
-| **UX-T1** | Fix `figma_restore_image` tool awareness | P1 | S | B-013, UX (script 11/17) | Open |
-| **UX-T2** | Auto-place generated images on canvas | P1 | S | B-016 | Open |
-| **UX-T3** | Suppress internal error narration durante retry | P2 | M | B-015, UX-007 | Open |
-| **UX-T4** | Collapse retry tool cards nel renderer | P2 | M | UX-004, UX-007, UX-009, UX-011 | Open |
-| **UX-T5** | Reduce annotation clarification friction | P2 | S | UX-002, B-014 | Open |
-| **UX-T6** | De-duplicate disconnected state guidance | P2 | S | UX-001 | Open |
-| **UX-T7** | Human-readable annotation categories | P3 | S | B-014 | Open |
-| **UX-T8** | Lint report summarization (top-N expandable) | P3 | M | UX-006 | Open |
-| **UX-T9** | Strengthen tool descriptions per tool selection | P3 | S | B-020, UX-008 | Open |
+| **UX-T1** | Fix `figma_restore_image` tool awareness | P1 | S | B-013, UX (script 11/17) | **FIXED** (Run 4) |
+| **UX-T2** | Auto-place generated images on canvas | P1 | S | B-016 | **FIXED** (Run 4) |
+| **UX-T3** | Suppress internal error narration durante retry | P2 | M | B-015, UX-007 | **FIXED** (Run 4) |
+| **UX-T4** | Collapse retry tool cards nel renderer | P2 | M | UX-004, UX-007, UX-009, UX-011 | **FIXED** (Run 4) |
+| **UX-T5** | Reduce annotation clarification friction | P2 | S | UX-002, B-014 | **FIXED** (Run 4) |
+| **UX-T6** | De-duplicate disconnected state guidance | P2 | S | UX-001 | **FIXED** (Run 4) |
+| **UX-T7** | Human-readable annotation categories | P3 | S | B-014 | **FIXED** (Run 4) |
+| **UX-T8** | Lint report summarization (top-N expandable) | P3 | M | UX-006 | **FIXED** (Run 4) |
+| **UX-T9** | Strengthen tool descriptions per tool selection | P3 | S | B-020, UX-008 | **FIXED** (Run 4) |
 
 **Legenda effort**: S = ≤1 giorno, M = 1-3 giorni, L = >3 giorni
 

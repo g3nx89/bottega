@@ -972,6 +972,18 @@ body {
   white-space: nowrap;
 }
 
+/* UX-004: retry badge shown on collapsed tool-card after failed attempts */
+.tool-retry-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  margin-left: 6px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Spinner */
 .tool-spinner {
   width: 12px;

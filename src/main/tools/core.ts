@@ -94,11 +94,16 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
       parameters: Type.Object({}),
       async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
         const connected = wsServer.isClientConnected();
-        const fileInfo = wsServer.getConnectedFileInfo();
         const files = wsServer.getConnectedFiles();
-        const dsCache = deps.designSystemCache.get(true, deps.fileKey);
+        // B-023: Report the file bound to THIS slot (deps.fileKey) instead of the
+        // globally-active plugin file. Otherwise Tab B would show Tab A's file name
+        // whenever the plugin focus is on a different tab's file.
+        const slotFileKey = deps.fileKey;
+        const scopedFile = files.find((f) => f.fileKey === slotFileKey);
+        const fileInfo = scopedFile ?? wsServer.getConnectedFileInfo();
+        const dsCache = deps.designSystemCache.get(true, slotFileKey);
         const dsStatus = dsCache?.dsStatus ?? 'unknown';
-        return textResult({ connected, fileInfo, files, dsStatus });
+        return textResult({ connected, fileInfo, files, dsStatus, slotFileKey });
       },
     },
     {
@@ -108,6 +113,13 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
       promptSnippet: 'figma_get_selection: get currently selected nodes',
       parameters: Type.Object({}),
       async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
+        // B-023: Only return the selection when it belongs to this slot's file,
+        // otherwise Tab B would mirror Tab A's current selection.
+        const slotFileKey = deps.fileKey;
+        const activeInfo = wsServer.getConnectedFileInfo();
+        if (slotFileKey && activeInfo && activeInfo.fileKey !== slotFileKey) {
+          return textResult({ nodes: [], note: 'No selection for this tab (plugin focus is on another file).' });
+        }
         const selection = wsServer.getCurrentSelection();
         return textResult(selection);
       },

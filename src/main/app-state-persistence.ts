@@ -11,6 +11,8 @@ export interface PersistedSlot {
   fileName: string;
   modelConfig: { provider: string; modelId: string };
   promptQueue: { id: string; text: string; addedAt: number }[];
+  /** Last known input-token count. Restored so the context bar reflects the saved state. B-026. */
+  lastContextTokens?: number;
 }
 
 export interface AppState {

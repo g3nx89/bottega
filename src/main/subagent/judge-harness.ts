@@ -110,6 +110,12 @@ export async function runJudgeHarness(
   slot: SessionSlot,
   settings: SubagentSettings,
   turnToolNames: string[],
+  /**
+   * UX-003: node IDs mutated/created by the turn under evaluation. The first ID
+   * is passed to `figma_screenshot` during prefetch so the judge sees only the
+   * target node instead of the whole canvas. Pass `[]` if nothing specific.
+   */
+  turnMutatedNodeIds: string[],
   parentSignal: AbortSignal,
   callbacks: JudgeHarnessCallbacks,
 ): Promise<JudgeVerdict | null> {
@@ -179,9 +185,20 @@ export async function runJudgeHarness(
 
       // Selective prefetch: only data needed by current judges
       const dataNeeds = getDataNeedsForJudges(currentJudgeIds);
+      // UX-003: pick the first mutated nodeId as the screenshot target. When the
+      // turn touched multiple nodes we still scope to the first one — the judge
+      // prompts explicitly mention this limitation so findings are always framed
+      // relative to the target node.
+      const targetNodeId = turnMutatedNodeIds[0];
       let prefetchedData: PrefetchedContext;
       try {
-        prefetchedData = await prefetchForMicroJudges(readOnlyTools, dataNeeds, signal, connector.fileKey);
+        prefetchedData = await prefetchForMicroJudges(
+          readOnlyTools,
+          dataNeeds,
+          signal,
+          connector.fileKey,
+          targetNodeId,
+        );
       } catch (err: unknown) {
         if ((err as Error)?.name === 'AbortError') break;
         log.warn({ err, slotId: slot.id }, 'Micro-judge prefetch failed');
@@ -371,5 +388,18 @@ export async function forceRerunJudge(
   const slotView = Object.create(slot) as SessionSlot;
   slotView.judgeOverride = true;
 
-  return runJudgeHarness(infra, connector, slotView, overriddenSettings, toolNames, parentSignal, callbacks);
+  // UX-003: re-use the last turn's captured mutation nodeIds so a manual
+  // re-run still scopes the screenshot correctly.
+  const mutatedNodeIds = slot.lastTurnMutatedNodeIds ?? [];
+
+  return runJudgeHarness(
+    infra,
+    connector,
+    slotView,
+    overriddenSettings,
+    toolNames,
+    mutatedNodeIds,
+    parentSignal,
+    callbacks,
+  );
 }

@@ -9,6 +9,8 @@ interface SlotInfoDTO {
   isConnected: boolean;
   modelConfig: { provider: string; modelId: string };
   queueLength: number;
+  /** Last known input-token count — restores the context bar after app restart. B-026. */
+  lastContextTokens?: number;
 }
 
 /** Queued prompt entry. */

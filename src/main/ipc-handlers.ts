@@ -287,8 +287,14 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     persistSlotSession,
     contextSizes: CONTEXT_SIZES,
     infra,
-    getConnectorForSlot: (slot: SessionSlot) =>
-      slot.fileKey ? new ScopedConnector(infra.wsServer, slot.fileKey) : null,
+    getConnectorForSlot: (slot: SessionSlot) => {
+      // B-018: Prefer the slot's bound fileKey. If the slot has never been bound
+      // (e.g. judge toggled on before any fileConnected event landed) but there's
+      // a live Bridge connection, fall back to the currently active file so the
+      // judge can still run against real screenshots.
+      const fileKey = slot.fileKey || infra.wsServer.getConnectedFileInfo()?.fileKey;
+      return fileKey ? new ScopedConnector(infra.wsServer, fileKey) : null;
+    },
   });
   const { subscribeToSlot } = eventRouter;
 

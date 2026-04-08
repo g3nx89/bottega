@@ -87,6 +87,7 @@ export function createMockWsServer() {
   return {
     sendCommand: vi.fn().mockResolvedValue({ success: true }),
     isClientConnected: vi.fn().mockReturnValue(true),
+    isFileConnected: vi.fn().mockReturnValue(true),
     isStarted: vi.fn().mockReturnValue(true),
     getConnectedFileInfo: vi.fn().mockReturnValue({
       fileKey: 'abc123',

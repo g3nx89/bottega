@@ -152,6 +152,7 @@ describe('Judge Harness', () => {
         makeSlot() as any,
         { ...defaultSettings, judgeMode: 'off' },
         ['figma_set_fills'],
+        [],
         new AbortController().signal,
         mockCallbacks(),
       );
@@ -165,6 +166,7 @@ describe('Judge Harness', () => {
         makeSlot({ judgeOverride: false }) as any,
         defaultSettings,
         ['figma_set_fills'],
+        [],
         new AbortController().signal,
         mockCallbacks(),
       );
@@ -178,6 +180,7 @@ describe('Judge Harness', () => {
         makeSlot() as any,
         defaultSettings,
         ['figma_screenshot', 'figma_get_file_data'],
+        [],
         new AbortController().signal,
         mockCallbacks(),
       );
@@ -201,6 +204,7 @@ describe('Judge Harness', () => {
         makeSlot() as any,
         defaultSettings,
         ['figma_set_fills', 'figma_screenshot'],
+        [],
         new AbortController().signal,
         cbs,
       );
@@ -226,6 +230,7 @@ describe('Judge Harness', () => {
         slot as any,
         { ...defaultSettings, autoRetry: false },
         ['figma_set_fills'],
+        [],
         new AbortController().signal,
         cbs,
       );
@@ -300,6 +305,7 @@ describe('Judge Harness', () => {
         slot as any,
         { ...defaultSettings, autoRetry: true, maxRetries: 2 },
         ['figma_set_fills'],
+        [],
         new AbortController().signal,
         cbs,
       );

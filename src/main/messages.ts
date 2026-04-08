@@ -50,6 +50,8 @@ export const MSG_PLUGIN_NOT_FOUND = 'Plugin files not found in app bundle.';
 export const MSG_PLUGIN_UPDATED = (pluginVersion: number, requiredVersion: number) =>
   `The Figma plugin has been updated (v${pluginVersion} \u2192 v${requiredVersion}). ` +
   'Close the plugin in Figma and re-run it from Plugins \u2192 Development \u2192 Bottega Bridge.';
+export const MSG_BRIDGE_NOT_CONNECTED = (fileKey: string) =>
+  `Figma Bridge not connected for file ${fileKey} \u2014 open the Bridge plugin in Figma Desktop on this file, then retry.`;
 
 // ── Diagnostics ──────────────────────────────
 

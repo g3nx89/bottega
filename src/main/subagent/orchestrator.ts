@@ -364,9 +364,18 @@ export async function runMicroJudgeBatch(
       // Screenshot is passed as an image attachment via session.prompt({ images }), not as text
       const hasScreenshot = prefetchedData.screenshot && def.dataNeeds.includes('screenshot');
       if (hasScreenshot) {
-        dataSections.push(
-          '## Screenshot\nA screenshot of the current design is attached as an image. Evaluate visually.',
-        );
+        // UX-003: when the screenshot is scoped to a specific node the judges
+        // must frame findings about THAT node — otherwise they flag unrelated
+        // pre-existing canvas content as "missing" or "misaligned".
+        if (prefetchedData.targetNodeId) {
+          dataSections.push(
+            `## Screenshot (scoped to target node ${prefetchedData.targetNodeId})\nThe attached screenshot shows ONLY the node that was just created or modified (node ${prefetchedData.targetNodeId}), not the entire canvas. Evaluate this criterion RELATIVE TO THIS NODE only. Do NOT flag elements that are absent from the screenshot as "missing" — they exist elsewhere on the canvas and are out of scope for this evaluation.`,
+          );
+        } else {
+          dataSections.push(
+            '## Screenshot\nA screenshot of the current design is attached as an image. Evaluate visually.',
+          );
+        }
       }
       if (prefetchedData.lint && def.dataNeeds.includes('lint')) {
         dataSections.push(`## Lint Results\n${prefetchedData.lint.slice(0, 5_000)}`);

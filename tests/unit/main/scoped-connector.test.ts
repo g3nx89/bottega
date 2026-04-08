@@ -7,6 +7,7 @@ function makeMockWsServer() {
   return {
     sendCommand: vi.fn().mockResolvedValue({ success: true }),
     isClientConnected: vi.fn().mockReturnValue(true),
+    isFileConnected: vi.fn().mockReturnValue(true),
   } as any;
 }
 
@@ -223,15 +224,15 @@ describe('ScopedConnector', () => {
   });
 
   // ============================================================================
-  // setImageFill uses 60000 timeout
+  // setImageFill uses 30s timeout (was 60s — reduced for UX-005 / P-006)
   // ============================================================================
 
-  it('setImageFill passes correct params with 60000 timeout', async () => {
+  it('setImageFill passes correct params with 30000 timeout', async () => {
     await connector.setImageFill(['n1', 'n2'], 'base64data==', 'FIT');
     expect(mockWsServer.sendCommand).toHaveBeenCalledWith(
       'SET_IMAGE_FILL',
       { nodeIds: ['n1', 'n2'], imageData: 'base64data==', scaleMode: 'FIT' },
-      60000,
+      30000,
       FILE_KEY,
     );
   });
@@ -240,5 +241,43 @@ describe('ScopedConnector', () => {
     await connector.setImageFill(['n1'], 'imgdata');
     const [, params] = mockWsServer.sendCommand.mock.calls[0];
     expect(params.scaleMode).toBe('FILL');
+  });
+
+  // ============================================================================
+  // Pattern 1 fail-fast precheck (P-006 / B-008 / B-018 family)
+  // ============================================================================
+
+  describe('fail-fast precheck when Bridge is not connected', () => {
+    it('throws immediately on sendCommand when isFileConnected returns false', async () => {
+      mockWsServer.isFileConnected.mockReturnValue(false);
+      await expect(connector.setNodeFills('node1', [])).rejects.toThrow(/Bridge not connected/);
+      expect(mockWsServer.sendCommand).not.toHaveBeenCalled();
+    });
+
+    it('blocks createFromJsx before sendCommand (would otherwise wait 60s)', async () => {
+      mockWsServer.isFileConnected.mockReturnValue(false);
+      await expect(connector.createFromJsx({ type: 'Frame', props: {}, children: [] } as any)).rejects.toThrow(
+        /Bridge not connected/,
+      );
+      expect(mockWsServer.sendCommand).not.toHaveBeenCalled();
+    });
+
+    it('blocks lintDesign without waiting the 120s timeout', async () => {
+      mockWsServer.isFileConnected.mockReturnValue(false);
+      await expect(connector.lintDesign()).rejects.toThrow(/Bridge not connected/);
+      expect(mockWsServer.sendCommand).not.toHaveBeenCalled();
+    });
+
+    it('checks isFileConnected with the slot fileKey', async () => {
+      mockWsServer.isFileConnected.mockReturnValue(false);
+      await connector.setNodeFills('n', []).catch(() => {});
+      expect(mockWsServer.isFileConnected).toHaveBeenCalledWith(FILE_KEY);
+    });
+
+    it('passes through when isFileConnected returns true', async () => {
+      mockWsServer.isFileConnected.mockReturnValue(true);
+      await expect(connector.setNodeFills('n', [])).resolves.toBeDefined();
+      expect(mockWsServer.sendCommand).toHaveBeenCalled();
+    });
   });
 });

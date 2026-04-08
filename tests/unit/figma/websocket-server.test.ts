@@ -48,6 +48,18 @@ describe('FigmaWebSocketServer', () => {
       expect(info!.currentPage).toBe('Page 1');
     });
 
+    it('isFileConnected returns true only for an OPEN client matching the fileKey', async () => {
+      expect(server.isFileConnected('abc123')).toBe(false);
+
+      await client.connect(port, 'abc123', 'Test File');
+      expect(server.isFileConnected('abc123')).toBe(true);
+      expect(server.isFileConnected('unknown-key')).toBe(false);
+
+      await client.close();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(server.isFileConnected('abc123')).toBe(false);
+    });
+
     it('client disconnect makes isClientConnected false after grace period', async () => {
       await client.connect(port, 'abc123', 'Test File');
       expect(server.isClientConnected()).toBe(true);

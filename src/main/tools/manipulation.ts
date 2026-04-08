@@ -106,7 +106,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_set_image_fill',
       label: 'Set Image Fill',
-      description: 'Set an image as the fill of one or more nodes. Provide either a URL or base64-encoded image data.',
+      description:
+        'Set an image as the fill of one or more nodes. Provide either imageUrl (fetched host-side, 15s timeout, must return an image/* content-type) or base64-encoded image data.',
       promptSnippet: 'figma_set_image_fill: apply an image fill to nodes (from URL or base64)',
       parameters: Type.Object({
         nodeIds: Type.Array(Type.String(), { description: 'Node IDs to apply image fill to' }),
@@ -118,9 +119,62 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
           }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params: any, signal, _onUpdate, _ctx) {
+        // Fail fast if the Bridge plugin is not connected — otherwise the WS command
+        // waits the full timeout before surfacing the error, starving the turn
+        // budget and producing an empty user-facing response (P-006 / UX-005).
+        if (!deps.wsServer.getConnectedFileInfo()) {
+          return textResult({
+            success: false,
+            error:
+              'Figma Bridge not connected — open the Bridge plugin in Figma Desktop, then retry figma_set_image_fill.',
+          });
+        }
+
+        // UX-011: The Bridge pipeline only accepts base64 — ui.html calls atob() on whatever
+        // string it receives. Previously passing imageUrl here resulted in atob() throwing
+        // inside the plugin and the host waiting the full timeout with zero feedback.
+        // We now fetch the URL host-side, convert to base64, and send bytes.
+        let imageData: string = params.base64 ?? '';
+        if (!imageData && params.imageUrl) {
+          try {
+            const fetchController = new AbortController();
+            const fetchTimer = setTimeout(() => fetchController.abort(), 15000);
+            // Link the fetch abort to the tool's abort signal so user-cancel also cancels the fetch.
+            const onToolAbort = () => fetchController.abort();
+            signal?.addEventListener('abort', onToolAbort);
+            let res: Response;
+            try {
+              res = await fetch(params.imageUrl, { signal: fetchController.signal });
+            } finally {
+              clearTimeout(fetchTimer);
+              signal?.removeEventListener('abort', onToolAbort);
+            }
+            if (!res.ok) {
+              return textResult({
+                success: false,
+                error: `Failed to fetch imageUrl: HTTP ${res.status} ${res.statusText}`,
+              });
+            }
+            const contentType = res.headers.get('content-type') || '';
+            if (contentType && !contentType.startsWith('image/')) {
+              return textResult({
+                success: false,
+                error: `imageUrl did not return an image (content-type: ${contentType})`,
+              });
+            }
+            const buf = Buffer.from(await res.arrayBuffer());
+            imageData = buf.toString('base64');
+          } catch (err: any) {
+            const msg = err?.name === 'AbortError' ? 'timed out after 15s' : err?.message || String(err);
+            return textResult({ success: false, error: `Failed to fetch imageUrl: ${msg}` });
+          }
+        }
+        if (!imageData) {
+          return textResult({ success: false, error: 'Provide either imageUrl or base64' });
+        }
+
         return operationQueue.execute(async () => {
-          const imageData = params.base64 ?? params.imageUrl ?? '';
           const result = await connector.setImageFill(params.nodeIds, imageData, params.scaleMode ?? 'FILL');
           return textResult(result);
         });

@@ -40,6 +40,13 @@ afterEach(() => {
 //    times out after 60 s, agent falls back to figma_generate_image.
 // ═══════════════════════════════════════════════════════════
 
+// UX-011 NOTE: Previously these tests passed `imageUrl` and relied on
+// connector.setImageFill rejecting with the 60 s WS timeout error. That code
+// path no longer exists — the tool now fetches the URL host-side in
+// manipulation.ts and only passes bytes to the connector. To preserve the
+// fallback-chain intent of these recorded tests (connector failure → agent
+// falls back to generate_image), we now drive the same failure by passing
+// `base64` directly. The connector rejection is still the thing being tested.
 describe('Image fill fallback chain (recorded from QA)', () => {
   it('set_image_fill timeout error text is surfaced in tool result', async () => {
     const connector = createMockConnector();
@@ -56,7 +63,7 @@ describe('Image fill fallback chain (recorded from QA)', () => {
       when('Apply image fill to node 136:497', [
         calls('figma_set_image_fill', {
           nodeIds: ['136:497'],
-          imageUrl: 'https://example.com/photo.jpg',
+          base64: 'ZmFrZS1iYXNlNjQ=',
         }),
         says('The image fill timed out. I will use image generation instead.'),
       ]),
@@ -67,7 +74,7 @@ describe('Image fill fallback chain (recorded from QA)', () => {
     // Error text is surfaced in the result content (propagateErrors:false catches and returns)
     expect(results[0].text).toContain('SET_IMAGE_FILL timed out after 60000ms');
     // connector.setImageFill was called (it threw — tool was reached)
-    expect(connector.setImageFill).toHaveBeenCalledWith(['136:497'], 'https://example.com/photo.jpg', 'FILL');
+    expect(connector.setImageFill).toHaveBeenCalledWith(['136:497'], 'ZmFrZS1iYXNlNjQ=', 'FILL');
   });
 
   it('agent falls back to generate_image after set_image_fill timeout', async () => {
@@ -107,7 +114,7 @@ describe('Image fill fallback chain (recorded from QA)', () => {
       when('Apply image fill to hero node', [
         calls('figma_set_image_fill', {
           nodeIds: ['136:497'],
-          imageUrl: 'https://example.com/hero.jpg',
+          base64: 'ZmFrZS1iYXNlNjQ=',
         }),
         says('Image fill timed out. Falling back to AI image generation.'),
       ]),
@@ -165,7 +172,7 @@ describe('Image fill fallback chain (recorded from QA)', () => {
       when('Try image fill', [
         calls('figma_set_image_fill', {
           nodeIds: ['136:497'],
-          imageUrl: 'https://example.com/img.jpg',
+          base64: 'ZmFrZS1iYXNlNjQ=',
         }).chain((result) => {
           capturedFallbackResult = result.text;
         }),
@@ -527,7 +534,7 @@ describe('figma_set_image_fill WS timeout behavior (recorded from QA)', () => {
       when('Set image fill that will time out', [
         calls('figma_set_image_fill', {
           nodeIds: ['136:497'],
-          imageUrl: 'https://example.com/slow.jpg',
+          base64: 'ZmFrZS1iYXNlNjQ=',
         }),
         says('Set image fill timed out.'),
       ]),
@@ -551,11 +558,11 @@ describe('figma_set_image_fill WS timeout behavior (recorded from QA)', () => {
 
     await t.run(
       when('First image fill attempt', [
-        calls('figma_set_image_fill', { nodeIds: ['136:497'], imageUrl: 'https://example.com/1.jpg' }),
+        calls('figma_set_image_fill', { nodeIds: ['136:497'], base64: 'Zmlyc3Q=' }),
         says('First attempt timed out.'),
       ]),
       when('Second image fill attempt', [
-        calls('figma_set_image_fill', { nodeIds: ['136:497'], imageUrl: 'https://example.com/2.jpg' }),
+        calls('figma_set_image_fill', { nodeIds: ['136:497'], base64: 'c2Vjb25k' }),
         says('Second attempt also timed out.'),
       ]),
     );
@@ -591,7 +598,7 @@ describe('figma_set_image_fill WS timeout behavior (recorded from QA)', () => {
 
     await t.run(
       when('Try image fill, then continue with solid fill and screenshot', [
-        calls('figma_set_image_fill', { nodeIds: ['136:497'], imageUrl: 'https://example.com/img.jpg' }),
+        calls('figma_set_image_fill', { nodeIds: ['136:497'], base64: 'ZmFrZS1iYXNlNjQ=' }),
         calls('figma_set_fills', { nodeId: '136:497', fills: [{ type: 'SOLID', color: '#CCCCCC' }] }),
         calls('figma_screenshot', { nodeId: '136:497' }),
         says('Image fill failed but I applied a solid fill instead.'),
@@ -633,7 +640,7 @@ describe('figma_set_image_fill WS timeout behavior (recorded from QA)', () => {
 
     await t.run(
       when('Queue should survive a timeout error', [
-        calls('figma_set_image_fill', { nodeIds: ['1:1'], imageUrl: 'https://example.com/img.jpg' }),
+        calls('figma_set_image_fill', { nodeIds: ['1:1'], base64: 'ZmFrZS1iYXNlNjQ=' }),
         calls('figma_set_fills', { nodeId: '1:2', fills: [] }),
         calls('figma_set_text', { nodeId: '1:3', text: 'After timeout' }),
         says('All queued mutations ran despite the initial timeout.'),

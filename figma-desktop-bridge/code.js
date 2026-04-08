@@ -3815,7 +3815,13 @@ figma.ui.onmessage = async (msg) => {
       console.log('🌉 [Desktop Bridge] Fetching annotation categories');
 
       var categories = await figma.annotations.getAnnotationCategoriesAsync();
-      var result = categories.map(function(c) { return { id: c.id, name: c.name }; });
+      // Figma plugin API shapes differ across versions — try label/name/title.
+      // Always return a readable `name` field so the agent doesn't have to expose raw IDs like "51:0".
+      var result = categories.map(function(c) {
+        var readable = c.label || c.name || c.title || '';
+        if (!readable) readable = 'Category ' + c.id;
+        return { id: c.id, name: readable, label: readable, color: c.color || null };
+      });
 
       console.log('🌉 [Desktop Bridge] Found ' + result.length + ' annotation categories');
 

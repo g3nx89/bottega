@@ -9,8 +9,12 @@ vi.mock('../../../../src/figma/logger.js', () => ({
   createChildLogger: () => mockLog,
 }));
 
-import { formatBriefing, prefetchCommonContext } from '../../../../src/main/subagent/context-prefetch.js';
-import type { PrefetchedContext } from '../../../../src/main/subagent/types.js';
+import {
+  formatBriefing,
+  prefetchCommonContext,
+  prefetchForMicroJudges,
+} from '../../../../src/main/subagent/context-prefetch.js';
+import type { PrefetchDataKey, PrefetchedContext } from '../../../../src/main/subagent/types.js';
 
 function makeMockTools(overrides: Record<string, any> = {}) {
   const defaultResults: Record<string, any> = {
@@ -174,6 +178,52 @@ describe('Context Pre-fetch', () => {
       const briefing = formatBriefing(context);
       expect(briefing).not.toContain('iVBORw0KGgo');
       expect(briefing).toContain('Screenshot');
+    });
+  });
+
+  // UX-003: judge screenshot scoping — verify that when the harness knows which
+  // node was just mutated, the screenshot call passes `nodeId` instead of a
+  // viewport zoom. Without this, the judge evaluates unrelated pre-existing
+  // canvas content and produces false positives like "[DS::colors] frame not
+  // visible" on a totally unrelated node.
+  describe('prefetchForMicroJudges — UX-003 screenshot scoping', () => {
+    const screenshotNeeds = new Set<PrefetchDataKey>(['screenshot']);
+
+    it('calls figma_screenshot with viewport params when no targetNodeId is provided', async () => {
+      const tools = makeMockTools();
+      await prefetchForMicroJudges(tools as any, screenshotNeeds);
+
+      const screenshotTool = tools.find((t) => t.name === 'figma_screenshot')!;
+      expect(screenshotTool.execute).toHaveBeenCalledTimes(1);
+      const callParams = (screenshotTool.execute as any).mock.calls[0][1];
+      expect(callParams).toEqual({ zoom: 2 });
+      expect(callParams.nodeId).toBeUndefined();
+    });
+
+    it('calls figma_screenshot with nodeId when a targetNodeId is provided', async () => {
+      const tools = makeMockTools();
+      await prefetchForMicroJudges(tools as any, screenshotNeeds, undefined, undefined, '128:445');
+
+      const screenshotTool = tools.find((t) => t.name === 'figma_screenshot')!;
+      expect(screenshotTool.execute).toHaveBeenCalledTimes(1);
+      const callParams = (screenshotTool.execute as any).mock.calls[0][1];
+      expect(callParams).toEqual({ nodeId: '128:445' });
+      // Must NOT also pass zoom — the bridge auto-fits the node to the frame
+      // and a zoom value would conflict with the crop.
+      expect(callParams.zoom).toBeUndefined();
+    });
+
+    it('propagates targetNodeId onto the returned PrefetchedContext so judges can reference it', async () => {
+      const tools = makeMockTools();
+      const result = await prefetchForMicroJudges(tools as any, screenshotNeeds, undefined, undefined, '128:445');
+      expect(result.targetNodeId).toBe('128:445');
+      expect(result.screenshot).not.toBeNull();
+    });
+
+    it('leaves targetNodeId null when not provided (unscoped viewport screenshot)', async () => {
+      const tools = makeMockTools();
+      const result = await prefetchForMicroJudges(tools as any, screenshotNeeds);
+      expect(result.targetNodeId).toBeNull();
     });
   });
 });

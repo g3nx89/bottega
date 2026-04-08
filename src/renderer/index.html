@@ -75,16 +75,16 @@
       </div>
       <div class="input-toolbar">
         <div class="toolbar-left">
-          <button id="bar-model-btn" class="toolbar-chip" title="Switch model">
+          <button id="bar-model-btn" class="toolbar-chip" title="Switch model" aria-haspopup="listbox" aria-expanded="false" aria-label="Select model">
             <span id="bar-model-label">Sonnet 4.6</span>
-            <svg width="8" height="5" viewBox="0 0 8 5" fill="none"><path d="M1 1L4 4L7 1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            <svg width="8" height="5" viewBox="0 0 8 5" fill="none" aria-hidden="true"><path d="M1 1L4 4L7 1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
           </button>
-          <button id="bar-effort-btn" class="toolbar-chip" title="Thinking effort">
+          <button id="bar-effort-btn" class="toolbar-chip" title="Thinking effort" aria-haspopup="listbox" aria-expanded="false" aria-label="Select thinking effort">
             <span id="bar-effort-label">Medium</span>
-            <svg width="8" height="5" viewBox="0 0 8 5" fill="none"><path d="M1 1L4 4L7 1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            <svg width="8" height="5" viewBox="0 0 8 5" fill="none" aria-hidden="true"><path d="M1 1L4 4L7 1" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
           </button>
-          <button id="bar-judge-btn" class="toolbar-chip" title="Quality judge">
-            <span id="bar-judge-icon">&#x1F6E1;</span>
+          <button id="bar-judge-btn" class="toolbar-chip" title="Quality judge" aria-pressed="false" aria-label="Toggle quality judge">
+            <span id="bar-judge-icon" aria-hidden="true">&#x1F6E1;</span>
             <span id="bar-judge-label">Judge</span>
           </button>
         </div>
@@ -177,39 +177,39 @@
             <span class="setting-hint">Enable/disable individual quality criteria. Use the toolbar toggle for quick on/off.</span>
             <div id="micro-judge-list">
               <div class="micro-judge-row" data-judge="alignment">
-                <input type="checkbox" class="judge-enable" checked>
-                <div class="judge-info"><span class="judge-label">Alignment</span><span class="judge-desc">Layout precision, auto-layout, pixel offsets</span></div>
-                <select class="judge-model setting-select setting-select-sm"></select>
+                <input type="checkbox" id="judge-enable-alignment" class="judge-enable" checked>
+                <label class="judge-info" for="judge-enable-alignment"><span class="judge-label">Alignment</span><span class="judge-desc">Layout precision, auto-layout, pixel offsets</span></label>
+                <select class="judge-model setting-select setting-select-sm" aria-label="Model for alignment judge"></select>
               </div>
               <div class="micro-judge-row" data-judge="token_compliance">
-                <input type="checkbox" class="judge-enable" checked>
-                <div class="judge-info"><span class="judge-label">Token Compliance</span><span class="judge-desc">Design token usage, hardcoded values, lint violations</span></div>
-                <select class="judge-model setting-select setting-select-sm"></select>
+                <input type="checkbox" id="judge-enable-token-compliance" class="judge-enable" checked>
+                <label class="judge-info" for="judge-enable-token-compliance"><span class="judge-label">Token Compliance</span><span class="judge-desc">Design token usage, hardcoded values, lint violations</span></label>
+                <select class="judge-model setting-select setting-select-sm" aria-label="Model for token compliance judge"></select>
               </div>
               <div class="micro-judge-row" data-judge="visual_hierarchy">
-                <input type="checkbox" class="judge-enable" checked>
-                <div class="judge-info"><span class="judge-label">Visual Hierarchy</span><span class="judge-desc">Typography scale, primary action prominence</span></div>
-                <select class="judge-model setting-select setting-select-sm"></select>
+                <input type="checkbox" id="judge-enable-visual-hierarchy" class="judge-enable" checked>
+                <label class="judge-info" for="judge-enable-visual-hierarchy"><span class="judge-label">Visual Hierarchy</span><span class="judge-desc">Typography scale, primary action prominence</span></label>
+                <select class="judge-model setting-select setting-select-sm" aria-label="Model for visual hierarchy judge"></select>
               </div>
               <div class="micro-judge-row" data-judge="completeness">
-                <input type="checkbox" class="judge-enable" checked>
-                <div class="judge-info"><span class="judge-label">Completeness</span><span class="judge-desc">All requested elements present vs task description</span></div>
-                <select class="judge-model setting-select setting-select-sm"></select>
+                <input type="checkbox" id="judge-enable-completeness" class="judge-enable" checked>
+                <label class="judge-info" for="judge-enable-completeness"><span class="judge-label">Completeness</span><span class="judge-desc">All requested elements present vs task description</span></label>
+                <select class="judge-model setting-select setting-select-sm" aria-label="Model for completeness judge"></select>
               </div>
               <div class="micro-judge-row" data-judge="consistency">
-                <input type="checkbox" class="judge-enable" checked>
-                <div class="judge-info"><span class="judge-label">Consistency</span><span class="judge-desc">Uniform spacing, sizing across similar elements</span></div>
-                <select class="judge-model setting-select setting-select-sm"></select>
+                <input type="checkbox" id="judge-enable-consistency" class="judge-enable" checked>
+                <label class="judge-info" for="judge-enable-consistency"><span class="judge-label">Consistency</span><span class="judge-desc">Uniform spacing, sizing across similar elements</span></label>
+                <select class="judge-model setting-select setting-select-sm" aria-label="Model for consistency judge"></select>
               </div>
               <div class="micro-judge-row" data-judge="naming">
-                <input type="checkbox" class="judge-enable" checked>
-                <div class="judge-info"><span class="judge-label">Naming</span><span class="judge-desc">Semantic names, no auto-generated names</span></div>
-                <select class="judge-model setting-select setting-select-sm"></select>
+                <input type="checkbox" id="judge-enable-naming" class="judge-enable" checked>
+                <label class="judge-info" for="judge-enable-naming"><span class="judge-label">Naming</span><span class="judge-desc">Semantic names, no auto-generated names</span></label>
+                <select class="judge-model setting-select setting-select-sm" aria-label="Model for naming judge"></select>
               </div>
               <div class="micro-judge-row" data-judge="componentization">
-                <input type="checkbox" class="judge-enable" checked>
-                <div class="judge-info"><span class="judge-label">Componentization</span><span class="judge-desc">Duplicate detection, library usage, detached instances</span></div>
-                <select class="judge-model setting-select setting-select-sm"></select>
+                <input type="checkbox" id="judge-enable-componentization" class="judge-enable" checked>
+                <label class="judge-info" for="judge-enable-componentization"><span class="judge-label">Componentization</span><span class="judge-desc">Duplicate detection, library usage, detached instances</span></label>
+                <select class="judge-model setting-select setting-select-sm" aria-label="Model for componentization judge"></select>
               </div>
             </div>
             <div class="setting-divider" style="margin:8px 0"></div>

@@ -130,6 +130,16 @@ async function cleanup(exitCode = 0): Promise<void> {
     process.exit(exitCode);
   }
   log.info('Shutting down');
+
+  // B-017: Hard deadline for graceful shutdown. After DS-heavy sessions the WS
+  // cleanup or metrics flush can hang and the QA runner has to pkill. Force exit
+  // after 5s regardless of pending work.
+  const forceExitTimer = setTimeout(() => {
+    log.warn('Graceful shutdown timed out after 5s — forcing exit');
+    process.exit(exitCode);
+  }, 5000);
+  forceExitTimer.unref?.();
+
   await safeRun(() => appState.slotManager?.persistStateSync(), 'persisting slot state');
   await safeRun(() => {
     appState.usageTracker?.trackAppQuit(Math.round(process.uptime()), 0);
@@ -139,6 +149,7 @@ async function cleanup(exitCode = 0): Promise<void> {
     safeRun(() => appState.infra?.metricsCollector.finalize(), 'finalizing metrics'),
     safeRun(() => figmaCore?.stop(), 'stopping Figma (WS cleanup)'),
   ]);
+  clearTimeout(forceExitTimer);
   process.exit(exitCode);
 }
 

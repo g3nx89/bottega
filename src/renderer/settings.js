@@ -349,12 +349,11 @@ async function initAuthUI() {
   // Sync bar label now that models are loaded
   syncBarModelLabel();
 
-  // Switch session to saved model if it differs from the default
-  const savedProvider = localStorage.getItem('bottega:provider') || 'anthropic';
-  const savedModel = localStorage.getItem('bottega:model') || 'claude-sonnet-4-6';
-  if (activeTabId && (savedProvider !== 'anthropic' || savedModel !== 'claude-sonnet-4-6')) {
-    await window.api.switchModel(activeTabId, { provider: savedProvider, modelId: savedModel });
-  }
+  // B-025: Do NOT force-switch the active tab to the global localStorage model on
+  // startup. The slot's persisted modelConfig is the source of truth — overwriting
+  // it from the global "last-used" value in localStorage would wipe per-tab model
+  // selection on every restart. syncBarToTab() already reconciles the dropdown /
+  // bar label to the active tab's actual modelConfig when the tab becomes active.
 }
 
 initAuthUI();

@@ -38,13 +38,13 @@ describe('WebSocketConnector', () => {
     expect(mockSendCommand).toHaveBeenCalledWith('CREATE_FROM_JSX', { tree, x: 100, y: 200 }, 60000);
   });
 
-  it('setImageFill sends SET_IMAGE_FILL with 60s timeout', async () => {
+  it('setImageFill sends SET_IMAGE_FILL with 30s timeout (UX-005)', async () => {
     await connector.setImageFill(['1:1', '2:2'], 'base64data', 'FIT');
 
     expect(mockSendCommand).toHaveBeenCalledWith(
       'SET_IMAGE_FILL',
       { nodeIds: ['1:1', '2:2'], imageData: 'base64data', scaleMode: 'FIT' },
-      60000,
+      30000,
     );
   });
 

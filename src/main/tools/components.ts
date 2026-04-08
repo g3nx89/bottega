@@ -49,8 +49,14 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
     {
       name: 'figma_arrange_component_set',
       label: 'Arrange Component Set',
-      description: 'Arrange variants in a component set into an organized grid layout with consistent spacing.',
-      promptSnippet: 'figma_arrange_component_set: organize component variants into a grid',
+      description:
+        'Arrange variants in a component set into an organized grid layout with consistent spacing. PREFER this tool over figma_execute or figma_batch_transform when the user asks to "arrange", "organize", "lay out", or "grid" the variants of a component set — it handles spacing and column math in one call.',
+      promptSnippet:
+        'figma_arrange_component_set: organize component variants into a grid (prefer over figma_execute / figma_batch_transform)',
+      promptGuidelines: [
+        'Use whenever the user asks to arrange / organize / lay out / grid the variants of a component set.',
+        'Prefer this over figma_execute or figma_batch_transform — it is a single dedicated call.',
+      ],
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Component set node ID' }),
         columns: Type.Optional(Type.Number({ description: 'Number of columns (default: auto)' })),

@@ -122,8 +122,9 @@ describe('Manipulation Tools', () => {
   // ── figma_set_image_fill ───────────────────────────────────────────
 
   describe('figma_set_image_fill', () => {
-    it('prefers base64 over imageUrl', async () => {
+    it('prefers base64 over imageUrl (no fetch)', async () => {
       const tool = findTool('figma_set_image_fill');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
       await tool.execute(
         'c9',
@@ -134,14 +135,74 @@ describe('Manipulation Tools', () => {
       );
 
       expect(deps.connector.setImageFill).toHaveBeenCalledWith(['5:6'], 'b64data', 'FILL');
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
     });
 
-    it('falls back to imageUrl when base64 is absent', async () => {
+    it('fetches imageUrl host-side and sends base64 bytes (UX-011)', async () => {
       const tool = findTool('figma_set_image_fill');
+      const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG magic
+      const expectedB64 = Buffer.from(bytes).toString('base64');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'image/png' }),
+        arrayBuffer: async () => bytes.buffer,
+      } as any);
 
       await tool.execute('c10', { nodeIds: ['5:6'], imageUrl: 'https://img.png' }, undefined, undefined, undefined);
 
-      expect(deps.connector.setImageFill).toHaveBeenCalledWith(['5:6'], 'https://img.png', 'FILL');
+      expect(fetchSpy).toHaveBeenCalledWith('https://img.png', expect.objectContaining({ signal: expect.anything() }));
+      expect(deps.connector.setImageFill).toHaveBeenCalledWith(['5:6'], expectedB64, 'FILL');
+      fetchSpy.mockRestore();
+    });
+
+    it('returns error when imageUrl fetch fails (UX-011)', async () => {
+      const tool = findTool('figma_set_image_fill');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        headers: new Headers(),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      } as any);
+
+      const result = await tool.execute(
+        'c10b',
+        { nodeIds: ['5:6'], imageUrl: 'https://img.png' },
+        undefined,
+        undefined,
+        undefined,
+      );
+
+      expect(deps.connector.setImageFill).not.toHaveBeenCalled();
+      const text = (result as any).content[0].text;
+      expect(text).toContain('HTTP 404');
+      fetchSpy.mockRestore();
+    });
+
+    it('rejects non-image content-type responses (UX-011)', async () => {
+      const tool = findTool('figma_set_image_fill');
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'text/html' }),
+        arrayBuffer: async () => new ArrayBuffer(0),
+      } as any);
+
+      const result = await tool.execute(
+        'c10c',
+        { nodeIds: ['5:6'], imageUrl: 'https://not-an-image.com' },
+        undefined,
+        undefined,
+        undefined,
+      );
+
+      expect(deps.connector.setImageFill).not.toHaveBeenCalled();
+      expect((result as any).content[0].text).toContain('did not return an image');
+      fetchSpy.mockRestore();
     });
 
     it('uses default scaleMode FILL', async () => {

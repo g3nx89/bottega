@@ -272,27 +272,55 @@ export function createLintTools(deps: ToolDeps): ToolDefinition[] {
             if (node.fills || node.strokes) issues.push(...checkBoundVariables(node, context.dsVariables ?? []));
           }
 
+          const dsCheck = issues.filter(
+            (i) =>
+              i.type.includes('color') ||
+              i.type.includes('spacing') ||
+              i.type.includes('typography') ||
+              i.type.includes('bound') ||
+              i.type.includes('effect'),
+          );
+          const bestPractices = issues.filter(
+            (i) =>
+              i.type.includes('auto-layout') ||
+              i.type.includes('depth') ||
+              i.type.includes('naming') ||
+              i.type.includes('sizing'),
+          );
+          // UX-T8 / UX-006: for large reports (>10 findings per section), return a top-N
+          // slice ordered by severity + type frequency, with a remaining count so the agent
+          // can summarise instead of dumping 80+ warnings verbatim. Use topN / remaining
+          // together with hasMore as a hint for the caller.
+          const SEVERITY_RANK: Record<string, number> = { error: 0, warning: 1, info: 2 };
+          const topN = <T extends { severity: string; type: string }>(arr: T[], n = 10) => {
+            const counts = new Map<string, number>();
+            for (const it of arr) counts.set(it.type, (counts.get(it.type) ?? 0) + 1);
+            const sorted = [...arr].sort((a, b) => {
+              const rs = (SEVERITY_RANK[a.severity] ?? 99) - (SEVERITY_RANK[b.severity] ?? 99);
+              if (rs !== 0) return rs;
+              return (counts.get(b.type) ?? 0) - (counts.get(a.type) ?? 0);
+            });
+            return {
+              top: sorted.slice(0, n),
+              remaining: Math.max(0, sorted.length - n),
+              hasMore: sorted.length > n,
+              byType: Object.fromEntries([...counts].sort((a, b) => b[1] - a[1]).slice(0, 5)),
+            };
+          };
+
           return textResult({
-            dsCheck: issues.filter(
-              (i) =>
-                i.type.includes('color') ||
-                i.type.includes('spacing') ||
-                i.type.includes('typography') ||
-                i.type.includes('bound') ||
-                i.type.includes('effect'),
-            ),
-            bestPractices: issues.filter(
-              (i) =>
-                i.type.includes('auto-layout') ||
-                i.type.includes('depth') ||
-                i.type.includes('naming') ||
-                i.type.includes('sizing'),
-            ),
+            dsCheck: dsCheck.length > 10 ? topN(dsCheck) : dsCheck,
+            bestPractices: bestPractices.length > 10 ? topN(bestPractices) : bestPractices,
             figmaLint: raw.nativeIssues ?? [],
             summary: {
               total: issues.length,
               errors: issues.filter((i) => i.severity === 'error').length,
               warnings: issues.filter((i) => i.severity === 'warning').length,
+              truncated: dsCheck.length > 10 || bestPractices.length > 10,
+              hint:
+                dsCheck.length > 10 || bestPractices.length > 10
+                  ? 'Report truncated to top-10 per section by severity + frequency. Call figma_lint with a specific nodeId to narrow scope, or prioritise the listed types first.'
+                  : undefined,
             },
           });
         }

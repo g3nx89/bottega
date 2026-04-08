@@ -182,6 +182,7 @@ describe('Judge Harness Integration', () => {
       makeSlot(),
       defaultSettings,
       ['figma_set_fills', 'figma_screenshot'],
+      [],
       new AbortController().signal,
       cbs,
     );
@@ -233,6 +234,7 @@ describe('Judge Harness Integration', () => {
       slot,
       { ...defaultSettings, autoRetry: true, maxRetries: 2 },
       ['figma_set_fills'],
+      [],
       new AbortController().signal,
       cbs,
     );
@@ -264,6 +266,7 @@ describe('Judge Harness Integration', () => {
       slot,
       { ...defaultSettings, autoRetry: true, maxRetries: 2 },
       ['figma_set_fills'],
+      [],
       new AbortController().signal,
       makeCallbacks(),
     );
@@ -279,6 +282,7 @@ describe('Judge Harness Integration', () => {
       makeSlot(),
       defaultSettings,
       ['figma_screenshot', 'figma_get_file_data', 'figma_status'],
+      [],
       new AbortController().signal,
       makeCallbacks(),
     );
@@ -294,6 +298,7 @@ describe('Judge Harness Integration', () => {
       makeSlot(),
       { ...defaultSettings, judgeMode: 'off' },
       ['figma_set_fills'],
+      [],
       new AbortController().signal,
       makeCallbacks(),
     );
@@ -313,6 +318,7 @@ describe('Judge Harness Integration', () => {
       slot,
       { ...defaultSettings, judgeMode: 'off' },
       ['figma_set_fills'],
+      [],
       new AbortController().signal,
       makeCallbacks(),
     );
@@ -338,6 +344,7 @@ describe('Judge Harness Integration', () => {
       slot,
       { ...defaultSettings, autoRetry: true, maxRetries: 3 },
       ['figma_set_fills'],
+      [],
       new AbortController().signal,
       makeCallbacks(),
     );
