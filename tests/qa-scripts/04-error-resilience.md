@@ -51,6 +51,17 @@ Send: "Execute this code: figma.currentPage.notAMethod()"
 - Does the app remain functional after the error?
 - Can you continue the conversation?
 
+```assert
+# Error path: figma_execute MUST be called (not skipped), the response MUST
+# acknowledge the error in natural language, and the duration must be bounded
+# (no infinite retry loop).
+tools_called: [figma_execute]
+response_contains:
+  any_of: [error, failed, undefined, "not a function", method]
+  case_sensitive: false
+duration_max_ms: 30000
+```
+
 ### 5. Multiple tabs during operations
 If 2 tabs are connected:
 1. Send a prompt on Tab A
@@ -71,6 +82,21 @@ Send: "List every available Figma tool and describe what each one does"
 - Does the chat auto-scroll to follow new content?
 - Is the response readable (not cut off or overflowing)?
 - Does the send button area remain visible?
+
+```assert
+# Long-response budget: bounded but generous. The cap on figma_screenshot
+# guards against the agent spamming screenshots while listing tools (a
+# common drift). The response should mention multiple tool names.
+# Token note: "figma_" is a code-identifier prefix — case_sensitive: true
+# matches only the canonical form (not "Figma_" or "FIGMA_"). The natural
+# language tokens ("screenshot", "tool") stay case-insensitive via Form 3.
+tools_NOT_called_more_than:
+  figma_screenshot: 1
+response_contains:
+  any_of: ["figma_"]
+  case_sensitive: true
+duration_max_ms: 180000
+```
 
 ### 7. Final assessment
 **Overall assessment:**

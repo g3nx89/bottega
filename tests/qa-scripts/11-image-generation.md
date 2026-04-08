@@ -10,7 +10,9 @@ Test all 7 image generation slash commands. Requires a valid Gemini API key.
 ## Steps
 
 ### 1. /generate — Basic image
-Type `/generate` and select from the menu, then complete with: "a sunset over mountains, photorealistic style"
+Send: "/generate a sunset over mountains, photorealistic style"
+
+(Manual variant for qa-tester subagent: type `/generate`, select from the slash menu, then complete with the description.)
 
 **Evaluate:**
 - Does the slash menu appear with "/generate" highlighted?
@@ -18,6 +20,18 @@ Type `/generate` and select from the menu, then complete with: "a sunset over mo
 - Is an image generated and placed on the canvas?
 - Is the image visible in the screenshot?
 - Did the agent report dimensions and placement?
+
+```assert
+# Canary for image-gen pipeline: figma_generate_image MUST be called and
+# produce at least 1 visible image. duration_max is generous (Gemini latency)
+# but bounded so a hung request fails.
+tools_called: [figma_generate_image]
+screenshots_min: 1
+response_contains:
+  any_of: [generated, image, sunset, mountain, placed]
+  case_sensitive: false
+duration_max_ms: 120000
+```
 
 ### 2. /icon — App icon
 Send: "/icon a minimalist chat bubble icon in purple, flat design"
@@ -52,12 +66,30 @@ Send: "/story a 4-step onboarding flow for a design app"
 - Is there visual consistency across frames?
 
 ### 6. /edit — Edit existing image
-After creating an image in step 1, send: "/edit change the sky to a night sky with stars"
+Send: "/edit change the sky to a night sky with stars"
+
+(Depends on step 1 having created an image; qa-runner relies on sequential step ordering.)
 
 **Evaluate:**
 - Does the agent call `figma_edit_image`?
 - Does it find the correct node to edit?
 - Is the edit applied to the existing image (not a new one)?
+
+```assert
+# Anti-regression for "edit, don't regenerate" semantics:
+# figma_edit_image MUST be called, figma_generate_image MUST NOT be called.
+# A common drift is the agent generating a fresh image instead of editing.
+# NOTE: response_contains is intentionally OMITTED here. The user prompt
+# ("/edit change the sky to a night sky with stars") would be echoed by the
+# agent in any natural reply, making any_of: [night, stars, sky, ...] a
+# tautology that adds noise without signal. The tools_called + cap on
+# generate_image carry the substantive check.
+tools_called: [figma_edit_image]
+tools_NOT_called_more_than:
+  figma_generate_image: 0
+screenshots_min: 1
+duration_max_ms: 120000
+```
 
 ### 7. /restore — Image enhancement
 Send: "/restore enhance the image quality and upscale"
@@ -73,6 +105,21 @@ Send: "/generate" without any description (just the command)
 **Evaluate:**
 - Does the agent ask for a description?
 - Does it NOT crash or error?
+
+```assert
+# Negative test: empty /generate MUST NOT call figma_generate_image (would
+# waste a Gemini call) and MUST ask the user for a description in natural
+# language. The cap of 0 enforces "no premature generation".
+# Token tightening: dropped "what" and "please" — they're ambient polite
+# English that match almost any agent reply. Kept the substantive
+# clarification-asking tokens.
+tools_NOT_called_more_than:
+  figma_generate_image: 0
+response_contains:
+  any_of: [description, missing, prompt, provide, specify]
+  case_sensitive: false
+duration_max_ms: 30000
+```
 
 ### Overall assessment
 - Do all 7 slash commands work end-to-end?

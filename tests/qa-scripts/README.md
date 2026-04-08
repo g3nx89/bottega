@@ -41,12 +41,45 @@ await resetSession(page);
 
 ## How to run
 
-1. Build the app: `npm run build`
-2. Delegate to the `qa-tester` subagent with the script number
-3. The subagent launches the app, cleans state, follows the script, returns findings
-4. Review findings and update `BUG-REPORT.md`
+There are **two execution modes**:
 
-### Run via qa-tester subagent
+### Mode A: Deterministic runner (`qa-runner.mjs` — default for CI/automated)
+
+The qa-runner is a Playwright-based deterministic harness that parses each
+script's markdown, executes the `Send:` steps automatically, and evaluates
+embedded assertion blocks. Use this for automated PASS/FAIL gating and
+regression detection.
+
+```bash
+# Build first (the runner launches the built Electron binary)
+npm run build
+
+# Run a single script
+node .claude/skills/bottega-dev-debug/scripts/qa-runner.mjs --script 02
+
+# Run a predefined suite (smoke|pre-release|targeted|full|stress)
+node .claude/skills/bottega-dev-debug/scripts/qa-runner.mjs --suite pre-release
+
+# Calibration mode (run each script N times, aggregate variance)
+node .claude/skills/bottega-dev-debug/scripts/qa-runner.mjs --script 02 --calibrate 3
+
+# Dry run (parse only, no Electron launch — useful for validating script structure)
+node .claude/skills/bottega-dev-debug/scripts/qa-runner.mjs --script 02 --dry-run
+```
+
+**Output per script** (in `/tmp/bottega-qa/` by default):
+- `result-NN.txt` — PASS/FAIL summary with `FAILURES:` block
+- `NN-metadata.json` — full step metadata (response, tool cards, screenshot path, assertion mode/results)
+- `NN-assertions.json` — structured per-step assertion verdicts
+- `NN-step-K.png` — screenshots
+- `NN-calibration.json` — only in calibration mode, aggregated variance report
+
+### Mode B: Manual exploratory (`qa-tester` subagent — Sonnet)
+
+Use the `qa-tester` subagent for exploratory testing where the runner can't
+go: visual inspection, multi-tab orchestration, stress scenarios, or any
+step that requires human-like judgement on quality.
+
 ```
 Agent tool:
   subagent_type: "qa-tester"
@@ -57,7 +90,11 @@ Agent tool:
            Bridge plugin active."
 ```
 
-### Run multiple scripts (sequentially)
+The subagent reads the same markdown scripts but **ignores assertion blocks**
+— it follows the human-readable Evaluate bullets and the optional manual
+variant notes. Both modes coexist on the same source files.
+
+### Run multiple scripts via qa-tester
 ```
 Agent tool:
   subagent_type: "qa-tester"
@@ -66,6 +103,155 @@ Agent tool:
            cleaning state between each: 01-first-launch.md, 02-happy-path.md,
            05-settings-and-controls.md. Scripts are in tests/qa-scripts/."
 ```
+
+## Assertion DSL (Fase 2)
+
+Migrated scripts contain ` ```assert ` YAML blocks inside selected steps that
+the qa-runner evaluates deterministically. See:
+
+- **`ASSERTION-DSL.md`** — full DSL spec, 7 P1 assertion types, parser rules
+- **`CALIBRATION.md`** — workflow for tuning assertion thresholds via `--calibrate N`
+
+### PASS / FAIL / SOFT_PASS matrix
+
+| Step has assertions? | Parse error? | Transport success? | `QA_RUNNER_LEGACY_MODE` | Outcome |
+|---|---|---|---|---|
+| no | no | yes | unset | **SOFT_PASS** (legacy binary heuristic) |
+| no | no | no | unset | **FAIL** (transport) |
+| yes | no | yes | unset | evaluate → **PASS** or **FAIL** |
+| yes | no | no | unset | **FAIL** + assertions evaluated for diagnostic data |
+| no | yes | any | unset | **FAIL** loud (parse error in detail) |
+| any | any | any | `1` | legacy SOFT_PASS, all assert blocks ignored |
+
+### Migration status
+
+| Script | Auto steps | Migrated steps | Notes |
+|---|---|---|---|
+| 02-happy-path | 3 | 3 (1, 4, 6) | Step 6 has the **B-021 sentinel** (`#suggestions:not(.hidden)`) |
+| 04-error-resilience | 2 | 2 (4, 6) | Error path + tool spam guard |
+| 09-styling-and-layout | 8 | 4 (1, 2, 6, 8) | Anti-sequential pattern: `tools_NOT_called_more_than: {figma_set_text: 0}` etc. |
+| 11-image-generation | 8 | 3 (1, 6, 8) | `/edit` MUST NOT call `figma_generate_image` (anti-regenerate) |
+| 14-judge-and-subagents | 4 | 3 (2, 5, 8) | Steps 2 & 8 have the **B-018 sentinel** (`response_contains: [quality check]`) |
+| **Total** | **25** | **15** | **15 assertion blocks** across 5 scripts |
+
+The remaining 20 QA scripts run in legacy SOFT_PASS mode until migrated.
+Migration is incremental — adding an assert block to a script does not
+require touching any other script.
+
+### Rollback / emergency bypass
+
+If the assertion runner produces a >20% false-positive rate in production:
+
+**Per-script rollback**: delete the `assert` block from the offending script.
+The step automatically reverts to SOFT_PASS.
+
+```bash
+# Strip all assert blocks from a script (creates .bak)
+sed -i.bak '/^```assert$/,/^```$/d' tests/qa-scripts/02-happy-path.md
+```
+
+**Global bypass**: set the env var to ignore all assert blocks at runtime
+(parser still reads them but evaluator never runs).
+
+```bash
+QA_RUNNER_LEGACY_MODE=1 node .claude/skills/bottega-dev-debug/scripts/qa-runner.mjs --script 02
+```
+
+In legacy mode the runner falls back to the binary success heuristic (PASS
+if `sendPromptAndWait` returned `success=true`, otherwise FAIL). Useful for
+emergency bypass without touching files.
+
+### Regression-detection validation (task 2.13)
+
+The Fase 2 plan requires a one-shot validation that the assertion runner
+actually FAILS when a known bug regresses. Because B-018 (judge
+auto-trigger) and B-021 (suggestion chips) are both fixed in production,
+validation requires a scratch branch that temporarily reverts the fix.
+
+There are two validation forms, both already executed once:
+
+**Simulated (permanent, in CI)** — `tests/unit/qa-tooling/assertion-evaluators.test.ts`
+contains a `describe('B-018 regression sentinel (task 2.13 simulated)')`
+block that replays the exact step-2 and step-8 assert blocks from
+`14-judge-and-subagents.md` through `evaluateAssertions` with two
+`stepData` shapes:
+
+- **Healthy**: `responseText` contains "Quality Check · PASS ✓" → all
+  four assertions pass.
+- **B-018 active**: identical state minus the judge footer → only
+  `response_contains` fails, the other three pass. This is the precise
+  signature: mutation tools ran, screenshot taken, duration fine, but no
+  judge footer.
+
+If this test ever stops failing on the B-018 shape, the sentinel has lost
+its teeth and must be re-tuned.
+
+**Live (manual, one-shot)** — executed once during Fase 2 validation.
+Procedure for future re-validation (e.g., after major session-events.ts
+refactor):
+
+```bash
+# 1. Safeguard any uncommitted work
+git stash push -u -m "phase2-wip-pre-validation"
+
+# 2. Create scratch branch and re-apply the stash
+git checkout -b qa/validate-sentinel
+git stash apply   # keeps stash as safety net
+
+# 3. Patch src/main/session-events.ts to disable the auto-judge block.
+#    Minimal revert — find the shouldRun assignment in handleAgentEnd:
+#    - const shouldRun = slot.judgeOverride === true || (slot.judgeOverride !== false && settings.judgeMode === 'auto');
+#    + const shouldRun = false && (slot.judgeOverride === true || ...);
+
+# 4. Rebuild
+npm run build
+
+# 5. Run script 14 only (Figma Desktop + Bottega Bridge + Bottega-Test_A required)
+mkdir -p /tmp/bottega-qa-validation
+node .claude/skills/bottega-dev-debug/scripts/qa-runner.mjs \
+  --script 14 --output /tmp/bottega-qa-validation
+
+# 6. Verify the assertion failure signature — cat the file and confirm:
+#    - Step 2: response_contains "quality check" → FAIL
+#    - Step 8: response_contains "quality check" → FAIL
+#    - tools_called_any_of, screenshots_min, duration_max_ms → all PASS
+cat /tmp/bottega-qa-validation/14-assertions.json
+
+# 7. Revert the patch (edit session-events.ts back to the original line)
+#    VERIFY with `git status` that session-events.ts is no longer modified
+#    before proceeding — checkout main carries uncommitted edits across.
+
+# 8. Return to main and clean up.
+#    Note: git branches share the working tree, so the Phase 2 WIP applied
+#    in step 2 carries over to main automatically. We use `git stash drop`
+#    (NOT `git stash pop`), because the stash content is already in the
+#    working tree — popping would conflict on every modified file.
+git checkout main
+git status                # confirm: phase 2 files modified, no session-events.ts
+git stash drop            # WIP already present, discard the safety stash
+git branch -D qa/validate-sentinel
+```
+
+**Expected outcome** (from the one-shot run on 2026-04-08):
+
+```
+SUMMARY 14: 2 passed, 2 failed, 5 manual
+Step 2: assertions failed: response_contains (none of any_of matched:
+        [quality check] (case_sensitive=false))
+Step 8: assertions failed: response_contains (none of any_of matched:
+        [quality check] (case_sensitive=false))
+```
+
+Two non-obvious points from the validation:
+
+1. The qa-runner script lives under `.claude/` which is gitignored — branch
+   switches do not affect it, so `qa-runner.mjs` and `assertion-evaluators.mjs`
+   stay in the working tree regardless of the scratch branch. Only the 8
+   tracked files under `tests/qa-scripts/` plus the 3 new files under
+   `tests/unit/qa-tooling/` need to be stashed.
+2. The minimal patch is `shouldRun = false && (...)` not `shouldRun = false`
+   alone — the short-circuit preserves type inference and leaves the
+   original expression as self-documenting context for the reviewer.
 
 ## Scripts
 
