@@ -173,9 +173,9 @@ dom_visible: ".message-content .judge-section"
 
 ---
 
-### 3.2 Priority 2 (grammar only, implemented post-MVP)
+### 3.2 Priority 2 (grammar only, except `metric` / `metric_growth` which are implemented in Fase 4)
 
-These are documented for forward compatibility. The Day 2 evaluator implements only P1 — using a P2 type before it's implemented produces FAIL with `unknown assertion type: X`.
+The grammar variants below are documented for forward compatibility — using one before it's implemented produces FAIL with `unknown assertion type: X`. The two **`metric`** and **`metric_growth`** evaluators are live as of Fase 4 (Task 4.13). They require an app build with `BOTTEGA_AGENT_TEST=1` so the preload exposes `window.api.__testGetMetrics`.
 
 ```yaml
 # Tool selection variants
@@ -203,15 +203,32 @@ judge_section_present: true        # Quality Check section visible (B-018 sentin
 suggestions_visible: true          # follow-up chips appeared (B-021 sentinel)
 error_thrown: false                # negative test for explicit error states
 
-# Fase 4 — metric assertions (require BOTTEGA_AGENT_TEST=1 + MetricsRegistry)
+# Fase 4 — metric assertions (LIVE — require BOTTEGA_AGENT_TEST=1 + MetricsRegistry)
+# `path` is dotted, supports bracket-quoted segments for keys with dashes.
+# Snapshot schema: see docs/test-metrics-schema.md (schemaVersion: 1).
+#
+# Both `metric` and `metric_growth` accept either a single spec or an ARRAY of
+# specs (use the array form when one step needs more than one check, since
+# YAML mappings reject duplicate keys).
 metric:
-  path: judge.totalTriggers
-  op: '>'
+  path: "judge.triggeredTotal"
+  op: ">"                              # one of ==, !=, >, >=, <, <=
   value: 0
+metric:                                # array form
+  - path: "judge.triggeredTotal"
+    op: ">"
+    value: 0
+  - path: "judge.skippedByReason['no-connector']"
+    op: "=="
+    value: 0                           # B-018 regression sentinel
 metric_growth:
-  path: tools.callCount
-  maxGrowth: 5
-  sinceStep: start
+  path: "tools.callCount"
+  maxGrowth: 5                         # delta (after - before) must be ≤ 5
+metric_growth:                         # array form
+  - path: "judge.triggeredTotal"
+    minGrowth: 1                       # at least one judge invocation
+  - path: "judge.verdictCounts.PASS"
+    exactGrowth: 1                     # exactly one PASS verdict
 ```
 
 ---

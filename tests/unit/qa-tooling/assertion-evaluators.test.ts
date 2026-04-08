@@ -384,6 +384,11 @@ describe('B-018 regression sentinel (task 2.13 simulated)', () => {
     screenshots_min: 1,
     dom_visible: '.assistant-message:last-child .judge-verdict-card',
     duration_max_ms: 120000,
+    // Fase 4: metric_growth additions for B-018 semantic guarantee.
+    metric_growth: [
+      { path: 'judge.triggeredTotal', minGrowth: 1 },
+      { path: "judge.skippedByReason['no-connector']", exactGrowth: 0 },
+    ],
   };
 
   // Step 8 (complex creation) adds figma_auto_layout to the tool set.
@@ -394,6 +399,18 @@ describe('B-018 regression sentinel (task 2.13 simulated)', () => {
     duration_max_ms: 180000,
   };
 
+  // Fase 4: metric snapshots paired with the simulated stepData. Healthy =
+  // judge actually ran (triggered++); broken = judge silently skipped
+  // (skippedByReason['no-connector']++).
+  //
+  // Both before+after must seed `no-connector` so metric_growth's path
+  // resolution returns numbers (delta math). The real registry seeds the same
+  // way once the first skip lands; tests bake in 0 to mirror that floor.
+  const HEALTHY_METRICS_BEFORE = { judge: { triggeredTotal: 0, skippedByReason: { 'no-connector': 0 } } };
+  const HEALTHY_METRICS_AFTER = { judge: { triggeredTotal: 1, skippedByReason: { 'no-connector': 0 } } };
+  const BROKEN_METRICS_BEFORE = { judge: { triggeredTotal: 0, skippedByReason: { 'no-connector': 0 } } };
+  const BROKEN_METRICS_AFTER = { judge: { triggeredTotal: 0, skippedByReason: { 'no-connector': 1 } } };
+
   // Healthy state: the agent created a button, screenshot taken, judge ran
   // and rendered the .judge-verdict-card (page.locator returns visible: true).
   const HEALTHY_STEP_2 = makeStepData({
@@ -402,16 +419,21 @@ describe('B-018 regression sentinel (task 2.13 simulated)', () => {
     screenshotCount: 1,
     durationMs: 48000,
     page: fakePageReturns(true),
+    metricsBefore: HEALTHY_METRICS_BEFORE,
+    metricsAfter: HEALTHY_METRICS_AFTER,
   });
 
   // B-018 active: everything identical EXCEPT the judge harness was silently
-  // skipped, so the .judge-verdict-card was never rendered (isVisible: false).
+  // skipped, so the .judge-verdict-card was never rendered (isVisible: false)
+  // and the registry caught the silent skip via skippedByReason['no-connector'].
   const BROKEN_STEP_2 = makeStepData({
     toolsCalled: ['figma_render_jsx', 'figma_screenshot'],
     responseText: "I've created a button with 'Submit' label, blue background, white text, and rounded corners.",
     screenshotCount: 1,
     durationMs: 45000,
     page: fakePageReturns(false),
+    metricsBefore: BROKEN_METRICS_BEFORE,
+    metricsAfter: BROKEN_METRICS_AFTER,
   });
 
   it('step 2 assertions PASS when judge auto-triggered (healthy)', async () => {
@@ -424,13 +446,15 @@ describe('B-018 regression sentinel (task 2.13 simulated)', () => {
     const { passed, results } = await evaluateAssertions(STEP_2_ASSERT, BROKEN_STEP_2);
     expect(passed).toBe(false);
 
-    // The specific failure signature of B-018: dom_visible fails because the
-    // judge verdict card was never rendered, while everything else (tools ran,
-    // screenshot taken, duration fine) still passes.
-    const failing = results.filter((r: AssertionResult) => !r.passed);
-    expect(failing).toHaveLength(1);
-    expect(failing[0].name).toBe('dom_visible');
-    expect(failing[0].error).toMatch(/judge-verdict-card.*not visible/);
+    // Two-layer B-018 signature:
+    //  1. dom_visible fails because the judge verdict card was never rendered
+    //  2. metric_growth fails because triggeredTotal didn't grow AND
+    //     skippedByReason['no-connector'] grew (Fase 4 semantic check)
+    const failingNames = results.filter((r: AssertionResult) => !r.passed).map((r: AssertionResult) => r.name);
+    expect(failingNames).toContain('dom_visible');
+    expect(failingNames).toContain('metric_growth');
+    const domFail = results.find((r: AssertionResult) => r.name === 'dom_visible');
+    expect(domFail?.error).toMatch(/judge-verdict-card.*not visible/);
 
     // Non-B-018 assertions still pass — this is what makes the sentinel
     // precise: it does not false-positive on transport errors.
@@ -464,6 +488,8 @@ describe('B-018 regression sentinel (task 2.13 simulated)', () => {
       screenshotCount: 1,
       durationMs: 50000,
       page: fakePageReturns(true),
+      metricsBefore: HEALTHY_METRICS_BEFORE,
+      metricsAfter: HEALTHY_METRICS_AFTER,
     });
     const { passed } = await evaluateAssertions(STEP_2_ASSERT, withVerdict);
     expect(passed).toBe(true);
@@ -481,14 +507,17 @@ describe('B-018 regression sentinel (task 2.13 simulated)', () => {
       screenshotCount: 1,
       durationMs: 47000,
       page: fakePageReturns(false), // no card rendered → judge did NOT run
+      metricsBefore: BROKEN_METRICS_BEFORE,
+      metricsAfter: BROKEN_METRICS_AFTER,
     });
     const { passed, results } = await evaluateAssertions(STEP_2_ASSERT, withProseEcho);
     // Judge did NOT actually run — sentinel must FAIL even though prose
     // mentions "quality check". The structural anchor immunizes us from prose drift.
     expect(passed).toBe(false);
-    const failing = results.filter((r: AssertionResult) => !r.passed);
-    expect(failing).toHaveLength(1);
-    expect(failing[0].name).toBe('dom_visible');
+    const failingNames = results.filter((r: AssertionResult) => !r.passed).map((r: AssertionResult) => r.name);
+    expect(failingNames).toContain('dom_visible');
+    // metric_growth also catches this case via Fase 4 semantic layer.
+    expect(failingNames).toContain('metric_growth');
   });
 
   // Drift detection (review fix #4): parse the live assert blocks from
@@ -549,7 +578,7 @@ describe('module exports', () => {
     expect(DSL_VERSION).toBe(1);
   });
 
-  it('ASSERTION_EVALUATORS registry has exactly 7 P1 types', () => {
+  it('ASSERTION_EVALUATORS registry has all 9 supported types (7 P1 + 2 metric)', () => {
     const expected = [
       'tools_called',
       'tools_called_any_of',
@@ -558,7 +587,206 @@ describe('module exports', () => {
       'screenshots_min',
       'duration_max_ms',
       'dom_visible',
+      'metric',
+      'metric_growth',
     ].sort();
     expect(Object.keys(ASSERTION_EVALUATORS).sort()).toEqual(expected);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// metric / metric_growth (Fase 4 — Task 4.13)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('metric', () => {
+  function snap(judge: Partial<{ triggeredTotal: number; skippedByReason: Record<string, number> }> = {}) {
+    return {
+      schemaVersion: 1,
+      judge: {
+        triggeredTotal: 0,
+        skippedByReason: {},
+        ...judge,
+      },
+      tools: { callCount: 0, byName: { figma_set_fills: { calls: 3, errors: 0, totalDurationMs: 100 } } },
+    };
+  }
+
+  it('passes when path satisfies > op', async () => {
+    const r = await evaluateAssertions({ metric: { path: 'judge.triggeredTotal', op: '>', value: 0 } }, {
+      metricsAfter: snap({ triggeredTotal: 2 }),
+    } as any);
+    expect(r.passed).toBe(true);
+  });
+
+  it('fails when actual does not satisfy ==', async () => {
+    const r = await evaluateAssertions({ metric: { path: 'judge.triggeredTotal', op: '==', value: 5 } }, {
+      metricsAfter: snap({ triggeredTotal: 2 }),
+    } as any);
+    expect(r.passed).toBe(false);
+    expect(r.results[0].error).toMatch(/actual: 2/);
+  });
+
+  it('supports bracket-quoted paths for keys with dashes', async () => {
+    const r = await evaluateAssertions(
+      { metric: { path: "judge.skippedByReason['no-connector']", op: '>=', value: 1 } },
+      { metricsAfter: snap({ skippedByReason: { 'no-connector': 1 } }) } as any,
+    );
+    expect(r.passed).toBe(true);
+  });
+
+  it('fails loud when metricsAfter is missing', async () => {
+    const r = await evaluateAssertions({ metric: { path: 'judge.triggeredTotal', op: '>', value: 0 } }, {} as any);
+    expect(r.passed).toBe(false);
+    expect(r.results[0].error).toMatch(/metricsAfter missing/);
+  });
+
+  it('rejects unknown op', async () => {
+    const r = await evaluateAssertions({ metric: { path: 'judge.triggeredTotal', op: '=>', value: 0 } }, {
+      metricsAfter: snap(),
+    } as any);
+    expect(r.passed).toBe(false);
+    expect(r.results[0].error).toMatch(/op/);
+  });
+
+  it('fails when path resolves to undefined', async () => {
+    const r = await evaluateAssertions({ metric: { path: 'judge.nonExistent', op: '>', value: 0 } }, {
+      metricsAfter: snap(),
+    } as any);
+    expect(r.passed).toBe(false);
+    expect(r.results[0].error).toMatch(/undefined/);
+  });
+
+  it('accepts array form for batching multiple checks', async () => {
+    const r = await evaluateAssertions(
+      {
+        metric: [
+          { path: 'judge.triggeredTotal', op: '>', value: 0 },
+          { path: "judge.skippedByReason['no-connector']", op: '==', value: 0 },
+        ],
+      },
+      { metricsAfter: snap({ triggeredTotal: 2, skippedByReason: { 'no-connector': 0 } }) } as any,
+    );
+    expect(r.passed).toBe(true);
+  });
+
+  it('array form reports the failing element index', async () => {
+    const r = await evaluateAssertions(
+      {
+        metric: [
+          { path: 'judge.triggeredTotal', op: '>', value: 0 },
+          { path: 'judge.triggeredTotal', op: '==', value: 99 },
+        ],
+      },
+      { metricsAfter: snap({ triggeredTotal: 2 }) } as any,
+    );
+    expect(r.passed).toBe(false);
+    expect(r.results[0].error).toMatch(/\[1\]/);
+  });
+});
+
+describe('metric_growth', () => {
+  function pair(beforeVal: number, afterVal: number) {
+    return {
+      metricsBefore: { tools: { callCount: beforeVal } },
+      metricsAfter: { tools: { callCount: afterVal } },
+    };
+  }
+
+  it('passes when delta within maxGrowth', async () => {
+    const r = await evaluateAssertions(
+      { metric_growth: { path: 'tools.callCount', maxGrowth: 5 } },
+      pair(10, 13) as any,
+    );
+    expect(r.passed).toBe(true);
+  });
+
+  it('fails when delta exceeds maxGrowth', async () => {
+    const r = await evaluateAssertions(
+      { metric_growth: { path: 'tools.callCount', maxGrowth: 2 } },
+      pair(10, 15) as any,
+    );
+    expect(r.passed).toBe(false);
+    expect(r.results[0].error).toMatch(/delta 5 > maxGrowth 2/);
+  });
+
+  it('supports exactGrowth', async () => {
+    const ok = await evaluateAssertions(
+      { metric_growth: { path: 'tools.callCount', exactGrowth: 1 } },
+      pair(7, 8) as any,
+    );
+    expect(ok.passed).toBe(true);
+    const bad = await evaluateAssertions(
+      { metric_growth: { path: 'tools.callCount', exactGrowth: 1 } },
+      pair(7, 9) as any,
+    );
+    expect(bad.passed).toBe(false);
+  });
+
+  it('supports minGrowth', async () => {
+    const r = await evaluateAssertions({ metric_growth: { path: 'tools.callCount', minGrowth: 3 } }, pair(0, 2) as any);
+    expect(r.passed).toBe(false);
+    expect(r.results[0].error).toMatch(/< minGrowth 3/);
+  });
+
+  it('requires both metricsBefore and metricsAfter', async () => {
+    const r = await evaluateAssertions({ metric_growth: { path: 'tools.callCount', maxGrowth: 5 } }, {
+      metricsAfter: { tools: { callCount: 1 } },
+    } as any);
+    expect(r.passed).toBe(false);
+    expect(r.results[0].error).toMatch(/metricsBefore.*missing/);
+  });
+
+  it('rejects when no constraint specified', async () => {
+    const r = await evaluateAssertions({ metric_growth: { path: 'tools.callCount' } }, pair(0, 1) as any);
+    expect(r.passed).toBe(false);
+    expect(r.results[0].error).toMatch(/maxGrowth.*minGrowth.*exactGrowth/);
+  });
+
+  it('treats both-undefined as delta 0 (sparse-map convention)', async () => {
+    // Sparse-map convention: counters that have never fired aren't in the map.
+    // The evaluator floors missing values to 0 so test scripts can assert
+    // "did NOT happen" without pre-seeding the registry.
+    const r = await evaluateAssertions(
+      { metric_growth: { path: 'tools.byName.figma_set_fills.calls', maxGrowth: 1 } },
+      { metricsBefore: { tools: { byName: {} } }, metricsAfter: { tools: { byName: {} } } } as any,
+    );
+    expect(r.passed).toBe(true);
+  });
+
+  it('fails when path resolves to a non-number, non-undefined value', async () => {
+    // String at the path (not undefined) → cannot do delta math, fail loud.
+    const r = await evaluateAssertions({ metric_growth: { path: 'tools.weird', maxGrowth: 1 } }, {
+      metricsBefore: { tools: { weird: 'string' } },
+      metricsAfter: { tools: { weird: 'still-a-string' } },
+    } as any);
+    expect(r.passed).toBe(false);
+    expect(r.results[0].error).toMatch(/must resolve to numbers/);
+  });
+
+  it('accepts array form for batching multiple checks', async () => {
+    const r = await evaluateAssertions(
+      {
+        metric_growth: [
+          { path: 'tools.callCount', minGrowth: 1 },
+          { path: 'tools.callCount', maxGrowth: 5 },
+        ],
+      },
+      pair(0, 3) as any,
+    );
+    expect(r.passed).toBe(true);
+  });
+
+  it('array form fails on second-element violation with index', async () => {
+    const r = await evaluateAssertions(
+      {
+        metric_growth: [
+          { path: 'tools.callCount', minGrowth: 1 },
+          { path: 'tools.callCount', maxGrowth: 2 },
+        ],
+      },
+      pair(0, 5) as any,
+    );
+    expect(r.passed).toBe(false);
+    expect(r.results[0].error).toMatch(/\[1\]/);
   });
 });

@@ -61,6 +61,9 @@ Send: "Create a blue button with the text 'Click Me', about 200x60 pixels with r
 # Creation step: any of three creation tools is valid per the prompt's intent.
 # tools_called_any_of expresses the domain truth without forcing arbitrary
 # pre-calibration choice (the agent's pick depends on prompt phrasing + model).
+# Fase 4: metric_growth on tools.callCount adds an end-to-end smoke test that
+# the registry is wired up to handleToolEnd. Loose cap so the assertion stays
+# stable across model swap, but tight enough to catch a runaway loop.
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child]
 screenshots_min: 1
 response_contains:
@@ -69,6 +72,11 @@ response_contains:
 duration_max_ms: 90000
 tools_NOT_called_more_than:
   figma_screenshot: 2
+metric_growth:
+  - path: "tools.callCount"
+    minGrowth: 1
+  - path: "tools.callCount"
+    maxGrowth: 15
 ```
 
 ### 5. Verify in Figma (if possible)

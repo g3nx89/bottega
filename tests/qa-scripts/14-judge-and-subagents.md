@@ -35,18 +35,27 @@ Send: "Create a simple button with text 'Submit' — blue background, white text
 
 ```assert
 # B-018 SENTINEL — judge auto-trigger after mutation tools.
-# Asserts via dom_visible on `.judge-verdict-card` because the judge harness
-# renders its verdict as a SEPARATE DOM element (sibling of `.message-content`)
-# inside the assistant bubble — NOT inside the agent's response text stream.
-# A response_contains check would always fail since the agent's prose never
-# embeds the rendered footer. The card class is set in src/renderer/app.js
-# (createJudgeVerdictCard) and only created when the judge harness fires.
-# Empirically validated against script 14 calibration (2026-04-08) where the
-# judge-active runs produced the .judge-verdict-card element.
+# Two-layer guarantee:
+#  1. dom_visible on `.judge-verdict-card` — the judge harness renders its
+#     verdict as a SEPARATE DOM element (sibling of `.message-content`) inside
+#     the assistant bubble, NOT inside the response text stream. A
+#     response_contains check would always fail since the prose never embeds
+#     the rendered footer. Class set in src/renderer/app.js (createJudgeVerdictCard).
+#     Empirically validated 2026-04-08.
+#  2. metric_growth on `judge.triggeredTotal` (Fase 4) — semantic guarantee
+#     that the harness ACTUALLY ran. If a future bug causes the card to render
+#     from a stale DOM template, the metric assertion still catches it.
+#  3. metric on `judge.skippedByReason['no-connector']` — original B-018 was a
+#     silent skip. If the regression returns this delta is > 0.
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child]
 screenshots_min: 1
 dom_visible: ".assistant-message:last-child .judge-verdict-card"
 duration_max_ms: 120000
+metric_growth:
+  - path: "judge.triggeredTotal"
+    minGrowth: 1
+  - path: "judge.skippedByReason['no-connector']"
+    exactGrowth: 0
 ```
 
 ### 3. Judge verdict analysis
@@ -82,16 +91,20 @@ Send: "Create a red rectangle"
 ```assert
 # Judge-disabled path: creation tool MUST still run, but the duration cap is
 # tighter (60s vs 120s in step 2) — without judge overhead the cycle is faster.
-# Caveat: P1 has no `response_NOT_contains` for asserting absence of "Quality
-# Check" — that becomes a P2 assertion. Step 6 (re-enable) carries its own
-# assert block that re-checks the judge footer presence, completing the
-# off → on cycle coverage.
+# Fase 4 metric assertions add semantic verification:
+#  - judge.triggeredTotal MUST NOT grow (0)
+#  - judge.skippedByReason['disabled'] MUST grow by ≥1 (replaces P2 response_NOT_contains)
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child]
 screenshots_min: 1
 response_contains:
   any_of: [red, rectangle, created]
   case_sensitive: false
 duration_max_ms: 60000
+metric_growth:
+  - path: "judge.triggeredTotal"
+    exactGrowth: 0
+  - path: "judge.skippedByReason['disabled']"
+    minGrowth: 1
 ```
 
 ### 6. Force re-run judge (with mutation)
