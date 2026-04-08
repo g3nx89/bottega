@@ -110,13 +110,13 @@ Send: "/generate" without any description (just the command)
 # Negative test: empty /generate MUST NOT call figma_generate_image (would
 # waste a Gemini call) and MUST ask the user for a description in natural
 # language. The cap of 0 enforces "no premature generation".
-# Token tightening: dropped "what" and "please" — they're ambient polite
-# English that match almost any agent reply. Kept the substantive
-# clarification-asking tokens.
+# Calibration (2026-04-08) found response_contains flaky — the agent uses
+# different clarification phrasings across runs. Loosen to the widest set
+# of clarification-request verbs while still avoiding ambient English.
 tools_NOT_called_more_than:
   figma_generate_image: 0
 response_contains:
-  any_of: [description, missing, prompt, provide, specify]
+  any_of: [description, missing, prompt, provide, specify, need, describe, tell]
   case_sensitive: false
 duration_max_ms: 30000
 ```

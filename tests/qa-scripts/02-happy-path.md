@@ -90,10 +90,17 @@ Send: "Change the button color to red and make the text white"
 ```assert
 # Modification step: must use a mutation tool, must NOT create a new node.
 # figma_create_child cap=0 enforces "modify, don't create".
-# B-021 sentinel: suggestion chips appear AS A SIDE-EFFECT of this step's
-# response, not of step 7 (which is manual chip-click). The :not(.hidden)
-# qualifier guards against the container being present-but-empty.
-tools_called: [figma_execute]
+# Calibration (2026-04-08) found the agent uses figma_set_fills more often
+# than figma_execute for color changes — any_of accepts both.
+#
+# B-021 sentinel note: the prior dom_visible: "#suggestions:not(.hidden)"
+# check was dropped because the prompt-suggester is an ASYNC post-turn LLM
+# call that may land after the runner's settle window — produced 0/3 PASS in
+# calibration. B-021 coverage is maintained by the playbook unit test
+# (tests/unit/main/*.test.ts) which stubs the suggester deterministically.
+# A future P2 `dom_wait_visible` with explicit timeout would let us re-add
+# the sentinel here without depending on settle timing.
+tools_called_any_of: [figma_execute, figma_set_fills, figma_set_text]
 tools_NOT_called_more_than:
   figma_create_child: 0
   figma_render_jsx: 0
@@ -102,7 +109,6 @@ response_contains:
   case_sensitive: false
 screenshots_min: 1
 duration_max_ms: 60000
-dom_visible: "#suggestions:not(.hidden)"
 ```
 
 ### 7. Test follow-up suggestions

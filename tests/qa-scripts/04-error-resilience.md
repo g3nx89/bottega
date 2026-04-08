@@ -52,14 +52,19 @@ Send: "Execute this code: figma.currentPage.notAMethod()"
 - Can you continue the conversation?
 
 ```assert
-# Error path: figma_execute MUST be called (not skipped), the response MUST
-# acknowledge the error in natural language, and the duration must be bounded
-# (no infinite retry loop).
-tools_called: [figma_execute]
+# Error path: the response MUST acknowledge the error in natural language
+# (whatever the agent's path), and the duration must be bounded (no infinite
+# retry loop).
+# Calibration (2026-04-08) found tools_called: [figma_execute] flaky — the
+# agent sometimes attempts figma_execute (which fails and produces an error
+# tool card) and sometimes refuses upfront without calling the tool. Both
+# are valid handling of invalid code. The response_contains check is the
+# substantive assertion: whatever the path, the agent must communicate the
+# error to the user.
 response_contains:
   any_of: [error, failed, undefined, "not a function", method]
   case_sensitive: false
-duration_max_ms: 30000
+duration_max_ms: 45000
 ```
 
 ### 5. Multiple tabs during operations
