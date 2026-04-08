@@ -525,4 +525,253 @@ describe('createEventRouter', () => {
       expect(slot.session.subscribe).toHaveBeenCalledTimes(2); // 1 from beforeEach + 1 from first router() call
     });
   });
+
+  // ── Fase 4: MetricsRegistry hook wiring ────────────────────────────────
+  //
+  // The 8 hook points in session-events.ts are easy to typo (e.g.
+  // 'no_connector' vs 'no-connector') and have no other test coverage.
+  // These tests inject a fake MetricsRegistry and assert that each path
+  // through handleAgentEnd / handleToolEnd / finalizeTurn fires the right
+  // record* call. The fake records calls in arrays keyed by method name so
+  // assertions stay readable.
+
+  describe('MetricsRegistry hook wiring', () => {
+    type FakeRegistry = ReturnType<typeof makeFakeRegistry>;
+
+    function makeFakeRegistry() {
+      return {
+        turnStarts: 0,
+        turnEnds: 0,
+        triggered: 0,
+        skipped: [] as string[],
+        verdicts: [] as string[],
+        toolCalls: [] as Array<{ name: string; ms: number; success: boolean }>,
+        recordTurnStart() {
+          this.turnStarts++;
+        },
+        recordTurnEnd() {
+          this.turnEnds++;
+        },
+        recordJudgeTriggered() {
+          this.triggered++;
+        },
+        recordJudgeSkipped(reason: string) {
+          this.skipped.push(reason);
+        },
+        recordJudgeVerdict(v: string) {
+          this.verdicts.push(v);
+        },
+        recordToolCall(name: string, ms: number, success: boolean) {
+          this.toolCalls.push({ name, ms, success });
+        },
+      };
+    }
+
+    function makeMetricsDeps(registry: FakeRegistry, overrides: Partial<any> = {}) {
+      const deps = makeDeps({
+        infra: { metricsRegistry: registry },
+        getConnectorForSlot: () => ({}),
+        ...overrides,
+      });
+      // makeTracker() doesn't include trackJudgeVerdict — add it so the
+      // onVerdict callback doesn't throw before reaching recordJudgeVerdict.
+      deps.usageTracker.trackJudgeVerdict = vi.fn();
+      return deps;
+    }
+
+    it('recordToolCall fires on tool_execution_end with name + duration + success', () => {
+      const registry = makeFakeRegistry();
+      const deps = makeMetricsDeps(registry);
+      const metricsSlot = makeSlot();
+      deps.slotManager.getSlot.mockReturnValue(metricsSlot);
+      const { subscribeToSlot } = createEventRouter(deps as any);
+      subscribeToSlot(metricsSlot);
+      const handler = metricsSlot.session.subscribe.mock.calls[0][0];
+
+      handler({ type: 'tool_execution_start', toolName: 'figma_set_fills', toolCallId: 'tc-1' });
+      handler({
+        type: 'tool_execution_end',
+        toolName: 'figma_set_fills',
+        toolCallId: 'tc-1',
+        isError: false,
+        result: { content: [] },
+      });
+
+      expect(registry.toolCalls).toHaveLength(1);
+      expect(registry.toolCalls[0].name).toBe('figma_set_fills');
+      expect(registry.toolCalls[0].success).toBe(true);
+      expect(registry.toolCalls[0].ms).toBeGreaterThanOrEqual(0);
+    });
+
+    it('recordToolCall reports success=false when isError is true', () => {
+      const registry = makeFakeRegistry();
+      const deps = makeMetricsDeps(registry);
+      const metricsSlot = makeSlot();
+      deps.slotManager.getSlot.mockReturnValue(metricsSlot);
+      const { subscribeToSlot } = createEventRouter(deps as any);
+      subscribeToSlot(metricsSlot);
+      const handler = metricsSlot.session.subscribe.mock.calls[0][0];
+
+      handler({ type: 'tool_execution_start', toolName: 'figma_set_fills', toolCallId: 'tc-err' });
+      handler({
+        type: 'tool_execution_end',
+        toolName: 'figma_set_fills',
+        toolCallId: 'tc-err',
+        isError: true,
+        result: { content: [] },
+      });
+
+      expect(registry.toolCalls[0].success).toBe(false);
+    });
+
+    it('recordTurnEnd fires when finalizeTurn runs (via agent_end)', async () => {
+      const registry = makeFakeRegistry();
+      const deps = makeMetricsDeps(registry);
+      const metricsSlot = makeSlot();
+      deps.slotManager.getSlot.mockReturnValue(metricsSlot);
+      const { subscribeToSlot } = createEventRouter(deps as any);
+      subscribeToSlot(metricsSlot);
+      const handler = metricsSlot.session.subscribe.mock.calls[0][0];
+
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+
+      expect(registry.turnEnds).toBe(1);
+    });
+
+    it("recordJudgeSkipped('disabled') fires when judge is off and override is null", async () => {
+      const { loadSubagentSettings } = await import('../../../src/main/subagent/config.js');
+      (loadSubagentSettings as any).mockReturnValue({ judgeMode: 'off', autoRetry: false, maxRetries: 0, models: {} });
+
+      const registry = makeFakeRegistry();
+      const deps = makeMetricsDeps(registry);
+      const metricsSlot = makeSlot({ judgeOverride: null });
+      deps.slotManager.getSlot.mockReturnValue(metricsSlot);
+      const { subscribeToSlot } = createEventRouter(deps as any);
+      subscribeToSlot(metricsSlot);
+      const handler = metricsSlot.session.subscribe.mock.calls[0][0];
+
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+
+      expect(registry.skipped).toContain('disabled');
+      expect(registry.skipped).not.toContain('no-connector');
+      expect(registry.triggered).toBe(0);
+    });
+
+    it("recordJudgeSkipped('no-mutations') fires when judge is on but turn had no mutations", async () => {
+      const { loadSubagentSettings } = await import('../../../src/main/subagent/config.js');
+      const { categorizeToolName } = await import('../../../src/main/compression/metrics.js');
+      (loadSubagentSettings as any).mockReturnValue({ judgeMode: 'auto', autoRetry: false, maxRetries: 0, models: {} });
+      // Force every tool to read-only — `hasMutations` will be false.
+      (categorizeToolName as any).mockReturnValue('discovery');
+
+      const registry = makeFakeRegistry();
+      const deps = makeMetricsDeps(registry);
+      const metricsSlot = makeSlot({ judgeOverride: null });
+      deps.slotManager.getSlot.mockReturnValue(metricsSlot);
+      const { subscribeToSlot } = createEventRouter(deps as any);
+      subscribeToSlot(metricsSlot);
+      const handler = metricsSlot.session.subscribe.mock.calls[0][0];
+
+      handler({ type: 'tool_execution_start', toolName: 'figma_screenshot', toolCallId: 'tc-1' });
+      handler({
+        type: 'tool_execution_end',
+        toolName: 'figma_screenshot',
+        toolCallId: 'tc-1',
+        isError: false,
+        result: { content: [] },
+      });
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+
+      expect(registry.skipped).toContain('no-mutations');
+      expect(registry.skipped).not.toContain('disabled');
+      expect(registry.triggered).toBe(0);
+    });
+
+    it("recordJudgeSkipped('no-connector') fires when judge would run but no connector available", async () => {
+      const { loadSubagentSettings } = await import('../../../src/main/subagent/config.js');
+      const { categorizeToolName } = await import('../../../src/main/compression/metrics.js');
+      (loadSubagentSettings as any).mockReturnValue({ judgeMode: 'auto', autoRetry: false, maxRetries: 0, models: {} });
+      (categorizeToolName as any).mockReturnValue('mutation');
+
+      const registry = makeFakeRegistry();
+      // getConnectorForSlot returns null → judge skipped with no-connector reason
+      const deps = makeDeps({
+        infra: { metricsRegistry: registry },
+        getConnectorForSlot: () => null,
+      });
+      const metricsSlot = makeSlot({ judgeOverride: null });
+      deps.slotManager.getSlot.mockReturnValue(metricsSlot);
+      const { subscribeToSlot } = createEventRouter(deps as any);
+      subscribeToSlot(metricsSlot);
+      const handler = metricsSlot.session.subscribe.mock.calls[0][0];
+
+      handler({ type: 'tool_execution_start', toolName: 'figma_set_fills', toolCallId: 'tc-1' });
+      handler({
+        type: 'tool_execution_end',
+        toolName: 'figma_set_fills',
+        toolCallId: 'tc-1',
+        isError: false,
+        result: { content: [] },
+      });
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+
+      expect(registry.skipped).toContain('no-connector');
+      expect(registry.triggered).toBe(0);
+    });
+
+    it('recordJudgeTriggered + recordJudgeVerdict fire when judge actually runs', async () => {
+      const { loadSubagentSettings } = await import('../../../src/main/subagent/config.js');
+      const { runJudgeHarness } = await import('../../../src/main/subagent/judge-harness.js');
+      const { categorizeToolName } = await import('../../../src/main/compression/metrics.js');
+      (loadSubagentSettings as any).mockReturnValue({ judgeMode: 'auto', autoRetry: false, maxRetries: 0, models: {} });
+      (categorizeToolName as any).mockReturnValue('mutation');
+      // Judge harness invokes the onVerdict callback once with PASS.
+      // Args order matches runJudgeHarness signature:
+      // (infra, connector, slot, settings, toolNames, mutatedIds, signal, callbacks)
+      (runJudgeHarness as any).mockReset();
+      (runJudgeHarness as any).mockImplementation(async (..._args: any[]) => {
+        // 8th positional arg is the JudgeHarnessCallbacks object.
+        const callbacks = _args[7];
+        callbacks?.onVerdict({ verdict: 'PASS', criteria: [] }, 1, 1);
+        return null;
+      });
+
+      const registry = makeFakeRegistry();
+      const deps = makeMetricsDeps(registry);
+      const metricsSlot = makeSlot({ judgeOverride: null });
+      deps.slotManager.getSlot.mockReturnValue(metricsSlot);
+      const { subscribeToSlot } = createEventRouter(deps as any);
+      subscribeToSlot(metricsSlot);
+      const handler = metricsSlot.session.subscribe.mock.calls[0][0];
+
+      handler({ type: 'tool_execution_start', toolName: 'figma_set_fills', toolCallId: 'tc-1' });
+      handler({
+        type: 'tool_execution_end',
+        toolName: 'figma_set_fills',
+        toolCallId: 'tc-1',
+        isError: false,
+        result: { content: [] },
+      });
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+
+      expect(registry.triggered).toBe(1);
+      expect(registry.verdicts).toEqual(['PASS']);
+      expect(registry.skipped).not.toContain('no-connector');
+    });
+
+    it('exposes getJudgeInProgress as a ReadonlySet on the EventRouter', () => {
+      const registry = makeFakeRegistry();
+      const deps = makeMetricsDeps(registry);
+      const router = createEventRouter(deps as any);
+      const set = router.getJudgeInProgress();
+      // Idle: empty Set
+      expect(set instanceof Set).toBe(true);
+      expect(set.size).toBe(0);
+    });
+  });
 });

@@ -11,7 +11,13 @@ const common = {
   sourcemap: true,
   packages: 'external',  // Don't bundle node_modules — resolve at runtime
   external: ['electron'],
-  define: { '__APP_VERSION__': JSON.stringify(pkg.version) },
+  define: {
+    '__APP_VERSION__': JSON.stringify(pkg.version),
+    // Bake BOTTEGA_AGENT_TEST at build time so the test-IPC gate can't be
+    // toggled by setting the env var when launching a packaged release. To
+    // enable the test surface, rebuild with `BOTTEGA_AGENT_TEST=1 npm run build`.
+    'process.env.BOTTEGA_AGENT_TEST': JSON.stringify(process.env.BOTTEGA_AGENT_TEST ?? ''),
+  },
 }
 
 await Promise.all([

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, crashReporter, dialog, ipcMain } from 'electron';
 import { createChildLogger, logFilePath, logger, sessionUid } from '../figma/logger.js';
 import { DEFAULT_WS_PORT } from '../figma/port-discovery.js';
-import { createAgentInfra, OAUTH_PROVIDER_MAP } from './agent.js';
+import { type AgentInfra, createAgentInfra, OAUTH_PROVIDER_MAP } from './agent.js';
 import { AppStatePersistence } from './app-state-persistence.js';
 import { initAutoUpdater } from './auto-updater.js';
 import { cleanOldLogs, collectSystemInfo } from './diagnostics.js';
@@ -18,6 +18,7 @@ import {
   MSG_STARTUP_ERROR_BODY,
   MSG_STARTUP_ERROR_TITLE,
 } from './messages.js';
+import { MetricsRegistry } from './metrics-registry.js';
 import { loadDiagnosticsConfig, UsageTracker } from './remote-logger.js';
 import { safeSend, safeWc } from './safe-send.js';
 import { SessionStore } from './session-store.js';
@@ -246,11 +247,16 @@ if (!gotTheLock) {
           designSystemCache,
           metricsCollector,
           compressionExtensionFactory: () => ({}),
+          taskExtensionFactory: () => ({}),
+          workflowExtensionFactory: () => ({}),
+          setActiveTaskStore: () => {},
+          setWorkflowContext: () => {},
           wsServer: figmaCore.wsServer,
           figmaAPI: figmaCore.figmaAPI,
           queueManager: new OperationQueueManager(),
+          metricsRegistry: new MetricsRegistry(),
           getImageGenerator: () => imageGenState.generator,
-        } as any;
+        };
       } else {
         try {
           infra = await createAgentInfra(figmaCore, {
@@ -264,6 +270,11 @@ if (!gotTheLock) {
           );
           // Graceful degradation: create stub infra so the UI can load and the user can configure credentials
           log.warn('Starting with stub infrastructure — agent features will be unavailable');
+          // Graceful degradation: minimal stubs that satisfy AgentInfra so the
+          // UI loads. Tools/auth will fail at runtime — that's expected, the
+          // user is here to configure credentials. Each stub field is cast
+          // individually so adding a new field to AgentInfra still surfaces a
+          // type error in the spread, instead of being hidden by `as any`.
           infra = {
             authStorage: {
               get: () => null,
@@ -272,26 +283,38 @@ if (!gotTheLock) {
               getApiKey: async () => undefined,
               login: async () => {},
               logout() {},
-            },
-            modelRegistry: {},
-            sessionManager: {},
+            } as unknown as AgentInfra['authStorage'],
+            modelRegistry: {} as unknown as AgentInfra['modelRegistry'],
+            sessionManager: {} as unknown as AgentInfra['sessionManager'],
             configManager: {
               getActiveConfig: () => ({ designSystemCacheTtlMs: 60_000 }),
               getActiveProfile: () => 'balanced',
-            },
+            } as unknown as AgentInfra['configManager'],
             designSystemCache: {
               get: () => null,
               set: (r: any) => ({ compact: {}, raw: r }),
               invalidate: () => {},
               isValid: () => false,
-            },
-            metricsCollector: { record: () => {}, getSummary: () => ({}), finalize: async () => {} },
+            } as unknown as AgentInfra['designSystemCache'],
+            metricsCollector: {
+              record: () => {},
+              getSummary: () => ({}),
+              finalize: async () => {},
+            } as unknown as AgentInfra['metricsCollector'],
             compressionExtensionFactory: () => ({}),
+            taskExtensionFactory: () => ({}),
+            workflowExtensionFactory: () => ({}),
+            setActiveTaskStore: () => {},
+            setWorkflowContext: () => {},
             wsServer: figmaCore.wsServer,
             figmaAPI: figmaCore.figmaAPI,
-            queueManager: { getQueue: () => ({ execute: <T>(fn: () => Promise<T>) => fn() }), removeQueue: () => {} },
+            queueManager: {
+              getQueue: () => ({ execute: <T>(fn: () => Promise<T>) => fn() }),
+              removeQueue: () => {},
+            } as unknown as AgentInfra['queueManager'],
+            metricsRegistry: new MetricsRegistry(),
             getImageGenerator: () => imageGenState.generator,
-          } as any;
+          };
         }
       }
       appState.infra = infra;
@@ -415,9 +438,15 @@ if (!gotTheLock) {
         log.warn({ err }, 'Figma plugin startup sync failed (non-fatal)');
       }
 
-      // ── Agent test oracle: direct Figma code execution ──
-      // Only registered when BOTTEGA_AGENT_TEST env var is set (never in production).
-      if (process.env.BOTTEGA_AGENT_TEST) {
+      // ── Agent test oracle: direct Figma code execution + metrics snapshot ──
+      // Two layers of protection:
+      //  1. `process.env.BOTTEGA_AGENT_TEST` is replaced at build time by
+      //     esbuild's `define` (see scripts/build.mjs). A packaged release
+      //     built without the env var has the literal `''` here, so the
+      //     condition is dead code that the bundler eliminates.
+      //  2. `!app.isPackaged` is a runtime fallback in case someone ships a
+      //     dev build by accident — the IPC won't register on a .dmg/.app.
+      if (process.env.BOTTEGA_AGENT_TEST && !app.isPackaged) {
         ipcMain.handle(
           'test:figma-execute',
           async (_event: any, code: string, timeoutMs?: number, fileKey?: string) => {
@@ -430,6 +459,26 @@ if (!gotTheLock) {
             );
           },
         );
+
+        // Fase 4: test-only MetricsRegistry snapshot. Returns a JSON snapshot
+        // of slots, judge counters, tools, turns, ws state, and process memory.
+        // Schema is versioned (`schemaVersion: 1`) — see docs/test-metrics-schema.md.
+        // Defensive null guard: appState may not be fully populated during
+        // a soft-reset window — return null instead of throwing on `infra!`.
+        ipcMain.handle('test:get-metrics', () => {
+          if (!appState.infra || !appState.slotManager || !figmaCore) return null;
+          return appState.infra.metricsRegistry.snapshot({
+            slotManager: appState.slotManager,
+            wsServer: figmaCore.wsServer,
+            getJudgeInProgress: ipcController.getJudgeInProgress,
+          });
+        });
+
+        ipcMain.handle('test:reset-metrics', () => {
+          if (!appState.infra) return { ok: false };
+          appState.infra.metricsRegistry.reset();
+          return { ok: true };
+        });
       }
 
       // 7. Auto-updater (GitHub Releases)

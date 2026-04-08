@@ -18,6 +18,7 @@ import { createCompressionExtensionFactory } from './compression/extension-facto
 import type { CompressionMetricsCollector } from './compression/metrics.js';
 import type { FigmaCore } from './figma-core.js';
 import type { ImageGenerator } from './image-gen/image-generator.js';
+import { MetricsRegistry } from './metrics-registry.js';
 import type { OperationQueueManager } from './operation-queue-manager.js';
 import { ScopedConnector } from './scoped-connector.js';
 import { buildSystemPrompt, type DsBlockData } from './system-prompt.js';
@@ -172,6 +173,8 @@ export interface AgentInfra {
   wsServer: FigmaWebSocketServer;
   figmaAPI: FigmaAPI;
   queueManager: OperationQueueManager;
+  /** Test-observable runtime counters; snapshot via BOTTEGA_AGENT_TEST IPC. */
+  metricsRegistry: MetricsRegistry;
   getImageGenerator?: () => ImageGenerator | null;
 }
 
@@ -292,6 +295,7 @@ export async function createAgentInfra(
     wsServer: figmaCore.wsServer,
     figmaAPI: figmaCore.figmaAPI,
     queueManager,
+    metricsRegistry: new MetricsRegistry(),
     getImageGenerator: opts.getImageGenerator,
   };
 }

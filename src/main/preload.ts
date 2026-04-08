@@ -254,10 +254,17 @@ contextBridge.exposeInMainWorld('api', {
   },
 
   // ── Agent test oracle (conditional, never in production) ──
+  // The `process.env.BOTTEGA_AGENT_TEST` literal is replaced at build time by
+  // esbuild's `define` (see scripts/build.mjs). Setting the env var on a
+  // packaged release at launch will NOT activate this branch — you must
+  // rebuild with `BOTTEGA_AGENT_TEST=1 npm run build`. The main process adds
+  // a second `!app.isPackaged` defense for the IPC handlers themselves.
   ...(process.env.BOTTEGA_AGENT_TEST
     ? {
         __testFigmaExecute: (code: string, timeoutMs?: number, fileKey?: string) =>
           ipcRenderer.invoke('test:figma-execute', code, timeoutMs, fileKey),
+        __testGetMetrics: () => ipcRenderer.invoke('test:get-metrics'),
+        __testResetMetrics: () => ipcRenderer.invoke('test:reset-metrics'),
       }
     : {}),
 });

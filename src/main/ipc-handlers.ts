@@ -231,6 +231,12 @@ export interface IpcController {
   subscribeSlot(slot: SessionSlot): void;
   /** Register a callback for model config changes. */
   onModelChange(cb: (config: ModelConfig) => void): void;
+  /**
+   * Fase 4: live view of in-progress judges. Used by the BOTTEGA_AGENT_TEST
+   * `test:get-metrics` IPC handler so the snapshot can include
+   * `judge.inProgressSlotIds` without exposing module-level state.
+   */
+  getJudgeInProgress(): ReadonlySet<string>;
 }
 
 const log = createChildLogger({ component: 'ipc' });
@@ -334,7 +340,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     }
 
     // Direct send — assign a promptId for correlation across tool calls and turn end
-    beginTurn(slot, text, false, usageTracker);
+    beginTurn(slot, text, false, usageTracker, infra);
     slot.suggester.trackUserPrompt(text);
     slot.suggester.resetAssistantText();
     slot.isStreaming = true;
@@ -856,5 +862,6 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   return {
     subscribeSlot: subscribeToSlot,
     onModelChange: (cb: (config: ModelConfig) => void) => modelChangeListeners.push(cb),
+    getJudgeInProgress: eventRouter.getJudgeInProgress,
   };
 }

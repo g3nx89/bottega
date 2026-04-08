@@ -28,12 +28,24 @@ export interface EventRouterDeps {
   getConnectorForSlot?: (slot: SessionSlot) => import('./scoped-connector.js').ScopedConnector | null;
 }
 
-/** Initialize a new turn on the slot: assign promptId, increment turnIndex, track prompt. */
-export function beginTurn(slot: SessionSlot, text: string, isFollowUp: boolean, usageTracker?: UsageTracker): void {
+/**
+ * Initialize a new turn on the slot: assign promptId, increment turnIndex, track prompt.
+ *
+ * Also bumps the MetricsRegistry turnsStarted counter when an infra ref is
+ * supplied — callers pass `deps.infra` when available.
+ */
+export function beginTurn(
+  slot: SessionSlot,
+  text: string,
+  isFollowUp: boolean,
+  usageTracker?: UsageTracker,
+  infra?: AgentInfra,
+): void {
   const promptId = randomUUID();
   slot.turnIndex += 1;
   slot.currentPromptId = promptId;
   slot.promptStartTime = Date.now();
+  infra?.metricsRegistry?.recordTurnStart();
   usageTracker?.trackPrompt(text.length, isFollowUp, {
     promptId,
     slotId: slot.id,
@@ -193,6 +205,10 @@ export function createEventRouter(deps: EventRouterDeps) {
       ...ctx,
       screenshotMeta,
     });
+    // Fase 4 / Option B: MetricsRegistry owns its own tool counter (independent
+    // of UsageTracker, which is emit-only). Test harness reads this via
+    // `test:get-metrics` to assert on tool call counts/errors/durations.
+    deps.infra?.metricsRegistry?.recordToolCall(event.toolName, durationMs, !event.isError);
 
     if (
       event.toolName.startsWith('figma_generate_') ||
@@ -275,6 +291,7 @@ export function createEventRouter(deps: EventRouterDeps) {
   /** Emit turn_end metrics and reset per-turn accumulators. */
   function finalizeTurn(slot: SessionSlot): void {
     if (!slot.currentPromptId) return; // idempotent — already finalized
+    deps.infra?.metricsRegistry?.recordTurnEnd();
     const toolNames = turnToolNames.get(slot.id) ?? [];
     const responseCharLength = turnResponseLength.get(slot.id) ?? 0;
     const responseDurationMs = slot.promptStartTime ? Date.now() - slot.promptStartTime : 0;
@@ -327,9 +344,17 @@ export function createEventRouter(deps: EventRouterDeps) {
       const hasMutations = toolNames.some((n) => !READ_ONLY_CATEGORIES.has(categorizeToolName(n)));
       // Check judgeOverride and judgeMode
       const shouldRun = slot.judgeOverride === true || (slot.judgeOverride !== false && settings.judgeMode === 'auto');
+      // Fase 4: emit skipped reasons before any structural skip so the metric
+      // makes the no-mutations / disabled / no-connector branches observable.
+      if (!shouldRun) {
+        deps.infra.metricsRegistry?.recordJudgeSkipped('disabled');
+      } else if (!hasMutations) {
+        deps.infra.metricsRegistry?.recordJudgeSkipped('no-mutations');
+      }
       if (shouldRun) {
         const connector = deps.getConnectorForSlot(slot);
         if (!connector && hasMutations) {
+          deps.infra.metricsRegistry?.recordJudgeSkipped('no-connector');
           // B-018: Judge was requested but we have no connector (slot.fileKey missing or WS disconnected).
           // Previously this was silently skipped. Now we log and notify the renderer so the user
           // understands why the Quality Check footer never appeared.
@@ -341,6 +366,7 @@ export function createEventRouter(deps: EventRouterDeps) {
         }
         if (connector && hasMutations) {
           judgeInProgress.add(slot.id);
+          deps.infra.metricsRegistry?.recordJudgeTriggered();
           const judgeStart = Date.now();
           try {
             safeSend(wc, 'judge:running', slot.id);
@@ -371,6 +397,7 @@ export function createEventRouter(deps: EventRouterDeps) {
                     failedCriteria: v.criteria.filter((c) => !c.pass).map((c) => c.name),
                     durationMs: Date.now() - judgeStart,
                   });
+                  deps.infra?.metricsRegistry?.recordJudgeVerdict(v.verdict);
                 },
                 onRetryStart: (attempt, max) => safeSend(wc, 'judge:retry-start', slot.id, attempt, max),
               },
@@ -398,7 +425,7 @@ export function createEventRouter(deps: EventRouterDeps) {
     finalizeTurn(slot);
     const next = slot.promptQueue.dequeue();
     if (next) {
-      beginTurn(slot, next.text, true, usageTracker);
+      beginTurn(slot, next.text, true, usageTracker, deps.infra);
       // B-021: queued prompts must also feed the suggester, otherwise follow-up
       // chips never appear after a dequeued turn (direct prompts already track this).
       slot.suggester.trackUserPrompt(next.text);
@@ -491,6 +518,12 @@ export function createEventRouter(deps: EventRouterDeps) {
     },
     /** Clean up per-turn accumulators for a slot (e.g. after a failed prompt). */
     finalizeTurn,
+    /**
+     * Fase 4: expose the in-progress judge set as a read-only view so the
+     * MetricsRegistry snapshot can include `judge.inProgressSlotIds` without
+     * leaking module-level state.
+     */
+    getJudgeInProgress: (): ReadonlySet<string> => judgeInProgress,
     /** Abort any running judge for a slot (called from user abort). Delegates to judge-harness. */
     abortJudge(slotId: string): void {
       // Abort via parent signal (stored controller from session-events)
