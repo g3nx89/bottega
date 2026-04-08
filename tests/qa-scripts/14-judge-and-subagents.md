@@ -35,19 +35,17 @@ Send: "Create a simple button with text 'Submit' — blue background, white text
 
 ```assert
 # B-018 SENTINEL — judge auto-trigger after mutation tools.
-# We assert on the LITERAL judge-footer prefix "Quality Check ·" (with the
-# middle-dot glyph), not the bare phrase "quality check" — the agent can
-# legitimately mention "quality check" in conversational prose without the
-# judge running, which would silently false-pass the sentinel. The middle-dot
-# anchor is rendered by judge-harness.ts only when the harness fires.
-# case_sensitive: true tightens the match to the canonical header form
-# (capital Q, capital C). This catches both PASS and FAIL verdict variants
-# because the prefix is identical.
+# Asserts via dom_visible on `.judge-verdict-card` because the judge harness
+# renders its verdict as a SEPARATE DOM element (sibling of `.message-content`)
+# inside the assistant bubble — NOT inside the agent's response text stream.
+# A response_contains check would always fail since the agent's prose never
+# embeds the rendered footer. The card class is set in src/renderer/app.js
+# (createJudgeVerdictCard) and only created when the judge harness fires.
+# Empirically validated against script 14 calibration (2026-04-08) where the
+# judge-active runs produced the .judge-verdict-card element.
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child]
 screenshots_min: 1
-response_contains:
-  any_of: ["Quality Check ·"]
-  case_sensitive: true
+dom_visible: ".assistant-message:last-child .judge-verdict-card"
 duration_max_ms: 120000
 ```
 
@@ -96,26 +94,27 @@ response_contains:
 duration_max_ms: 60000
 ```
 
-### 6. Force re-run judge
+### 6. Force re-run judge (with mutation)
 Toggle judge back on by clicking `#bar-judge-btn` until `classList.contains('active')` is true (may need 1-2 clicks to cycle through `null` → `true`).
 
-Send: "Re-run the quality check on the current state"
+Send: "Make the red rectangle from step 5 slightly larger (250x150) and add a 2px white border"
 
 **Evaluate:**
-- Does the agent or UI provide a way to manually trigger the judge?
-- Can you use the IPC `forceRerunJudge` if no UI exists?
-- Does it evaluate the current canvas state?
+- Does the agent perform the mutation (figma_resize / figma_set_strokes / figma_execute)?
+- Does the judge auto-trigger AFTER the mutation, now that it's re-enabled?
+- Is there a Quality Check verdict card visible?
 
 ```assert
 # Re-enable cycle: closes the judge-disabled (step 5) → judge-enabled (step 6)
-# loop. After toggling back ON, the next mutation MUST produce the Quality Check
-# footer again. We do not require a specific creation tool — the prompt is
-# explicit ("re-run the quality check"), the agent may use any approach.
-# This sentinel is the partner of step 2 (initial fire) and step 5 (off path),
-# completing coverage of the three-state judge cycle.
-response_contains:
-  any_of: ["Quality Check ·"]
-  case_sensitive: true
+# loop. The prompt MUST be a mutating one — the judge harness only fires
+# after a mutating turn, so a read-only "re-run quality check" prompt won't
+# trigger the verdict card (calibration 2026-04-08 confirmed this). With a
+# real mutation, the .judge-verdict-card MUST appear because we just toggled
+# the judge ON. This sentinel is the partner of step 2 (initial fire) and
+# step 5 (off path), completing coverage of the three-state cycle.
+tools_called_any_of: [figma_resize, figma_set_strokes, figma_execute, figma_render_jsx, figma_set_fills]
+screenshots_min: 1
+dom_visible: ".assistant-message:last-child .judge-verdict-card"
 duration_max_ms: 90000
 ```
 
@@ -138,15 +137,12 @@ Send: "Create a card with a header section (logo + nav), a hero image area, and 
 
 ```assert
 # Complex creation: any of the creation tools is valid (figma_auto_layout often
-# triggered for cards). The Quality Check footer MUST appear because this is a
-# multi-element mutation — same B-018 sentinel as step 2 (literal "Quality Check ·"
-# prefix, case-sensitive) but on a complex flow. Generous duration cap (180s)
-# for a multi-step creation + judge evaluation.
+# triggered for cards). Same B-018 sentinel as step 2 — dom_visible on the
+# judge verdict card class — but on a complex multi-element flow. Generous
+# duration cap (180s) for multi-step creation + judge evaluation.
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child, figma_auto_layout]
 screenshots_min: 1
-response_contains:
-  any_of: ["Quality Check ·"]
-  case_sensitive: true
+dom_visible: ".assistant-message:last-child .judge-verdict-card"
 duration_max_ms: 180000
 ```
 

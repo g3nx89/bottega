@@ -374,16 +374,15 @@ import { parse as parseYaml } from 'yaml';
 describe('B-018 regression sentinel (task 2.13 simulated)', () => {
   // Verbatim copy of the step 2 assert block from 14-judge-and-subagents.md.
   // If that file changes, the drift-detection test below catches it.
-  // SENTINEL DESIGN: literal "Quality Check ·" prefix (case_sensitive: true)
-  // — the middle-dot glyph is rendered ONLY by the judge harness, so prose
-  // mentions of "quality check" cannot false-positive (see prose-echo test).
+  // SENTINEL DESIGN: dom_visible on `.judge-verdict-card` — the judge harness
+  // renders a SEPARATE DOM card (sibling of `.message-content`), NOT embedded
+  // in the agent's text stream. response_contains on rendered text would
+  // always fail since the agent's prose never contains the footer literally.
+  // Empirically validated against script 14 calibration (2026-04-08).
   const STEP_2_ASSERT = {
     tools_called_any_of: ['figma_render_jsx', 'figma_execute', 'figma_create_child'],
     screenshots_min: 1,
-    response_contains: {
-      any_of: ['Quality Check ·'],
-      case_sensitive: true,
-    },
+    dom_visible: '.assistant-message:last-child .judge-verdict-card',
     duration_max_ms: 120000,
   };
 
@@ -391,31 +390,28 @@ describe('B-018 regression sentinel (task 2.13 simulated)', () => {
   const STEP_8_ASSERT = {
     tools_called_any_of: ['figma_render_jsx', 'figma_execute', 'figma_create_child', 'figma_auto_layout'],
     screenshots_min: 1,
-    response_contains: {
-      any_of: ['Quality Check ·'],
-      case_sensitive: true,
-    },
+    dom_visible: '.assistant-message:last-child .judge-verdict-card',
     duration_max_ms: 180000,
   };
 
   // Healthy state: the agent created a button, screenshot taken, judge ran
-  // and produced "Quality Check · PASS ✓" in the assistant message.
+  // and rendered the .judge-verdict-card (page.locator returns visible: true).
   const HEALTHY_STEP_2 = makeStepData({
     toolsCalled: ['figma_render_jsx', 'figma_screenshot'],
-    responseText:
-      "I've created a button with 'Submit' label, blue background, white text, " +
-      'and rounded corners.\n\n**Quality Check · PASS ✓**\n- Alignment OK\n- Naming OK',
+    responseText: "I've created a button with 'Submit' label, blue background, white text, and rounded corners.",
     screenshotCount: 1,
     durationMs: 48000,
+    page: fakePageReturns(true),
   });
 
-  // B-018 active: everything identical EXCEPT the judge was silently skipped
-  // (no "quality check" footer), because connector was null at handleAgentEnd.
+  // B-018 active: everything identical EXCEPT the judge harness was silently
+  // skipped, so the .judge-verdict-card was never rendered (isVisible: false).
   const BROKEN_STEP_2 = makeStepData({
     toolsCalled: ['figma_render_jsx', 'figma_screenshot'],
     responseText: "I've created a button with 'Submit' label, blue background, white text, and rounded corners.",
     screenshotCount: 1,
     durationMs: 45000,
+    page: fakePageReturns(false),
   });
 
   it('step 2 assertions PASS when judge auto-triggered (healthy)', async () => {
@@ -428,75 +424,71 @@ describe('B-018 regression sentinel (task 2.13 simulated)', () => {
     const { passed, results } = await evaluateAssertions(STEP_2_ASSERT, BROKEN_STEP_2);
     expect(passed).toBe(false);
 
-    // The specific failure signature of B-018 is: response_contains fails
-    // because the "quality check" footer is absent, while everything else
-    // (tools ran, screenshot taken, duration fine) still passes.
+    // The specific failure signature of B-018: dom_visible fails because the
+    // judge verdict card was never rendered, while everything else (tools ran,
+    // screenshot taken, duration fine) still passes.
     const failing = results.filter((r: AssertionResult) => !r.passed);
     expect(failing).toHaveLength(1);
-    expect(failing[0].name).toBe('response_contains');
-    expect(failing[0].error).toMatch(/Quality Check/);
+    expect(failing[0].name).toBe('dom_visible');
+    expect(failing[0].error).toMatch(/judge-verdict-card.*not visible/);
 
-    // And the non-B-018 assertions still pass — this is what makes the
-    // sentinel precise: it does not false-positive on transport errors.
+    // Non-B-018 assertions still pass — this is what makes the sentinel
+    // precise: it does not false-positive on transport errors.
     const passingNames = results.filter((r: AssertionResult) => r.passed).map((r: AssertionResult) => r.name);
     expect(passingNames).toEqual(expect.arrayContaining(['tools_called_any_of', 'screenshots_min', 'duration_max_ms']));
   });
 
   it('step 8 (complex creation) also catches B-018 on the auto_layout path', async () => {
     // Complex creation uses figma_auto_layout — the broader tool set in the
-    // OR assertion must still match, and "quality check" absence must still fail.
+    // OR assertion must still match, and the verdict card absence must still fail.
     const brokenComplex = makeStepData({
       toolsCalled: ['figma_render_jsx', 'figma_auto_layout', 'figma_screenshot'],
       responseText: 'Created a card with header, hero, and footer sections with social icons.',
       screenshotCount: 1,
       durationMs: 95000,
+      page: fakePageReturns(false),
     });
     const { passed, results } = await evaluateAssertions(STEP_8_ASSERT, brokenComplex);
     expect(passed).toBe(false);
     const failing = results.filter((r: AssertionResult) => !r.passed);
     expect(failing).toHaveLength(1);
-    expect(failing[0].name).toBe('response_contains');
+    expect(failing[0].name).toBe('dom_visible');
   });
 
-  it('sentinel matches both PASS and FAIL verdict variants (same prefix)', async () => {
-    // Judge renders "Quality Check · PASS ✓" or "Quality Check · FAIL ✗".
-    // The "Quality Check ·" prefix is identical in both — a single any_of
-    // entry catches both verdict states.
-    const withFailVerdict = makeStepData({
-      toolsCalled: ['figma_render_jsx'],
-      responseText: 'Created.\n**Quality Check · FAIL ✗**\n- Naming issue',
+  it('sentinel passes for any judge verdict variant (PASS or FAIL)', async () => {
+    // Judge renders different headers depending on verdict, but the card class
+    // .judge-verdict-card is constant. dom_visible doesn't care about text.
+    const withVerdict = makeStepData({
+      toolsCalled: ['figma_render_jsx', 'figma_screenshot'],
+      responseText: 'Done.',
       screenshotCount: 1,
       durationMs: 50000,
+      page: fakePageReturns(true),
     });
-    const { passed } = await evaluateAssertions(STEP_2_ASSERT, withFailVerdict);
+    const { passed } = await evaluateAssertions(STEP_2_ASSERT, withVerdict);
     expect(passed).toBe(true);
   });
 
-  // Improvement #5 (review fix): negative test for prose echoing.
-  // Without this, a looser sentinel (case_sensitive: false on bare "quality
-  // check") would match agent prose mentioning the phrase even when the judge
-  // harness did not run. The literal "Quality Check ·" prefix with
-  // case_sensitive: true is immune to prose echoes — if this test starts
-  // failing, the sentinel has been weakened and B-018 can regress undetected.
-  it('does NOT false-positive when agent mentions "quality check" conversationally', async () => {
+  // Negative test for prose echoing — with the dom_visible sentinel, the
+  // agent can mention "quality check" conversationally without false-positive.
+  // The sentinel is structural (DOM card class), not textual.
+  it('sentinel is immune to agent prose echoing the phrase "quality check"', async () => {
     const withProseEcho = makeStepData({
       toolsCalled: ['figma_render_jsx', 'figma_screenshot'],
-      // Agent talks about quality check in lowercase prose without the
-      // structured judge footer (no middle-dot glyph). This is the failure
-      // mode the tightened sentinel guards against.
       responseText:
         "I've created the button. I'll do a quick quality check next: alignment looks " +
         'good, naming is consistent, no shadow needed. Ready for review!',
       screenshotCount: 1,
       durationMs: 47000,
+      page: fakePageReturns(false), // no card rendered → judge did NOT run
     });
     const { passed, results } = await evaluateAssertions(STEP_2_ASSERT, withProseEcho);
-    // Judge did NOT run, so the sentinel must FAIL even though the prose
-    // contains "quality check". This is the precision claim being tested.
+    // Judge did NOT actually run — sentinel must FAIL even though prose
+    // mentions "quality check". The structural anchor immunizes us from prose drift.
     expect(passed).toBe(false);
     const failing = results.filter((r: AssertionResult) => !r.passed);
     expect(failing).toHaveLength(1);
-    expect(failing[0].name).toBe('response_contains');
+    expect(failing[0].name).toBe('dom_visible');
   });
 
   // Drift detection (review fix #4): parse the live assert blocks from
@@ -516,24 +508,25 @@ describe('B-018 regression sentinel (task 2.13 simulated)', () => {
 
     // Script 14 has 4 assert blocks: step 2 (B-018), step 5 (judge-disabled),
     // step 6 (re-enable), step 8 (complex). Locate sentinel blocks by the
-    // distinctive shape: figma_create_child + "Quality Check ·" anchor.
+    // distinctive shape: figma_create_child + .judge-verdict-card dom_visible.
     expect(blocks.length).toBeGreaterThanOrEqual(4);
 
     type AssertBlock = {
       tools_called_any_of?: string[];
-      response_contains?: { any_of?: string[]; case_sensitive?: boolean };
+      dom_visible?: string;
       [k: string]: unknown;
     };
     const sentinels = (blocks as AssertBlock[]).filter(
       (b) =>
         Array.isArray(b.tools_called_any_of) &&
         b.tools_called_any_of.includes('figma_create_child') &&
-        b.response_contains?.any_of?.includes('Quality Check ·') === true,
+        typeof b.dom_visible === 'string' &&
+        b.dom_visible.includes('.judge-verdict-card'),
     );
-    // Step 2 and step 8 — both must be tightened with case_sensitive: true.
+    // Step 2 and step 8 — both must use the dom_visible structural anchor.
     expect(sentinels.length).toBe(2);
     for (const s of sentinels) {
-      expect(s.response_contains?.case_sensitive).toBe(true);
+      expect(s.dom_visible).toBe('.assistant-message:last-child .judge-verdict-card');
     }
 
     // Locate by exclusion: step 2 has 3 tools, step 8 has 4 (with auto_layout).
