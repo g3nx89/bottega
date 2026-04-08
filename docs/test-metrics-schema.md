@@ -67,8 +67,15 @@ interface MetricsSnapshot {
     inProgressSlotIds: string[];
     triggeredTotal: number;                       // judge actually invoked
     skippedTotal: number;                         // sum of skippedByReason
-    skippedByReason: Record<string, number>;      // 'no-connector' | 'no-mutations' | 'disabled'
+    skippedByReason: Partial<Record<JudgeSkipReason, number>>; // sparse: key absent until first fire
     verdictCounts: { PASS: number; FAIL: number; UNKNOWN: number };
+    // verdictCounts records ONLY terminal verdicts — one entry per judge turn
+    // after all retries resolve. Intermediate FAILs in a retry loop do not
+    // contribute (e.g. FAIL attempt 1 → PASS attempt 2 increments PASS by 1,
+    // FAIL by 0). This keeps the counter baseline-diff friendly: two runs of
+    // the same script should produce identical verdictCounts regardless of
+    // how many retries happened internally. Per-attempt history lives in
+    // usageTracker (analytics-oriented) instead.
   };
   tools: {
     callCount: number;

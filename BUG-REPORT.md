@@ -961,6 +961,38 @@ allo slot, non usare il file attualmente attivo nel plugin.
 
 ---
 
+## B-024: qa-runner non automatizza toggle judge in script 14 step 5 — ACCEPTED (awaits Fase 3)
+
+**Severita**: Bassa (test gap, non product bug)
+**Componente**: Test harness (qa-runner.mjs) / qa-script design
+**Scoperto in**: Fase 4 smoke validation (2026-04-08)
+**Descrizione**: Lo step 5 di `tests/qa-scripts/14-judge-and-subagents.md` dipende
+dal toggle del judge in stato `disabled-chip`, eseguito nella prosa prefisso dello
+step ("Toggle the judge off..."). Il runner legge solo il campo `Send:` e non
+esegue azioni DOM arbitrarie, quindi il judge resta attivo dal setup precedente.
+Le due metric_growth sub-assertion aggiunte in Fase 4
+(`judge.triggeredTotal exactGrowth:0` e `judge.skippedByReason['disabled'] minGrowth:1`)
+falliscono sistematicamente: actual delta 1 vs expected 0, e delta 0 vs expected ≥1.
+**Riproduzione**:
+1. `BOTTEGA_AGENT_TEST=1 npm run build`
+2. `node .claude/skills/bottega-dev-debug/scripts/qa-runner.mjs --script 14`
+3. Step 5 FAIL con "metric_growth judge.triggeredTotal actual 1, expected 0"
+**Root cause**: Architetturale — qa-runner non ha un DSL per pre-azioni DOM
+(es. `pre_action: click_until #bar-judge-btn.disabled-chip`). Le altre assertion
+semantiche di step 5 (tools_called, screenshots, duration) passano regolarmente.
+**Status**: ACCEPTED. Fase 3 (Oracle Baseline Diff) sostituirà queste assertion
+con un confronto drift contro una baseline storica. A quel punto il delta+1 sul
+`judge.triggeredTotal` di step 5 sarà o (a) parte della baseline registrata
+e quindi "no drift", oppure (b) drift flaggato da regole configurabili. Fino ad
+allora un inline comment nel file dello script documenta il gap.
+**Fix futuro**: Se Fase 3 non supera questo caso, estendere qa-runner con un
+action type `dom_set_judge_state: disabled/enabled` che cicla i click del toggle
+finché la classe target non è presente, e chiamarlo in un preamble allo step 5.
+**File**: `tests/qa-scripts/14-judge-and-subagents.md` (inline comment aggiunto),
+`.claude/skills/bottega-dev-debug/scripts/qa-runner.mjs` (futuro)
+
+---
+
 ## UX Backlog (da Pass 2 — UX Quality Review)
 
 Le 18 issue UX trovate dal Pass 2 (Opus reviewer) sono raggruppate qui in **9 task

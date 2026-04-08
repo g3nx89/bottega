@@ -373,7 +373,7 @@ export function createEventRouter(deps: EventRouterDeps) {
             // Store controller for external abort (e.g., user closes slot)
             const judgeController = new AbortController();
             judgeAbortControllers.set(slot.id, judgeController);
-            await runJudgeHarness(
+            const finalVerdict = await runJudgeHarness(
               deps.infra,
               connector,
               slot,
@@ -397,11 +397,16 @@ export function createEventRouter(deps: EventRouterDeps) {
                     failedCriteria: v.criteria.filter((c) => !c.pass).map((c) => c.name),
                     durationMs: Date.now() - judgeStart,
                   });
-                  deps.infra?.metricsRegistry?.recordJudgeVerdict(v.verdict);
                 },
                 onRetryStart: (attempt, max) => safeSend(wc, 'judge:retry-start', slot.id, attempt, max),
               },
             );
+            // Metric records ONLY the terminal outcome (after all retries resolved),
+            // so verdictCounts reflect "how did this turn end up" — the value Fase 3
+            // baselines diff against. Per-attempt history lives in usageTracker above.
+            if (finalVerdict) {
+              deps.infra?.metricsRegistry?.recordJudgeVerdict(finalVerdict.verdict);
+            }
           } catch (err) {
             log.warn({ err, slotId: slot.id }, 'Judge harness error in agent_end');
           } finally {

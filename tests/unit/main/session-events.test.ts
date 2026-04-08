@@ -736,8 +736,9 @@ describe('createEventRouter', () => {
       (runJudgeHarness as any).mockImplementation(async (..._args: any[]) => {
         // 8th positional arg is the JudgeHarnessCallbacks object.
         const callbacks = _args[7];
-        callbacks?.onVerdict({ verdict: 'PASS', criteria: [] }, 1, 1);
-        return null;
+        const verdict = { verdict: 'PASS', criteria: [] };
+        callbacks?.onVerdict(verdict, 1, 1);
+        return verdict;
       });
 
       const registry = makeFakeRegistry();
@@ -762,6 +763,48 @@ describe('createEventRouter', () => {
       expect(registry.triggered).toBe(1);
       expect(registry.verdicts).toEqual(['PASS']);
       expect(registry.skipped).not.toContain('no-connector');
+    });
+
+    it('recordJudgeVerdict records ONLY the terminal outcome on retry (no double-count)', async () => {
+      const { loadSubagentSettings } = await import('../../../src/main/subagent/config.js');
+      const { runJudgeHarness } = await import('../../../src/main/subagent/judge-harness.js');
+      const { categorizeToolName } = await import('../../../src/main/compression/metrics.js');
+      (loadSubagentSettings as any).mockReturnValue({ judgeMode: 'auto', autoRetry: true, maxRetries: 2, models: {} });
+      (categorizeToolName as any).mockReturnValue('mutation');
+      // Simulate retry loop: FAIL on attempt 1, PASS on attempt 2.
+      // Pre-fix behavior would record ['FAIL', 'PASS'] — polluting verdictCounts
+      // with the intermediate FAIL. Post-fix must record only the terminal ['PASS'].
+      (runJudgeHarness as any).mockReset();
+      (runJudgeHarness as any).mockImplementation(async (..._args: any[]) => {
+        const callbacks = _args[7];
+        callbacks?.onVerdict({ verdict: 'FAIL', criteria: [] }, 1, 2);
+        callbacks?.onVerdict({ verdict: 'PASS', criteria: [] }, 2, 2);
+        return { verdict: 'PASS', criteria: [] };
+      });
+
+      const registry = makeFakeRegistry();
+      const deps = makeMetricsDeps(registry);
+      const metricsSlot = makeSlot({ judgeOverride: null });
+      deps.slotManager.getSlot.mockReturnValue(metricsSlot);
+      const { subscribeToSlot } = createEventRouter(deps as any);
+      subscribeToSlot(metricsSlot);
+      const handler = metricsSlot.session.subscribe.mock.calls[0][0];
+
+      handler({ type: 'tool_execution_start', toolName: 'figma_set_fills', toolCallId: 'tc-1' });
+      handler({
+        type: 'tool_execution_end',
+        toolName: 'figma_set_fills',
+        toolCallId: 'tc-1',
+        isError: false,
+        result: { content: [] },
+      });
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+
+      // Registry sees exactly one terminal verdict, not the intermediate FAIL.
+      expect(registry.verdicts).toEqual(['PASS']);
+      // usageTracker still sees per-attempt history for analytics.
+      expect(deps.usageTracker.trackJudgeVerdict).toHaveBeenCalledTimes(2);
     });
 
     it('exposes getJudgeInProgress as a ReadonlySet on the EventRouter', () => {

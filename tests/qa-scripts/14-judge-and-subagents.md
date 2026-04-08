@@ -91,9 +91,13 @@ Send: "Create a red rectangle"
 ```assert
 # Judge-disabled path: creation tool MUST still run, but the duration cap is
 # tighter (60s vs 120s in step 2) — without judge overhead the cycle is faster.
-# Fase 4 metric assertions add semantic verification:
-#  - judge.triggeredTotal MUST NOT grow (0)
-#  - judge.skippedByReason['disabled'] MUST grow by ≥1 (replaces P2 response_NOT_contains)
+# KNOWN GAP (B-new, 2026-04-08): the metric_growth sub-assertions below fail in
+# qa-runner because they depend on the preceding sentence ("Toggle the judge off
+# ...") being executed, but that's a manual DOM action the runner cannot perform
+# yet. The assertion is semantically correct — it catches a real state mismatch —
+# but the gap is in the runner, not the product. Fase 3 (oracle baseline diff)
+# will supersede these assertions with a drift check against a recorded baseline,
+# so we accept the FAIL for now rather than extending qa-runner with DOM pre-actions.
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child]
 screenshots_min: 1
 response_contains:

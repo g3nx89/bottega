@@ -131,7 +131,7 @@ function summarizeVars(
   return matches
     .map(([name, v]) => {
       const firstValue = Object.values(v.values)[0];
-      const safeName = sanitizeDsValue(String(name.split('/').pop() ?? name));
+      const safeName = sanitizeDsValue(name.split('/').pop() ?? name);
       const safeValue = firstValue !== undefined ? sanitizeDsValue(String(firstValue)) : 'none';
       return `${safeName}=${safeValue}`;
     })

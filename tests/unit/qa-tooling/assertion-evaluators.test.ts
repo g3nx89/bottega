@@ -753,6 +753,23 @@ describe('metric_growth', () => {
     expect(r.passed).toBe(true);
   });
 
+  it('fails loud when counter disappears (number → undefined)', async () => {
+    // Monotonic counters should never regress to undefined. If they do, the
+    // registry was reset, the snapshot schema drifted, or the path was renamed —
+    // all of which must fail with a clear message instead of being coerced to
+    // a negative delta that might accidentally pass a loose maxGrowth cap.
+    const r = await evaluateAssertions(
+      { metric_growth: { path: 'tools.byName.figma_set_fills.calls', maxGrowth: 10 } },
+      {
+        metricsBefore: { tools: { byName: { figma_set_fills: { calls: 5 } } } },
+        metricsAfter: { tools: { byName: {} } },
+      } as any,
+    );
+    expect(r.passed).toBe(false);
+    expect(r.results[0].error).toMatch(/counter disappeared/);
+    expect(r.results[0].error).toMatch(/before=5/);
+  });
+
   it('fails when path resolves to a non-number, non-undefined value', async () => {
     // String at the path (not undefined) → cannot do delta math, fail loud.
     const r = await evaluateAssertions({ metric_growth: { path: 'tools.weird', maxGrowth: 1 } }, {

@@ -54,7 +54,7 @@ export interface MetricsSnapshot {
     inProgressSlotIds: string[];
     triggeredTotal: number;
     skippedTotal: number;
-    skippedByReason: Record<string, number>;
+    skippedByReason: Partial<Record<JudgeSkipReason, number>>;
     verdictCounts: { PASS: number; FAIL: number; UNKNOWN: number };
   };
   tools: {
