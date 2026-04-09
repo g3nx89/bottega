@@ -55,6 +55,12 @@ App in produzione connessa a Figma Desktop con Bridge plugin, 2 file aperti.
 | UX-004 | Tool retry cards visibili all'utente (noise) | Bassa | **FIXED** (Run 4 — collapse retry cards + badge) |
 | UX-005 | Risposta vuota dopo image fill timeout | Bassa | **FIXED** (Run 4 — timeout 60s→30s + host-side fetch) |
 | P-006 | figma_set_image_fill timeout 60s costante | Media | **FIXED** (Run 4 — host-side URL fetch + WS check) |
+| B-018 | qa-runner: campo `connection` inesistente in getAppState | Bassa | **FIXED** (Sessione B — field mismatch connectionStatus) |
+| B-019 | qa-baseline-loader: bare specifier non risolto da data: URL | Bassa | **FIXED** (Sessione B — file in node_modules/.cache/) |
+| B-020 | OAuth token AI scade durante run sequenziali (~10 min) | Media | OPEN |
+| UX-006 | Task tool cards (task_create/task_update) visibili in chat | Media | OPEN |
+| UX-007 | Judge spinner bloccato su "Quality check running..." senza timeout | Media | OPEN |
+| UX-008 | Agent entra in viewport-hunting loop con screenshot ripetuti | Media | OPEN |
 
 ---
 
@@ -1314,6 +1320,75 @@ Misurate da qa-recorder su 265 tool call durante la sessione full.
 | figma_generate_pattern | 4 | 24825 | 29208 | 29208 | Gemini latency |
 | figma_generate_story | 1 | 75987 | — | 75987 | Gemini heavy |
 | figma_set_image_fill | 4 | 60009 | 60010 | 60010 | 100% timeout |
+
+---
+
+## Run 5 — Baseline Bootstrap (2026-04-09)
+
+Metodologia: QA baseline bootstrap sessione (Fase 3/3b). 5 run × script 02, 5 run × script 14
+con baseline-cli record (--reuse CDP mode). UX variance calibration: 3 run Opus reviewer.
+**Risultati**: Baseline 02 CV 0.069–0.137, Baseline 14 CV 0.020–0.178. UX max stddev 0.118.
+
+---
+
+## B-018: qa-runner campo `connection` inesistente in getAppState — FIXED (Sessione B)
+
+**Severita**: Bassa
+**Componente**: `.claude/skills/bottega-dev-debug/scripts/qa-runner.mjs`
+**Riproduzione**: qa-runner controlla `state.connection === 'connected'` ma `getAppState()` in helpers.mjs restituisce `state.connectionStatus`. Il campo `connection` è sempre `undefined`, quindi Figma risulta sempre "disconnected" anche quando è connesso.
+**Fix applicato**: `state.connection` → `state.connectionStatus` in qa-runner.mjs:389.
+
+---
+
+## B-019: qa-baseline-loader bare specifier non risolto da data: URL — FIXED (Sessione B)
+
+**Severita**: Bassa
+**Componente**: `.claude/skills/bottega-dev-debug/scripts/qa-baseline-loader.mjs`
+**Riproduzione**: Il loader compila TypeScript via esbuild con `@sinclair/typebox` come external, poi carica il bundle da una `data:` URL. Node ESM non risolve bare specifiers da `data:` URL → crash all'import.
+**Fix applicato**: Scrivi il bundle compilato in `node_modules/.cache/bottega-qa-loader/` (file URL), così Node risolve `@sinclair/typebox` dal `node_modules/` del progetto.
+
+---
+
+## B-020: OAuth token AI scade durante run sequenziali — OPEN
+
+**Severita**: Media
+**Componente**: Pi SDK AuthStorage / OpenAI OAuth
+**Riproduzione**:
+1. Configura Bottega con provider OpenAI via OAuth
+2. Lancia `baseline-cli record --script 02 --runs 5` (~10+ min)
+3. Le prime 1-2 run funzionano (tool calls reali)
+4. Le run successive falliscono: `responseCharLength: 0`, `inputTokens: 0`
+5. Risposta UI: "I wasn't able to generate a response. This usually means your API key or login session has expired."
+
+**Root cause**: Il token OAuth OpenAI ha lifetime breve. Pi SDK non fa refresh proattivo durante una sessione attiva. Dopo la scadenza, le call API ritornano vuoto senza errore esplicito nei log.
+**Workaround**: Usare API key diretta (non OAuth) oppure re-login tra batch di run.
+
+---
+
+## UX-006: Task tool cards visibili in chat — OPEN
+
+**Severita**: Media
+**Componente**: Renderer (app.js) + agent tool pipeline
+**Riproduzione**: Script 14 step 8 (complex creation). L'agente chiama `task_create` × 5 + `task_update` × 8 = 13 tool cards di bookkeeping interno visibili nella chat. Queste card non forniscono valore all'utente e creano noise visuale.
+**Scoperto in**: Sessione B, UX reviewer run 1/2/3 (unanime).
+
+---
+
+## UX-007: Judge spinner bloccato senza timeout — OPEN
+
+**Severita**: Media
+**Componente**: Renderer (app.js), judge pipeline
+**Riproduzione**: Script 14 step 8. Dopo un turn di 122s con 20 tool calls, il Judge verdict card mostra "Quality check running..." indefinitamente. Lo screenshot finale cattura lo spinner ancora attivo. Nessun timeout visibile per l'utente.
+**Scoperto in**: Sessione B, UX reviewer (screenshot 14-step-8.png).
+
+---
+
+## UX-008: Agent viewport-hunting loop con screenshot ripetuti — OPEN
+
+**Severita**: Media
+**Componente**: Agent behavior (system prompt / tool selection)
+**Riproduzione**: Script 02 step 4 (creation prompt). In alcune run, dopo la creazione via `figma_render_jsx`, l'agente entra in un loop di `figma_execute` + `figma_screenshot` (5 screenshot, 3 execute) cercando di navigare/zoomare sul viewport per trovare l'elemento creato. Durata 89s vs media 34s. Le tool cards ripetute degradano la UX.
+**Scoperto in**: Sessione B, run di diff (varianza naturale dell'agente).
 
 ---
 
