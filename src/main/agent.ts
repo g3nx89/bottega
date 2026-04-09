@@ -75,7 +75,6 @@ export const OAUTH_PROVIDER_INFO: Record<string, { label: string; description: s
 export const CONTEXT_SIZES: Record<string, number> = {
   'claude-opus-4-6': 1_000_000,
   'claude-sonnet-4-6': 1_000_000,
-  'claude-haiku-4-5': 200_000,
   'gpt-5.4': 1_000_000,
   'gpt-5.4-mini': 1_000_000,
   'gpt-5.4-nano': 1_000_000,
@@ -95,7 +94,6 @@ export const AVAILABLE_MODELS: Record<string, { id: string; label: string; sdkPr
   anthropic: [
     { id: 'claude-opus-4-6', label: 'Claude Opus 4.6 (1M)', sdkProvider: 'anthropic' },
     { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', sdkProvider: 'anthropic' },
-    { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', sdkProvider: 'anthropic' },
   ],
   openai: [
     { id: 'gpt-5.4', label: 'GPT-5.4', sdkProvider: 'openai' },
