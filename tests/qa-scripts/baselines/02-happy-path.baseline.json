@@ -1,0 +1,487 @@
+{
+  "schemaVersion": 1,
+  "script": "02-happy-path",
+  "recordedAt": "2026-04-09T13:31:45.371Z",
+  "appVersion": "0.12.0",
+  "sampleSize": 5,
+  "driftRules": {
+    "durationToleranceP95": 0.3,
+    "toolCountTolerance": 2,
+    "metricDeltaTolerance": 0.5,
+    "toolSequencePolicy": "variant",
+    "assertionPassRateFloor": 1
+  },
+  "steps": [
+    {
+      "stepNumber": 1,
+      "stepTitle": "Send a simple prompt",
+      "isManual": false,
+      "assertionMode": "strict",
+      "toolSequences": {
+        "modal": [
+          "figma_screenshot"
+        ],
+        "variants": [
+          {
+            "sequence": [
+              "figma_screenshot"
+            ],
+            "count": 5
+          }
+        ]
+      },
+      "toolCallCount": {
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "p95": 1,
+        "max": 1,
+        "mean": 1,
+        "stddev": 0,
+        "samples": 5
+      },
+      "durationMs": {
+        "min": 12773,
+        "p50": 13865,
+        "p90": 15659,
+        "p95": 15659,
+        "max": 15659,
+        "mean": 14109,
+        "stddev": 974.2057277597992,
+        "samples": 5
+      },
+      "metricDeltas": {
+        "tools.callCount": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "tools.errorCount": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.triggeredTotal": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.skippedTotal": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.PASS": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.FAIL": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.UNKNOWN": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalStarted": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalEnded": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        }
+      },
+      "assertionPassRate": 1,
+      "assertionCount": 4
+    },
+    {
+      "stepNumber": 2,
+      "stepTitle": "Wait for the response",
+      "isManual": true,
+      "assertionMode": "soft_pass",
+      "toolSequences": null,
+      "toolCallCount": null,
+      "durationMs": null,
+      "metricDeltas": {},
+      "assertionPassRate": 1,
+      "assertionCount": 0
+    },
+    {
+      "stepNumber": 3,
+      "stepTitle": "Check context usage",
+      "isManual": true,
+      "assertionMode": "soft_pass",
+      "toolSequences": null,
+      "toolCallCount": null,
+      "durationMs": null,
+      "metricDeltas": {},
+      "assertionPassRate": 1,
+      "assertionCount": 0
+    },
+    {
+      "stepNumber": 4,
+      "stepTitle": "Send a creation prompt",
+      "isManual": false,
+      "assertionMode": "strict",
+      "toolSequences": {
+        "modal": [
+          "figma_render_jsx",
+          "figma_screenshot"
+        ],
+        "variants": [
+          {
+            "sequence": [
+              "figma_render_jsx",
+              "figma_screenshot"
+            ],
+            "count": 5
+          }
+        ]
+      },
+      "toolCallCount": {
+        "min": 2,
+        "p50": 2,
+        "p90": 2,
+        "p95": 2,
+        "max": 2,
+        "mean": 2,
+        "stddev": 0,
+        "samples": 5
+      },
+      "durationMs": {
+        "min": 29645,
+        "p50": 30730,
+        "p90": 40329,
+        "p95": 40329,
+        "max": 40329,
+        "mean": 34101.4,
+        "stddev": 4670.616344766502,
+        "samples": 5
+      },
+      "metricDeltas": {
+        "tools.callCount": {
+          "min": 2,
+          "p50": 2,
+          "p90": 2,
+          "p95": 2,
+          "max": 2,
+          "mean": 2,
+          "stddev": 0,
+          "samples": 5
+        },
+        "tools.errorCount": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.triggeredTotal": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.skippedTotal": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.PASS": {
+          "min": 0,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 0.8,
+          "stddev": 0.4000000000000001,
+          "samples": 5
+        },
+        "judge.verdictCounts.FAIL": {
+          "min": 0,
+          "p50": 0,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 0.2,
+          "stddev": 0.4,
+          "samples": 5
+        },
+        "judge.verdictCounts.UNKNOWN": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalStarted": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalEnded": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        }
+      },
+      "assertionPassRate": 1,
+      "assertionCount": 6
+    },
+    {
+      "stepNumber": 5,
+      "stepTitle": "Verify in Figma (if possible)",
+      "isManual": true,
+      "assertionMode": "soft_pass",
+      "toolSequences": null,
+      "toolCallCount": null,
+      "durationMs": null,
+      "metricDeltas": {},
+      "assertionPassRate": 1,
+      "assertionCount": 0
+    },
+    {
+      "stepNumber": 6,
+      "stepTitle": "Send a modification prompt",
+      "isManual": false,
+      "assertionMode": "strict",
+      "toolSequences": {
+        "modal": [
+          "figma_set_fills",
+          "figma_screenshot"
+        ],
+        "variants": [
+          {
+            "sequence": [
+              "figma_set_fills",
+              "figma_screenshot"
+            ],
+            "count": 3
+          },
+          {
+            "sequence": [
+              "figma_set_fills",
+              "figma_set_fills",
+              "figma_screenshot"
+            ],
+            "count": 2
+          }
+        ]
+      },
+      "toolCallCount": {
+        "min": 2,
+        "p50": 2,
+        "p90": 3,
+        "p95": 3,
+        "max": 3,
+        "mean": 2.4,
+        "stddev": 0.4898979485566356,
+        "samples": 5
+      },
+      "durationMs": {
+        "min": 28755,
+        "p50": 33766,
+        "p90": 40753,
+        "p95": 40753,
+        "max": 40753,
+        "mean": 33540.8,
+        "stddev": 4285.791147501241,
+        "samples": 5
+      },
+      "metricDeltas": {
+        "tools.callCount": {
+          "min": 2,
+          "p50": 2,
+          "p90": 3,
+          "p95": 3,
+          "max": 3,
+          "mean": 2.4,
+          "stddev": 0.4898979485566356,
+          "samples": 5
+        },
+        "tools.errorCount": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.triggeredTotal": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.skippedTotal": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.PASS": {
+          "min": 0,
+          "p50": 0,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 0.2,
+          "stddev": 0.4,
+          "samples": 5
+        },
+        "judge.verdictCounts.FAIL": {
+          "min": 0,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 0.8,
+          "stddev": 0.4000000000000001,
+          "samples": 5
+        },
+        "judge.verdictCounts.UNKNOWN": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalStarted": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalEnded": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        }
+      },
+      "assertionPassRate": 1,
+      "assertionCount": 5
+    },
+    {
+      "stepNumber": 7,
+      "stepTitle": "Test follow-up suggestions",
+      "isManual": true,
+      "assertionMode": "soft_pass",
+      "toolSequences": null,
+      "toolCallCount": null,
+      "durationMs": null,
+      "metricDeltas": {},
+      "assertionPassRate": 1,
+      "assertionCount": 0
+    },
+    {
+      "stepNumber": 8,
+      "stepTitle": "Final assessment",
+      "isManual": true,
+      "assertionMode": "soft_pass",
+      "toolSequences": null,
+      "toolCallCount": null,
+      "durationMs": null,
+      "metricDeltas": {},
+      "assertionPassRate": 1,
+      "assertionCount": 0
+    }
+  ]
+}

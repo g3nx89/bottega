@@ -1,0 +1,759 @@
+{
+  "schemaVersion": 1,
+  "script": "14-judge-and-subagents",
+  "recordedAt": "2026-04-09T13:54:15.667Z",
+  "appVersion": "0.12.0",
+  "sampleSize": 5,
+  "driftRules": {
+    "durationToleranceP95": 0.3,
+    "toolCountTolerance": 2,
+    "metricDeltaTolerance": 0.5,
+    "toolSequencePolicy": "variant",
+    "assertionPassRateFloor": 1
+  },
+  "steps": [
+    {
+      "stepNumber": 1,
+      "stepTitle": "Verify judge is enabled",
+      "isManual": true,
+      "assertionMode": "soft_pass",
+      "toolSequences": null,
+      "toolCallCount": null,
+      "durationMs": null,
+      "metricDeltas": {},
+      "assertionPassRate": 1,
+      "assertionCount": 0
+    },
+    {
+      "stepNumber": 2,
+      "stepTitle": "Trigger judge via creation",
+      "isManual": false,
+      "assertionMode": "strict",
+      "toolSequences": {
+        "modal": [
+          "figma_render_jsx",
+          "figma_screenshot"
+        ],
+        "variants": [
+          {
+            "sequence": [
+              "figma_render_jsx",
+              "figma_screenshot"
+            ],
+            "count": 5
+          }
+        ]
+      },
+      "toolCallCount": {
+        "min": 2,
+        "p50": 2,
+        "p90": 2,
+        "p95": 2,
+        "max": 2,
+        "mean": 2,
+        "stddev": 0,
+        "samples": 5
+      },
+      "durationMs": {
+        "min": 32248,
+        "p50": 35881,
+        "p90": 48241,
+        "p95": 48241,
+        "max": 48241,
+        "mean": 37366.2,
+        "stddev": 5640.936213076691,
+        "samples": 5
+      },
+      "metricDeltas": {
+        "tools.callCount": {
+          "min": 2,
+          "p50": 2,
+          "p90": 2,
+          "p95": 2,
+          "max": 2,
+          "mean": 2,
+          "stddev": 0,
+          "samples": 5
+        },
+        "tools.errorCount": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.triggeredTotal": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.skippedTotal": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.PASS": {
+          "min": 0,
+          "p50": 0,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 0.2,
+          "stddev": 0.4,
+          "samples": 5
+        },
+        "judge.verdictCounts.FAIL": {
+          "min": 0,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 0.8,
+          "stddev": 0.4000000000000001,
+          "samples": 5
+        },
+        "judge.verdictCounts.UNKNOWN": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalStarted": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalEnded": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        }
+      },
+      "assertionPassRate": 1,
+      "assertionCount": 5
+    },
+    {
+      "stepNumber": 3,
+      "stepTitle": "Judge verdict analysis",
+      "isManual": true,
+      "assertionMode": "soft_pass",
+      "toolSequences": null,
+      "toolCallCount": null,
+      "durationMs": null,
+      "metricDeltas": {},
+      "assertionPassRate": 1,
+      "assertionCount": 0
+    },
+    {
+      "stepNumber": 4,
+      "stepTitle": "Judge retry behavior",
+      "isManual": true,
+      "assertionMode": "soft_pass",
+      "toolSequences": null,
+      "toolCallCount": null,
+      "durationMs": null,
+      "metricDeltas": {},
+      "assertionPassRate": 1,
+      "assertionCount": 0
+    },
+    {
+      "stepNumber": 5,
+      "stepTitle": "Disable judge and verify",
+      "isManual": false,
+      "assertionMode": "strict",
+      "toolSequences": {
+        "modal": [
+          "figma_create_child",
+          "figma_execute",
+          "figma_screenshot"
+        ],
+        "variants": [
+          {
+            "sequence": [
+              "figma_create_child",
+              "figma_execute",
+              "figma_screenshot"
+            ],
+            "count": 2
+          },
+          {
+            "sequence": [
+              "figma_create_child",
+              "figma_screenshot",
+              "figma_move",
+              "figma_screenshot"
+            ],
+            "count": 1
+          },
+          {
+            "sequence": [
+              "figma_create_child",
+              "figma_screenshot"
+            ],
+            "count": 1
+          },
+          {
+            "sequence": [
+              "figma_create_child",
+              "figma_set_fills",
+              "figma_screenshot"
+            ],
+            "count": 1
+          }
+        ]
+      },
+      "toolCallCount": {
+        "min": 2,
+        "p50": 3,
+        "p90": 4,
+        "p95": 4,
+        "max": 4,
+        "mean": 3,
+        "stddev": 0.6324555320336759,
+        "samples": 5
+      },
+      "durationMs": {
+        "min": 29112,
+        "p50": 40506,
+        "p90": 44126,
+        "p95": 44126,
+        "max": 44126,
+        "mean": 37882.6,
+        "stddev": 6257.245451474634,
+        "samples": 5
+      },
+      "metricDeltas": {
+        "tools.callCount": {
+          "min": 2,
+          "p50": 3,
+          "p90": 4,
+          "p95": 4,
+          "max": 4,
+          "mean": 3,
+          "stddev": 0.6324555320336759,
+          "samples": 5
+        },
+        "tools.errorCount": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.triggeredTotal": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.skippedTotal": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.PASS": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.FAIL": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.UNKNOWN": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalStarted": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalEnded": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        }
+      },
+      "assertionPassRate": 0.8,
+      "assertionCount": 5
+    },
+    {
+      "stepNumber": 6,
+      "stepTitle": "Force re-run judge (with mutation)",
+      "isManual": false,
+      "assertionMode": "strict",
+      "toolSequences": {
+        "modal": [
+          "figma_resize",
+          "figma_set_strokes",
+          "figma_screenshot"
+        ],
+        "variants": [
+          {
+            "sequence": [
+              "figma_resize",
+              "figma_set_strokes",
+              "figma_screenshot"
+            ],
+            "count": 5
+          }
+        ]
+      },
+      "toolCallCount": {
+        "min": 3,
+        "p50": 3,
+        "p90": 3,
+        "p95": 3,
+        "max": 3,
+        "mean": 3,
+        "stddev": 0,
+        "samples": 5
+      },
+      "durationMs": {
+        "min": 29633,
+        "p50": 35464,
+        "p90": 48832,
+        "p95": 48832,
+        "max": 48832,
+        "mean": 36977.8,
+        "stddev": 6579.157921801239,
+        "samples": 5
+      },
+      "metricDeltas": {
+        "tools.callCount": {
+          "min": 3,
+          "p50": 3,
+          "p90": 3,
+          "p95": 3,
+          "max": 3,
+          "mean": 3,
+          "stddev": 0,
+          "samples": 5
+        },
+        "tools.errorCount": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.triggeredTotal": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.skippedTotal": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.PASS": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.FAIL": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.UNKNOWN": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalStarted": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalEnded": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        }
+      },
+      "assertionPassRate": 1,
+      "assertionCount": 4
+    },
+    {
+      "stepNumber": 7,
+      "stepTitle": "Subagent configuration",
+      "isManual": true,
+      "assertionMode": "soft_pass",
+      "toolSequences": null,
+      "toolCallCount": null,
+      "durationMs": null,
+      "metricDeltas": {},
+      "assertionPassRate": 1,
+      "assertionCount": 0
+    },
+    {
+      "stepNumber": 8,
+      "stepTitle": "Judge with complex creation",
+      "isManual": false,
+      "assertionMode": "strict",
+      "toolSequences": {
+        "modal": [
+          "figma_status",
+          "figma_design_system",
+          "task_create",
+          "task_create",
+          "task_create",
+          "task_update",
+          "figma_setup_tokens",
+          "task_update",
+          "task_update",
+          "figma_render_jsx",
+          "task_update",
+          "task_update",
+          "figma_batch_bind_variable",
+          "task_update",
+          "figma_screenshot"
+        ],
+        "variants": [
+          {
+            "sequence": [
+              "figma_status",
+              "figma_design_system",
+              "task_create",
+              "task_create",
+              "task_create",
+              "task_update",
+              "figma_setup_tokens",
+              "task_update",
+              "task_update",
+              "figma_render_jsx",
+              "task_update",
+              "task_update",
+              "figma_batch_bind_variable",
+              "task_update",
+              "figma_screenshot"
+            ],
+            "count": 1
+          },
+          {
+            "sequence": [
+              "task_create",
+              "task_create",
+              "task_create",
+              "task_create",
+              "task_update",
+              "figma_design_system",
+              "task_update",
+              "task_update",
+              "figma_setup_tokens",
+              "task_update",
+              "task_update",
+              "figma_render_jsx",
+              "task_update",
+              "task_update",
+              "figma_batch_bind_variable",
+              "figma_set_effects",
+              "figma_execute",
+              "figma_screenshot",
+              "task_update"
+            ],
+            "count": 1
+          },
+          {
+            "sequence": [
+              "task_create",
+              "task_create",
+              "task_create",
+              "task_update",
+              "figma_design_system",
+              "task_update",
+              "task_update",
+              "figma_setup_tokens",
+              "task_update",
+              "task_update",
+              "figma_render_jsx",
+              "figma_batch_bind_variable",
+              "figma_screenshot",
+              "task_update"
+            ],
+            "count": 1
+          },
+          {
+            "sequence": [
+              "task_create",
+              "task_create",
+              "task_create",
+              "figma_design_system",
+              "figma_search_components",
+              "task_update",
+              "task_update",
+              "figma_setup_tokens",
+              "task_update",
+              "task_update",
+              "figma_render_jsx",
+              "figma_batch_bind_variable",
+              "figma_screenshot",
+              "task_update",
+              "figma_update_ds_page"
+            ],
+            "count": 1
+          },
+          {
+            "sequence": [
+              "task_create",
+              "task_create",
+              "task_create",
+              "task_create",
+              "task_create",
+              "task_update",
+              "figma_design_system",
+              "task_update",
+              "figma_setup_tokens",
+              "task_update",
+              "task_update",
+              "task_update",
+              "task_update",
+              "figma_render_jsx",
+              "figma_get_file_data",
+              "figma_batch_bind_variable",
+              "figma_screenshot",
+              "task_update",
+              "task_update",
+              "task_update",
+              "task_update"
+            ],
+            "count": 1
+          }
+        ]
+      },
+      "toolCallCount": {
+        "min": 14,
+        "p50": 15,
+        "p90": 21,
+        "p95": 21,
+        "max": 21,
+        "mean": 16.8,
+        "stddev": 2.7129319932501073,
+        "samples": 5
+      },
+      "durationMs": {
+        "min": 121112,
+        "p50": 122990,
+        "p90": 128398,
+        "p95": 128398,
+        "max": 128398,
+        "mean": 123699.4,
+        "stddev": 2475.7663540810954,
+        "samples": 5
+      },
+      "metricDeltas": {
+        "tools.callCount": {
+          "min": 14,
+          "p50": 15,
+          "p90": 21,
+          "p95": 21,
+          "max": 21,
+          "mean": 16.8,
+          "stddev": 2.7129319932501073,
+          "samples": 5
+        },
+        "tools.errorCount": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.triggeredTotal": {
+          "min": 0,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 0.8,
+          "stddev": 0.4000000000000001,
+          "samples": 5
+        },
+        "judge.skippedTotal": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.PASS": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "judge.verdictCounts.FAIL": {
+          "min": 0,
+          "p50": 0,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 0.4,
+          "stddev": 0.48989794855663565,
+          "samples": 5
+        },
+        "judge.verdictCounts.UNKNOWN": {
+          "min": 0,
+          "p50": 0,
+          "p90": 0,
+          "p95": 0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalStarted": {
+          "min": 1,
+          "p50": 1,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 1,
+          "stddev": 0,
+          "samples": 5
+        },
+        "turns.totalEnded": {
+          "min": 0,
+          "p50": 0,
+          "p90": 1,
+          "p95": 1,
+          "max": 1,
+          "mean": 0.4,
+          "stddev": 0.48989794855663565,
+          "samples": 5
+        }
+      },
+      "assertionPassRate": 0.85,
+      "assertionCount": 4
+    },
+    {
+      "stepNumber": 9,
+      "stepTitle": "Overall assessment",
+      "isManual": true,
+      "assertionMode": "soft_pass",
+      "toolSequences": null,
+      "toolCallCount": null,
+      "durationMs": null,
+      "metricDeltas": {},
+      "assertionPassRate": 1,
+      "assertionCount": 0
+    }
+  ]
+}

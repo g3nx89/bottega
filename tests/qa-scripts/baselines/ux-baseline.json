@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-2026-04-09T16-run2",
+  "timestamp": "2026-04-09T16:35:00.000Z",
+  "appVersion": "0.12.0",
+  "overallScore": 3.88,
+  "scriptScores": {
+    "02-happy-path": {
+      "script": "02-happy-path",
+      "score": 3.85,
+      "stepCount": 8,
+      "issueCount": 4,
+      "dimensionScores": {
+        "visualQuality": 4.25,
+        "responseClarity": 4,
+        "toolSelection": 3.25,
+        "uxCoherence": 3.75,
+        "feedbackQuality": 4
+      }
+    },
+    "14-judge-and-subagents": {
+      "script": "14-judge-and-subagents",
+      "score": 3.9,
+      "stepCount": 8,
+      "issueCount": 4,
+      "dimensionScores": {
+        "visualQuality": 4,
+        "responseClarity": 4,
+        "toolSelection": 3.75,
+        "uxCoherence": 3.75,
+        "feedbackQuality": 4
+      }
+    }
+  },
+  "issues": [
+    {
+      "id": "UX-00000001",
+      "severity": "alta",
+      "script": "02-happy-path",
+      "step": "4. Send a creation prompt",
+      "description": "Agent used 5 figma_screenshot calls and 3 figma_execute calls for a simple button creation, exceeding the cap (figma_screenshot > 2). The agent struggled to locate the created element on the viewport and entered a zoom/scroll retry loop, inflating duration to 89s (borderline on the 90s cap). This wastes tokens and leaves the user waiting with no clear progress indicator during the retry attempts.",
+      "category": "tool_selection"
+    },
+    {
+      "id": "UX-00000002",
+      "severity": "media",
+      "script": "02-happy-path",
+      "step": "4. Send a creation prompt",
+      "description": "Context tokens jumped from 19K to 41K in a single turn due to excessive tool calls (9 tools in one turn). The redundant screenshots and execute calls bloat the context window unnecessarily, reducing headroom for subsequent conversation turns.",
+      "category": "performance"
+    },
+    {
+      "id": "UX-00000003",
+      "severity": "bassa",
+      "script": "02-happy-path",
+      "step": "4. Send a creation prompt",
+      "description": "The agent response says 'it's likely positioned off the visible viewport' and then enters multiple screenshot-execute cycles to find and zoom to the button. The intermediate uncertainty ('likely positioned off') is confusing to the user -- the agent should either create the element at a known viewport position or navigate there directly without narrating its confusion.",
+      "category": "response_quality"
+    },
+    {
+      "id": "UX-00000004",
+      "severity": "bassa",
+      "script": "02-happy-path",
+      "step": "6. Send a modification prompt",
+      "description": "The screenshot count in assertions shows 7 cumulative screenshots at this point, indicating the inline screenshot from step 4's excessive calls persists in the chat. While step 6 itself was efficient (only figma_set_fills + figma_screenshot), the chat scrollback shows accumulated visual noise from step 4's retry loop.",
+      "category": "visual"
+    },
+    {
+      "id": "UX-00000005",
+      "severity": "alta",
+      "script": "14-judge-and-subagents",
+      "step": "5. Disable judge and verify",
+      "description": "Judge triggered (triggeredTotal delta = 1) despite the test expecting it to be disabled. The metric_growth assertion failed on both sub-checks: judge.triggeredTotal was not 0 growth, and judge.skippedByReason['disabled'] did not increment. This is a known runner limitation (cannot perform the manual DOM toggle to disable the judge), but from a UX perspective the judge toggle three-state cycle is not testable by automation, indicating the toggle UX may be too subtle for users as well.",
+      "category": "feedback"
+    },
+    {
+      "id": "UX-00000006",
+      "severity": "media",
+      "script": "14-judge-and-subagents",
+      "step": "8. Judge with complex creation",
+      "description": "The judge verdict card was not visible when the screenshot was captured -- the dom_visible assertion on '.judge-verdict-card' failed. The screenshot shows 'Quality check running...' spinner still active at capture time. For a 122s turn with 20 tool calls, the judge evaluation did not complete before the runner's settle window. Users may see a spinning state with no resolution if they scroll away or switch tabs.",
+      "category": "feedback"
+    },
+    {
+      "id": "UX-00000007",
+      "severity": "media",
+      "script": "14-judge-and-subagents",
+      "step": "8. Judge with complex creation",
+      "description": "The agent called 20 tools in a single turn (5 task_create, 8 task_update, figma_design_system, figma_setup_tokens, figma_render_jsx, figma_get_file_data, figma_batch_bind_variable, figma_screenshot). While thorough, the task_create/task_update calls are internal bookkeeping that produce tool cards visible in the chat. The user sees a long stream of opaque 'task_update' cards with no indication of what each update means, degrading feedback clarity.",
+      "category": "response_quality"
+    },
+    {
+      "id": "UX-00000008",
+      "severity": "bassa",
+      "script": "14-judge-and-subagents",
+      "step": "6. Force re-run judge (with mutation)",
+      "description": "Quality check shows '0/121 items' in the verdict card footer, which is an opaque metric for the user. It is unclear what '121 items' refers to or why 0 of them have issues. A more descriptive summary (e.g., 'All checks passed') would be clearer.",
+      "category": "response_quality"
+    }
+  ]
+}
