@@ -92,9 +92,81 @@ export class FigmaAPI {
   private static readonly BACKOFF_BASE_MS = 1_000;
   private static readonly BACKOFF_MAX_MS = 10_000;
   private static readonly BACKOFF_JITTER_MS = 500;
+  private static readonly VALIDATE_TIMEOUT_MS = 10_000;
 
   constructor(accessToken?: string) {
     this.accessToken = accessToken || '';
+  }
+
+  /**
+   * Update the access token at runtime. Resets error state so a corrected
+   * token can recover from a previously-disabled client (e.g., after 3x 403s).
+   *
+   * Calling with an empty string clears the token and causes subsequent
+   * `request()` calls to throw `'Figma REST API token not configured'`
+   * (fast-fail instead of sending empty-header requests).
+   *
+   * IMPORTANT: The `apiDisabled` and `consecutive403Count` resets are
+   * load-bearing — they are what allow the "user saves a bad token, then
+   * saves a good one" recovery flow to work without an app restart. See
+   * `src/main/ipc-handlers-figma-auth.ts` `figma-auth:set-token` handler.
+   * Do NOT refactor this to a plain setter without preserving that behavior.
+   */
+  setAccessToken(token: string): void {
+    this.accessToken = token || '';
+    this.consecutive403Count = 0;
+    this.apiDisabled = false;
+    logger.info({ hasToken: !!this.accessToken }, 'Figma API access token updated');
+  }
+
+  /**
+   * Validate a token by calling `GET /v1/me`. Static because it's called
+   * during the "save token" and "startup revalidation" flows, before any
+   * FigmaAPI instance is reconfigured. Handles network errors, timeout,
+   * and non-2xx responses uniformly.
+   *
+   * Never persists the token. Never mutates global state. Safe to call
+   * concurrently.
+   */
+  static async validateToken(
+    token: string,
+  ): Promise<{ ok: true; handle: string } | { ok: false; error: string; status?: number }> {
+    if (!token || !token.trim()) {
+      return { ok: false, error: 'Token is required' };
+    }
+    const trimmed = token.trim();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FigmaAPI.VALIDATE_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${FIGMA_API_BASE}/me`, {
+        headers: { 'X-Figma-Token': trimmed },
+        signal: controller.signal,
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        return { ok: false, error: 'Invalid token', status: response.status };
+      }
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        return {
+          ok: false,
+          error: `Figma API error (${response.status}): ${body}`,
+          status: response.status,
+        };
+      }
+
+      // Only use `handle` or `id` for UI display — never `email`, which would
+      // persist PII as plaintext metadata in figma-auth.json (the handle field
+      // is not encrypted even when safeStorage is available — only the token).
+      const data = (await response.json()) as { handle?: string; id?: string };
+      const handle = data.handle || data.id || 'Figma user';
+      return { ok: true, handle };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: message };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -104,6 +176,12 @@ export class FigmaAPI {
   private async request(endpoint: string, options: RequestInit = {}): Promise<any> {
     if (this.apiDisabled) {
       throw new Error('Figma REST API disabled: invalid token (3 consecutive 403s)');
+    }
+    if (!this.accessToken) {
+      // Fast-fail: previously we'd proceed with an empty `X-Figma-Token` header
+      // and wait for 3 fresh 403s before disabling. After a Clear token click,
+      // in-flight tools must stop immediately — not waste 3 round-trips.
+      throw new Error('Figma REST API token not configured');
     }
 
     const url = `${FIGMA_API_BASE}${endpoint}`;

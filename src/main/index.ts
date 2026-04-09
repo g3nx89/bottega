@@ -7,10 +7,12 @@ import { type AgentInfra, createAgentInfra, OAUTH_PROVIDER_MAP } from './agent.j
 import { AppStatePersistence } from './app-state-persistence.js';
 import { initAutoUpdater } from './auto-updater.js';
 import { cleanOldLogs, collectSystemInfo } from './diagnostics.js';
+import { FigmaAuthStore } from './figma-auth-store.js';
 import { createFigmaCore } from './figma-core.js';
 import { effectiveApiKey, loadImageGenSettings } from './image-gen/config.js';
 import { ImageGenerator } from './image-gen/image-generator.js';
 import { setupIpcHandlers, syncFigmaPlugin } from './ipc-handlers.js';
+import { revalidateFigmaAuthOnStartup } from './ipc-handlers-figma-auth.js';
 import {
   MSG_PLUGIN_UPDATED,
   MSG_PORT_IN_USE_BODY,
@@ -187,7 +189,10 @@ if (!gotTheLock) {
 
       // 1. Start Figma core (WebSocket server — port 0 in test mode for auto-assign)
       const wsPort = isTestMode ? 0 : DEFAULT_WS_PORT;
-      figmaCore = await createFigmaCore({ port: wsPort });
+      const figmaAuthStore = new FigmaAuthStore();
+      const savedFigmaToken = figmaAuthStore.getToken();
+      log.info({ hasFigmaToken: !!savedFigmaToken }, 'Figma REST API auth state loaded');
+      figmaCore = await createFigmaCore({ port: wsPort, figmaToken: savedFigmaToken ?? undefined });
       try {
         await figmaCore.start();
       } catch (err: unknown) {
@@ -392,12 +397,28 @@ if (!gotTheLock) {
         imageGenState,
         sessionStore,
         usageTracker,
+        figmaAuthStore,
       });
 
       // Subscribe restored slots to IPC events
       for (const slotInfo of slotManager.listSlots()) {
         const slot = slotManager.getSlot(slotInfo.id);
         if (slot) ipcController.subscribeSlot(slot);
+      }
+
+      // ── Background revalidation of the persisted Figma PAT (HIGH 2) ──
+      // If the stored token was revoked between sessions, this clears it
+      // and flips the UI to "Not connected" before the user's first tool
+      // call wastes 3x403 round-trips. Fire-and-forget: the window is
+      // already visible, so we don't block startup on a network call.
+      if (savedFigmaToken) {
+        void revalidateFigmaAuthOnStartup({
+          figmaAuthStore,
+          figmaAPI: infra.figmaAPI,
+          mainWindow,
+        }).catch((err) => {
+          log.warn({ err }, 'Figma startup revalidation crashed');
+        });
       }
 
       // Sync model config ref when model switches in IPC

@@ -8,9 +8,11 @@ import { createChildLogger } from '../figma/logger.js';
 import { type AgentInfra, AVAILABLE_MODELS, CONTEXT_SIZES, isThinkingLevel, type ModelConfig } from './agent.js';
 import { checkForUpdates, downloadUpdate, getAppVersion, quitAndInstall } from './auto-updater.js';
 import { exportDiagnosticsZip, formatSystemInfoForClipboard } from './diagnostics.js';
+import type { FigmaAuthStore } from './figma-auth-store.js';
 import { effectiveApiKey, type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
 import { DEFAULT_IMAGE_MODEL, IMAGE_GEN_MODELS, ImageGenerator } from './image-gen/image-generator.js';
 import { setupAuthHandlers } from './ipc-handlers-auth.js';
+import { setupFigmaAuthHandlers } from './ipc-handlers-figma-auth.js';
 import {
   MSG_EXPORT_DIALOG_TITLE,
   MSG_EXPORT_FILTER_NAME,
@@ -265,10 +267,11 @@ export interface SetupIpcDeps {
   imageGenState?: ImageGenState;
   sessionStore?: SessionStore;
   usageTracker?: UsageTracker;
+  figmaAuthStore?: FigmaAuthStore;
 }
 
 export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
-  const { slotManager, mainWindow, infra, imageGenState, sessionStore, usageTracker } = deps;
+  const { slotManager, mainWindow, infra, imageGenState, sessionStore, usageTracker, figmaAuthStore } = deps;
   const modelChangeListeners: Array<(config: ModelConfig) => void> = [];
 
   /** Helper: get slot or throw. */
@@ -564,6 +567,11 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
 
   // ── Auth (delegated to ipc-handlers-auth.ts) ──
   setupAuthHandlers({ infra, mainWindow });
+
+  // ── Figma REST API auth (Personal Access Token) ──
+  if (figmaAuthStore) {
+    setupFigmaAuthHandlers({ figmaAuthStore, figmaAPI: infra.figmaAPI, mainWindow });
+  }
 
   // ── Image Generation settings (global) ────────────
 

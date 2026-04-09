@@ -20,6 +20,21 @@ interface QueuedPromptDTO {
   addedAt: number;
 }
 
+/** Figma REST API auth status — shared between get + subscribe contracts. */
+interface FigmaAuthStatusDTO {
+  connected: boolean;
+  encrypted: boolean;
+  userHandle?: string;
+  lastValidatedAt?: string;
+}
+
+interface FigmaAuthSetResultDTO {
+  success: boolean;
+  userHandle?: string;
+  error?: string;
+  status?: number;
+}
+
 contextBridge.exposeInMainWorld('api', {
   // ── Agent (per-slot) ─────────────────────
   sendPrompt: (slotId: string, text: string) => ipcRenderer.invoke('agent:prompt', slotId, text),
@@ -204,6 +219,15 @@ contextBridge.exposeInMainWorld('api', {
   getGoogleProject: () => ipcRenderer.invoke('auth:get-google-project') as Promise<string>,
   onLoginEvent: (cb: (event: any) => void) => {
     ipcRenderer.on('auth:login-event', (_event, data) => cb(data));
+  },
+
+  // ── Figma REST API auth (Personal Access Token) ──
+  getFigmaAuthStatus: () => ipcRenderer.invoke('figma-auth:get-status') as Promise<FigmaAuthStatusDTO>,
+  setFigmaToken: (token: string) => ipcRenderer.invoke('figma-auth:set-token', token) as Promise<FigmaAuthSetResultDTO>,
+  clearFigmaToken: () => ipcRenderer.invoke('figma-auth:clear') as Promise<{ success: boolean; error?: string }>,
+  openFigmaPatDocs: () => ipcRenderer.invoke('figma-auth:open-pat-docs') as Promise<void>,
+  onFigmaAuthStatusChanged: (cb: (status: FigmaAuthStatusDTO) => void) => {
+    ipcRenderer.on('figma-auth:status-changed', (_event, data: FigmaAuthStatusDTO) => cb(data));
   },
 
   // ── Usage tracking ────────────────────────

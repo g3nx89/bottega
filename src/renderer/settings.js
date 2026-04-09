@@ -422,6 +422,110 @@ imagegenModelSelect.addEventListener('change', async () => {
 
 initImageGenUI();
 
+// ── Figma REST API (Personal Access Token) ─────────────
+
+const figmaPatInput = document.getElementById('figma-pat-input');
+const figmaPatSaveBtn = document.getElementById('figma-pat-save-btn');
+const figmaPatClearBtn = document.getElementById('figma-pat-clear-btn');
+const figmaPatStatus = document.getElementById('figma-pat-status');
+const figmaPatDocsLink = document.getElementById('figma-pat-docs-link');
+
+function setFigmaPatStatus(text, variant) {
+  figmaPatStatus.textContent = text || '';
+  figmaPatStatus.className = 'key-status' + (variant ? ' ' + variant : '');
+}
+
+/** Map technical error strings from the main process to user-friendly UI copy. */
+function friendlyFigmaAuthError(result) {
+  if (!result) return 'Failed to save';
+  if (result.status === 401 || result.status === 403) {
+    return 'Invalid token — check that it has the required read scopes';
+  }
+  const err = result.error || '';
+  if (/ECONN|ENOTFOUND|EAI_AGAIN|fetch failed|network/i.test(err)) {
+    return 'Network unreachable — check your connection';
+  }
+  if (/abort|timed out|timeout/i.test(err)) {
+    return 'Figma API timed out — retry in a moment';
+  }
+  return err || 'Failed to save';
+}
+
+// Single source of truth for the "connected" / "disconnected" DOM state.
+// Previously duplicated between refreshFigmaAuthStatus and the save handler.
+const FIGMA_PAT_MASKED_PLACEHOLDER = '••••••••  (token saved)';
+const FIGMA_PAT_EMPTY_PLACEHOLDER = 'figd_...';
+
+function applyFigmaConnectedUI(userHandle) {
+  const who = userHandle ? `Connected as ${userHandle}` : 'Connected';
+  setFigmaPatStatus(who, 'success');
+  figmaPatClearBtn.classList.remove('hidden');
+  figmaPatInput.placeholder = FIGMA_PAT_MASKED_PLACEHOLDER;
+}
+
+function applyFigmaDisconnectedUI(message) {
+  setFigmaPatStatus(message ?? 'Not connected', '');
+  figmaPatClearBtn.classList.add('hidden');
+  figmaPatInput.placeholder = FIGMA_PAT_EMPTY_PLACEHOLDER;
+}
+
+async function refreshFigmaAuthStatus() {
+  try {
+    const status = await window.api.getFigmaAuthStatus();
+    if (status?.connected) {
+      applyFigmaConnectedUI(status.userHandle);
+    } else {
+      applyFigmaDisconnectedUI();
+    }
+  } catch (_err) {
+    setFigmaPatStatus('Failed to read status', 'error');
+  }
+}
+
+figmaPatSaveBtn.addEventListener('click', async () => {
+  const token = figmaPatInput.value.trim();
+  if (!token) {
+    setFigmaPatStatus('Paste a token first', 'error');
+    return;
+  }
+  figmaPatSaveBtn.disabled = true;
+  setFigmaPatStatus('Validating…', '');
+  try {
+    const result = await window.api.setFigmaToken(token);
+    if (result?.success) {
+      figmaPatInput.value = '';
+      applyFigmaConnectedUI(result.userHandle);
+    } else {
+      setFigmaPatStatus(friendlyFigmaAuthError(result), 'error');
+    }
+  } catch (err) {
+    setFigmaPatStatus(err?.message || 'Unexpected error', 'error');
+  } finally {
+    figmaPatSaveBtn.disabled = false;
+  }
+});
+
+figmaPatClearBtn.addEventListener('click', async () => {
+  figmaPatClearBtn.disabled = true;
+  try {
+    await window.api.clearFigmaToken();
+    await refreshFigmaAuthStatus();
+  } finally {
+    figmaPatClearBtn.disabled = false;
+  }
+});
+
+figmaPatDocsLink.addEventListener('click', (e) => {
+  e.preventDefault();
+  window.api.openFigmaPatDocs();
+});
+
+if (window.api.onFigmaAuthStatusChanged) {
+  window.api.onFigmaAuthStatusChanged(() => refreshFigmaAuthStatus());
+}
+
+refreshFigmaAuthStatus();
+
 // ── Transparency control ─────────────────
 
 function applyTransparency(value) {

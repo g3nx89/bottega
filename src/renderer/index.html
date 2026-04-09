@@ -141,6 +141,17 @@
             <select id="imagegen-model-select" class="setting-select"></select>
           </div>
           <div class="setting-divider"></div>
+          <div class="setting-group" id="figma-rest-api-group">
+            <label class="setting-label">Figma REST API</label>
+            <span class="setting-hint">Personal Access Token required for reading file data, variables, components, and publishing design system metadata. <a href="#" id="figma-pat-docs-link" class="setting-link-inline">How to create a token</a>.</span>
+            <div class="key-input-row">
+              <input type="password" id="figma-pat-input" class="setting-input" placeholder="figd_..." autocomplete="off">
+              <button id="figma-pat-save-btn" class="setting-btn-sm">Save</button>
+              <button id="figma-pat-clear-btn" class="setting-btn-sm hidden">Disconnect</button>
+            </div>
+            <span id="figma-pat-status" class="key-status"></span>
+          </div>
+          <div class="setting-divider"></div>
           <div class="setting-group">
             <label class="setting-label" for="transparency-slider">Background transparency</label>
             <div class="slider-row">
