@@ -153,33 +153,147 @@ Agent tool:
     4. Note any UX issues not caught by Pass 1 (subtle visual problems,
        confusing responses, missing feedback, timing concerns)
     
-    OUTPUT: Write a structured UX review to /tmp/bottega-qa/ux-review.md:
-    
+    DUAL OUTPUT (Fase 3b) — produce BOTH files in one pass:
+
+    FILE 1: /tmp/bottega-qa/ux-review.md — human-readable markdown (existing format)
+
     # UX Quality Review
-    
+
     ## Summary
     - Overall UX score: X/5
     - Scripts reviewed: N
     - UX issues found: N (by severity)
-    
+
     ## Per-Script Review
     ### Script NN — Name
     **Overall: X/5**
     | Step | Visual | Clarity | Tools | UX | Feedback | Notes |
     |------|--------|---------|-------|----|----------|-------|
     | 1    | 4/5    | 5/5     | 5/5   | 4/5| 3/5     | No loading indicator |
-    
+
     **UX Issues:**
     - [Media] Step 3: Agent response is 400 words for a simple color change — too verbose
     - [Bassa] Step 5: Screenshot shows misaligned text in the card header
-    
+
     ## Cross-Script Patterns
     - Recurring issues across multiple scripts
     - Positive patterns worth preserving
-    
+
     ## Recommendations
     - Prioritized UX improvements
+
+    FILE 2: /tmp/bottega-qa/ux-review.json — machine-readable UXReview JSON
+    consumed by ux-baseline-cli.mjs for drift detection against the committed
+    baseline. MUST conform to the schema in tests/helpers/ux-baseline/schema.ts
+    (schemaVersion 1). Example shape:
+
+    {
+      "schemaVersion": 1,
+      "runId": "run-<ISO-timestamp>",
+      "timestamp": "2026-04-09T10:00:00.000Z",
+      "appVersion": "<from package.json>",
+      "overallScore": 4.2,
+      "scriptScores": {
+        "02-happy-path": {
+          "script": "02-happy-path",
+          "score": 4.4,
+          "stepCount": 6,
+          "issueCount": 1,
+          "dimensionScores": {
+            "visualQuality": 4.5,
+            "responseClarity": 4.0,
+            "toolSelection": 5.0,
+            "uxCoherence": 4.0,
+            "feedbackQuality": 4.0
+          }
+        }
+      },
+      "issues": [
+        {
+          "id": "UX-a1b2c3d4",
+          "severity": "media",
+          "script": "02-happy-path",
+          "step": "4. Send a creation prompt",
+          "description": "Response is slightly verbose (400 words for a color change)",
+          "category": "response_quality"
+        }
+      ]
+    }
+
+    JSON RULES (critical for drift detection):
+
+    1. Scores are floats with 2 decimal precision (4.25 not 4.3). Integer
+       snapping would hide the variance measured in calibration (Fase 3 Task
+       3.2a) and would make the regressionDimension=0.5 threshold too coarse.
+
+    2. Severity enum is EXACTLY: "alta" | "media" | "bassa" (Italian; matches
+       existing BUG-REPORT.md vocabulary).
+
+    3. Category enum is EXACTLY: "tool_selection" | "response_quality" |
+       "visual" | "feedback" | "performance". If an issue doesn't fit, force
+       the closest match instead of inventing categories — the differ enum is
+       closed.
+
+    4. Issue IDs MUST follow UX-<8 hex chars> format. Compute deterministically
+       from (script, step, description) so the same semantic issue across runs
+       gets the same ID. Example algorithm (FNV-1a, lowercase trimmed desc):
+         id = "UX-" + fnv1a(script + "|" + step + "|" + desc.trim().toLowerCase()).toHex().slice(0, 8)
+       If you can't compute the hash yourself, use sequential UX-00000001,
+       UX-00000002, ... and a follow-up pass will stabilize them.
+
+    5. overallScore = mean of per-script scores (simple average, not weighted).
+
+    6. Each script.score = mean of its 5 dimensionScores.
+
+    7. BE DETERMINISTIC. Variance across identical runs must be <0.3 per
+       dimension (the calibration threshold). Prefer "this is clearly a 4"
+       over "3.5 or 4, I'll pick 4 this time" — pick a scoring anchor up
+       front and stick to it. If a step genuinely doesn't inform a dimension,
+       score it 4.0 (neutral-positive) rather than guessing.
+
+    After writing both files, do NOT call the validator yourself. The
+    orchestrator runs `ux-baseline-cli.mjs validate /tmp/bottega-qa/ux-review.json`
+    which catches schema violations.
 ```
+
+### Step 2b: UX Oracle — schema validate + drift diff (Fase 3b)
+
+**After Pass 2 writes ux-review.md + ux-review.json**, run the UX Oracle
+pipeline to validate schema conformance and detect drift against the
+committed baseline:
+
+```bash
+# 1. Validate the reviewer's JSON output against the TypeBox schema.
+#    Catches severity/category enum typos, malformed issue IDs, score
+#    out-of-range, missing fields. Exits 1 on any violation.
+node .claude/skills/bottega-dev-debug/scripts/ux-baseline-cli.mjs \
+  validate /tmp/bottega-qa/ux-review.json
+
+# 2. Diff against the committed baseline at tests/qa-scripts/baselines/ux-baseline.json
+#    Writes /tmp/bottega-qa/ux-drift.json and prints a summary:
+#    - verdict: OK | DRIFT | BASELINE_MISSING | SCHEMA_MISMATCH
+#    - overall score delta
+#    - per-script and per-dimension drops (floats)
+#    - new/fixed/escalated issues (by ID)
+#    Exit codes: 0=OK, 1=DRIFT, 2=BASELINE_MISSING
+node .claude/skills/bottega-dev-debug/scripts/ux-baseline-cli.mjs \
+  diff /tmp/bottega-qa/ux-review.json
+```
+
+**Bootstrap / refresh** (only when intentionally promoting a review to
+baseline — e.g., after a model swap where drift is expected and desired):
+```bash
+node .claude/skills/bottega-dev-debug/scripts/ux-baseline-cli.mjs \
+  record /tmp/bottega-qa/ux-review.json
+git add tests/qa-scripts/baselines/ux-baseline.json
+git commit -m "qa: refresh UX baseline after <reason>"
+```
+
+Thresholds live in `tests/helpers/ux-baseline/schema.ts` as
+`DEFAULT_UX_DIFF_RULES` (regressionOverall=0.3, regressionScript=0.5,
+regressionDimension=0.5). A regression is declared when an overall/script/
+dimension score drops beyond threshold, or when a new `alta` severity
+issue appears, or when an existing issue's severity escalates.
 
 ### Step 3: Merge + Report
 
