@@ -36,5 +36,12 @@ export default defineConfig({
       timeout: 300_000,
       retries: 1,
     },
+    {
+      name: 'resilience',
+      testDir: 'tests/agent',
+      testMatch: '**/tier6*.spec.mjs',
+      timeout: 900_000,
+      retries: 0,
+    },
   ],
 });
