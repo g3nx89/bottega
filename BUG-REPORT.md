@@ -39,7 +39,7 @@ App in produzione connessa a Figma Desktop con Bridge plugin, 2 file aperti.
 | B-007 | Flag isStreaming non azzerato subito dopo abort | Bassa | **FIXED** (immediate reset) |
 | B-008 | Nessun fallback visivo per screenshot senza Figma | Bassa | **FIXED** (tool-fallback msg) |
 | B-009 | Suggerimenti follow-up assenti dopo risposte degradate | Bassa | **FIXED** (relaxed guard) |
-| B-010 | Click su suggestion chip non riempie l'input | Media | **IMPROVED** (error handling) |
+| B-010 | Click su suggestion chip non riempie l'input | Media | **FIXED** (chip bypassa input by design; silent catch rimosso + error handling inline) |
 | B-011 | Suggestions riappaiono dopo session reset (race condition) | Bassa | **FIXED** (turnIndex guard) |
 | B-012 | Context bar non si resetta a 0K dopo New Chat | Media | **FIXED** (db11dae) |
 | B-013 | figma_restore_image non usato dall'agent (tool selection) | Bassa | **FIXED** (Run 4 — Image Restore Workflow in system prompt) |
@@ -242,9 +242,9 @@ al contesto (es. "Riconnetti Figma", "Verifica la connessione", "Riprova").
 
 ---
 
-## B-010: Click su suggestion chip non riempie l'input
+## B-010: Click su suggestion chip non riempie l'input — FIXED
 
-**Severita**: Media
+**Severita**: Media → **FIXED**
 **Componente**: Renderer (app.js)
 **Riproduzione**:
 1. Invia un prompt e attendi la risposta
@@ -258,9 +258,14 @@ al contesto (es. "Riconnetti Figma", "Verifica la connessione", "Riprova").
 Il vero rischio era il `.catch(() => {})` che inghiottiva silenziosamente errori IPC.
 
 **Fix applicato**: Rimosso silent catch, aggiunto error handling visibile con
-`console.error` + messaggio inline se `sendPrompt` fallisce. Aggiunta guard `!tab.id`.
+`console.error` + messaggio inline se `sendPrompt` fallisce. Aggiunta guard `!tab.id`
+e `!tab.isStreaming` prima di `_initTurn`. Il summary table era rimasto `IMPROVED`
+per sbaglio — riallineato a `FIXED` il 2026-04-09.
 
-**File**: `src/renderer/app.js` (suggestion chip click handler, linea ~1746)
+**Verificato**: codice corrente in `src/renderer/app.js:1854-1872` contiene tutte
+le protezioni descritte.
+
+**File**: `src/renderer/app.js:1854-1872` (suggestion chip click handler)
 
 ---
 
