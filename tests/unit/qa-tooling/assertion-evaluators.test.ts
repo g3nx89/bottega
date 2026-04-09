@@ -336,12 +336,12 @@ describe('evaluateAssertions (dispatcher)', () => {
     const { passed, results } = await evaluateAssertions(
       {
         tools_called: ['figma_execute'],
-        judge_triggered: true, // P2 type, not yet implemented
+        nonexistent_evaluator: true, // truly unknown type
       },
       makeStepData({ toolsCalled: ['figma_execute'] }),
     );
     expect(passed).toBe(false);
-    const unknown = results.find((r: AssertionResult) => r.name === 'judge_triggered');
+    const unknown = results.find((r: AssertionResult) => r.name === 'nonexistent_evaluator');
     expect(unknown).toBeDefined();
     expect(unknown!.passed).toBe(false);
     expect(unknown!.error).toContain('unknown assertion type');
@@ -578,7 +578,7 @@ describe('module exports', () => {
     expect(DSL_VERSION).toBe(1);
   });
 
-  it('ASSERTION_EVALUATORS registry has all 9 supported types (7 P1 + 2 metric)', () => {
+  it('ASSERTION_EVALUATORS registry has all 11 supported types (7 P1 + 2 metric + 2 judge)', () => {
     const expected = [
       'tools_called',
       'tools_called_any_of',
@@ -589,6 +589,8 @@ describe('module exports', () => {
       'dom_visible',
       'metric',
       'metric_growth',
+      'judge_triggered',
+      'judge_verdict',
     ].sort();
     expect(Object.keys(ASSERTION_EVALUATORS).sort()).toEqual(expected);
   });
