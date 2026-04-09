@@ -4223,6 +4223,32 @@ figma.ui.onmessage = async (msg) => {
       figma.ui.postMessage({ type: 'SET_CORNER_RADIUS_RESULT', requestId, success: false, error: e.message });
     }
   }
+
+  // ============================================================================
+  // CLEAR_PAGE - Create a fresh page and switch to it (QA canvas cleanup)
+  // ============================================================================
+  else if (msg.type === 'CLEAR_PAGE') {
+    try {
+      console.log('🌉 [Desktop Bridge] Creating clean page for QA');
+      var newPage = figma.createPage();
+      newPage.name = msg.payload && msg.payload.name ? msg.payload.name : 'QA-Run-' + Date.now();
+      await figma.setCurrentPageAsync(newPage);
+      figma.ui.postMessage({
+        type: 'CLEAR_PAGE_RESULT',
+        requestId: msg.requestId,
+        success: true,
+        pageId: newPage.id,
+        pageName: newPage.name
+      });
+    } catch (e) {
+      figma.ui.postMessage({
+        type: 'CLEAR_PAGE_RESULT',
+        requestId: msg.requestId,
+        success: false,
+        error: e.message
+      });
+    }
+  }
 };
 
 // ============================================================================

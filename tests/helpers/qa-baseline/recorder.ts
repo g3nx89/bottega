@@ -39,6 +39,8 @@ export interface RecorderStepInput {
   assertions: ReadonlyArray<{ passed: boolean }> | null;
   metricsBefore?: unknown | null;
   metricsAfter?: unknown | null;
+  /** Perceptual hash (16-char hex) of the step's primary screenshot, if any. */
+  screenshotHash?: string | null;
 }
 
 export interface RecorderOptions {
@@ -59,6 +61,9 @@ export const DEFAULT_METRIC_PATHS: readonly string[] = [
   'judge.verdictCounts.UNKNOWN',
   'turns.totalStarted',
   'turns.totalEnded',
+  'process.rssBytes',
+  'process.heapUsedBytes',
+  'process.uptimeSec',
 ];
 
 /**
@@ -126,6 +131,7 @@ function aggregateStep(
       metricDeltas: {},
       assertionPassRate: 1.0,
       assertionCount: 0,
+      screenshotHashes: null,
     };
   }
 
@@ -165,6 +171,13 @@ function aggregateStep(
   const assertionPassRate = rates.reduce((acc, r) => acc + r, 0) / rates.length;
   const assertionCount = first.assertions?.length ?? 0;
 
+  // Collect screenshot hashes and store the modal (most frequent) hash.
+  // We use "screenshot" as the canonical key; callers may pass their own key
+  // by setting screenshotHash. If no entry has a hash, screenshotHashes is null.
+  const hashes = entries.map((e) => e.screenshotHash ?? null).filter((h): h is string => h !== null);
+  const screenshotHashes: Record<string, string> | null =
+    hashes.length > 0 ? { screenshot: modalString(hashes) } : null;
+
   return {
     stepNumber,
     stepTitle,
@@ -176,7 +189,28 @@ function aggregateStep(
     metricDeltas,
     assertionPassRate,
     assertionCount,
+    screenshotHashes,
   };
+}
+
+/**
+ * Return the most frequently occurring string in an array.
+ * Ties are broken by first occurrence.
+ */
+function modalString(values: readonly string[]): string {
+  const counts = new Map<string, number>();
+  for (const v of values) {
+    counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  let best = values[0];
+  let bestCount = 0;
+  for (const [v, c] of counts) {
+    if (c > bestCount) {
+      best = v;
+      bestCount = c;
+    }
+  }
+  return best;
 }
 
 function parseStepTitle(raw: string, fallbackNumber: number): { stepNumber: number; stepTitle: string } {

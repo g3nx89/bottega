@@ -42,6 +42,7 @@ function automatedStep(n: number): BaselineStep {
     },
     assertionPassRate: 1.0,
     assertionCount: 4,
+    screenshotHashes: null,
   };
 }
 
@@ -57,6 +58,7 @@ function manualStep(n: number): BaselineStep {
     metricDeltas: {},
     assertionPassRate: 1.0,
     assertionCount: 0,
+    screenshotHashes: null,
   };
 }
 

@@ -330,8 +330,112 @@ describe('diffRun — metric_delta sparse handling', () => {
   });
 });
 
+describe('diffRun — visual_drift', () => {
+  it('no finding when both hashes match exactly', () => {
+    const s = step(1, ['a'], 1000);
+    const hashA = 'a0b1c2d3e4f56789';
+    const withHash = { ...s, screenshotHash: hashA };
+    const b = recordBaseline([[withHash], [withHash], [withHash]], { script: 'test', appVersion: '0.18.0' });
+    const r = diffRun({ baseline: b, run: [{ ...s, screenshotHash: hashA }] });
+    const f = r.steps[0].findings.find((f) => f.category === 'visual_drift');
+    expect(f).toBeUndefined();
+  });
+
+  it('no finding when neither side has screenshot hash', () => {
+    const b = baseline([step(1, ['a'], 1000)]);
+    const r = diffRun({ baseline: b, run: [step(1, ['a'], 1000)] });
+    const f = r.steps[0].findings.find((f) => f.category === 'visual_drift');
+    expect(f).toBeUndefined();
+  });
+
+  it('warning when hamming distance is 11-15', () => {
+    const s = step(1, ['a'], 1000);
+    // Two hashes that differ by ~12 bits: 0x0000 vs 0x0fff (12 bits in low 3 nibbles)
+    const baseHash = '0000000000000000';
+    const currHash = '0000000000000fff'; // 12 bits differ
+    const withHash = { ...s, screenshotHash: baseHash };
+    const b = recordBaseline([[withHash], [withHash], [withHash]], { script: 'test', appVersion: '0.18.0' });
+    const r = diffRun({ baseline: b, run: [{ ...s, screenshotHash: currHash }] });
+    const f = r.steps[0].findings.find((f) => f.category === 'visual_drift');
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe('warning');
+  });
+
+  it('no finding when baseline has hash but run does not (asymmetric)', () => {
+    const s = step(1, ['a'], 1000);
+    const withHash = { ...s, screenshotHash: 'a0b1c2d3e4f56789' };
+    const b = recordBaseline([[withHash], [withHash], [withHash]], { script: 'test', appVersion: '0.18.0' });
+    // Current run has no screenshot hash
+    const r = diffRun({ baseline: b, run: [step(1, ['a'], 1000)] });
+    const f = r.steps[0].findings.find((f) => f.category === 'visual_drift');
+    expect(f).toBeUndefined();
+  });
+
+  it('no finding when run has hash but baseline does not (asymmetric)', () => {
+    const b = baseline([step(1, ['a'], 1000)]); // no screenshotHash
+    const r = diffRun({ baseline: b, run: [{ ...step(1, ['a'], 1000), screenshotHash: 'a0b1c2d3e4f56789' }] });
+    const f = r.steps[0].findings.find((f) => f.category === 'visual_drift');
+    expect(f).toBeUndefined();
+  });
+
+  it('regression when hamming distance exceeds 15', () => {
+    const s = step(1, ['a'], 1000);
+    const baseHash = '0000000000000000';
+    const currHash = 'ffffffffffffffff'; // 64 bits differ
+    const withHash = { ...s, screenshotHash: baseHash };
+    const b = recordBaseline([[withHash], [withHash], [withHash]], { script: 'test', appVersion: '0.18.0' });
+    const r = diffRun({ baseline: b, run: [{ ...s, screenshotHash: currHash }] });
+    const f = r.steps[0].findings.find((f) => f.category === 'visual_drift');
+    expect(f).toBeDefined();
+    expect(f?.severity).toBe('regression');
+    expect(r.steps[0].verdict).toBe('DRIFT');
+  });
+});
+
+describe('diffRun — per-path metric tolerance overrides', () => {
+  it('uses override tolerance for process.rssBytes', () => {
+    const s = step(1, ['a'], 1000);
+    // Give baseline a process.rssBytes delta
+    const withRss = {
+      ...s,
+      metricsBefore: { ...metrics(), process: { rssBytes: 100_000_000, heapUsedBytes: 50_000_000, uptimeSec: 10 } },
+      metricsAfter: { ...metrics(), process: { rssBytes: 110_000_000, heapUsedBytes: 60_000_000, uptimeSec: 15 } },
+    };
+    const b = recordBaseline([[withRss], [withRss], [withRss]], {
+      script: 'test',
+      appVersion: '0.18.0',
+      metricPaths: ['process.rssBytes'],
+    });
+    // Current delta = 30M (3x the baseline 10M delta). With default 0.5 tolerance this would regression.
+    // But process.rssBytes has override tolerance 2.0, so |30M - 10M|/10M = 200% <= 200% → OK
+    const current = {
+      ...s,
+      metricsBefore: { ...metrics(), process: { rssBytes: 100_000_000, heapUsedBytes: 50_000_000, uptimeSec: 10 } },
+      metricsAfter: { ...metrics(), process: { rssBytes: 130_000_000, heapUsedBytes: 60_000_000, uptimeSec: 15 } },
+    };
+    const r = diffRun({
+      baseline: b,
+      run: [current],
+      driftRulesOverride: {
+        ...DEFAULT_DRIFT_RULES,
+        toolSequencePolicy: 'superset',
+        metricDeltaToleranceOverrides: { 'process.rssBytes': 2.0 },
+      },
+    });
+    const f = r.steps[0].findings.find((f) => f.category === 'metric_delta' && f.path === 'process.rssBytes');
+    // At 200% delta with 2.0 tolerance, this is exactly at the boundary — should not be flagged
+    expect(f).toBeUndefined();
+  });
+});
+
 describe('DEFAULT_METRIC_PATHS sanity', () => {
   it('exports a non-empty default path list for recorder', () => {
     expect(DEFAULT_METRIC_PATHS.length).toBeGreaterThan(0);
+  });
+
+  it('includes process memory metrics', () => {
+    expect(DEFAULT_METRIC_PATHS).toContain('process.rssBytes');
+    expect(DEFAULT_METRIC_PATHS).toContain('process.heapUsedBytes');
+    expect(DEFAULT_METRIC_PATHS).toContain('process.uptimeSec');
   });
 });

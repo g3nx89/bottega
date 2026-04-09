@@ -598,7 +598,8 @@
         'SET_TEXT_STYLE': function(params) { return window.sendPluginCommand('SET_TEXT_STYLE', params, 10000); },
         'SET_EFFECTS': function(params) { return window.sendPluginCommand('SET_EFFECTS', { nodeId: params.nodeId, effects: params.effects }, 10000); },
         'SET_OPACITY': function(params) { return window.sendPluginCommand('SET_OPACITY', { nodeId: params.nodeId, opacity: params.opacity }, 5000); },
-        'SET_CORNER_RADIUS': function(params) { return window.sendPluginCommand('SET_CORNER_RADIUS', params, 5000); }
+        'SET_CORNER_RADIUS': function(params) { return window.sendPluginCommand('SET_CORNER_RADIUS', params, 5000); },
+        'CLEAR_PAGE': function(params) { return window.sendPluginCommand('CLEAR_PAGE', { payload: params }, 10000); }
       };
 
       /**
@@ -1164,6 +1165,9 @@
           break;
         case 'SET_CORNER_RADIUS_RESULT':
           handleResult('SET_CORNER_RADIUS', 'node');
+          break;
+        case 'CLEAR_PAGE_RESULT':
+          handleResult('CLEAR_PAGE', 'pageId');
           break;
 
         // Batch operation results

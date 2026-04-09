@@ -63,6 +63,7 @@ export const DriftRules = Type.Object(
     metricDeltaTolerance: Type.Number({ minimum: 0 }),
     toolSequencePolicy: Type.Union([Type.Literal('exact'), Type.Literal('variant'), Type.Literal('superset')]),
     assertionPassRateFloor: Type.Number({ minimum: 0, maximum: 1 }),
+    metricDeltaToleranceOverrides: Type.Optional(Type.Record(Type.String(), Type.Number({ minimum: 0 }))),
   },
   { $id: 'DriftRules', additionalProperties: false },
 );
@@ -74,6 +75,7 @@ export const DEFAULT_DRIFT_RULES: DriftRules = {
   metricDeltaTolerance: 0.5,
   toolSequencePolicy: 'variant',
   assertionPassRateFloor: 1.0,
+  metricDeltaToleranceOverrides: { 'process.rssBytes': 2.0, 'process.heapUsedBytes': 2.0 },
 };
 
 // ─── Baseline step ─────────────────────────────────────────────────────
@@ -97,6 +99,10 @@ export const BaselineStep = Type.Object(
 
     assertionPassRate: Type.Number({ minimum: 0, maximum: 1 }),
     assertionCount: Type.Integer({ minimum: 0 }),
+
+    // Perceptual hash map: stepKey (e.g. "screenshot") → 16-char hex pHash.
+    // Null when no screenshots were captured during baseline recording.
+    screenshotHashes: Type.Optional(Type.Union([Type.Record(Type.String(), Type.String()), Type.Null()])),
   },
   { $id: 'BaselineStep', additionalProperties: false },
 );
@@ -132,6 +138,7 @@ export const DriftFinding = Type.Object(
       Type.Literal('duration'),
       Type.Literal('metric_delta'),
       Type.Literal('assertion_pass_rate'),
+      Type.Literal('visual_drift'),
     ]),
     // For metric_delta the path is the dotted path into MetricsSnapshot;
     // absent for other categories.

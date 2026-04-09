@@ -168,6 +168,10 @@ function diffStep(baseline: BaselineStep, run: RecorderStepInput, rules: DriftRu
   const asrFinding = checkAssertionPassRate(baseline, run, rules);
   if (asrFinding) findings.push(asrFinding);
 
+  // 6. Visual drift (perceptual hash)
+  const visualFinding = checkVisualDrift(baseline, run);
+  if (visualFinding) findings.push(visualFinding);
+
   const hasRegression = findings.some((f) => f.severity === 'regression');
   return {
     stepNumber: baseline.stepNumber,
@@ -191,7 +195,7 @@ function checkToolSequence(baseline: BaselineStep, run: RecorderStepInput, rules
       matches = variants.some((v) => arraysEqual(current, v.sequence));
       break;
     case 'superset':
-      matches = isSuperset(current, modal);
+      matches = isSubsequence(current, modal);
       break;
   }
 
@@ -286,16 +290,17 @@ function checkMetricDeltas(baseline: BaselineStep, run: RecorderStepInput, rules
     }
 
     if (p95 === 0) continue; // no ratio math if baseline is zero
+    const tolerance = rules.metricDeltaToleranceOverrides?.[path] ?? rules.metricDeltaTolerance;
     const ratio = Math.abs(currentDelta - p95) / Math.max(Math.abs(p95), 1);
-    if (ratio <= rules.metricDeltaTolerance) continue;
+    if (ratio <= tolerance) continue;
 
     findings.push({
       category: 'metric_delta',
       path,
       baseline: { p95 },
       current: currentDelta,
-      rule: `|${currentDelta} - p95 ${p95}| / p95 = ${(ratio * 100).toFixed(1)}% > tolerance ${(rules.metricDeltaTolerance * 100).toFixed(0)}%`,
-      severity: ratio <= rules.metricDeltaTolerance * 2 ? 'warning' : 'regression',
+      rule: `|${currentDelta} - p95 ${p95}| / p95 = ${(ratio * 100).toFixed(1)}% > tolerance ${(tolerance * 100).toFixed(0)}%`,
+      severity: ratio <= tolerance * 2 ? 'warning' : 'regression',
     });
   }
   return findings;
@@ -321,6 +326,56 @@ function checkAssertionPassRate(
   };
 }
 
+/**
+ * Visual drift check using perceptual hash Hamming distance.
+ *
+ * Thresholds (out of 64 bits):
+ *   distance > 15 → regression  (>23% bits differ — structural change)
+ *   distance > 10 → warning     (>15% bits differ — noticeable shift)
+ *   distance ≤ 10 → no finding  (within noise tolerance)
+ *
+ * Only fires when both the baseline has a stored "screenshot" hash and
+ * the current run step provides a screenshotHash.
+ */
+function checkVisualDrift(baseline: BaselineStep, run: RecorderStepInput): DriftFinding | null {
+  const baselineHash = baseline.screenshotHashes?.['screenshot'];
+  const currentHash = run.screenshotHash ?? null;
+
+  if (!baselineHash || !currentHash) return null;
+  if (baselineHash.length !== 16 || currentHash.length !== 16) return null;
+
+  const distance = hammingDistance(baselineHash, currentHash);
+  if (distance <= 10) return null;
+
+  return {
+    category: 'visual_drift',
+    baseline: {}, // visual drift has no numeric baseline — the reference is the stored hash
+    current: distance,
+    rule: `perceptual hash distance ${distance}/64 bits (${((distance / 64) * 100).toFixed(0)}%) exceeds ${distance > 15 ? 'regression' : 'warning'} threshold`,
+    severity: distance > 15 ? 'regression' : 'warning',
+  };
+}
+
+/**
+ * Compute Hamming distance between two 16-char hex pHash strings (0-64 bits).
+ * Inlined here so differ.ts stays a pure module with no runtime imports.
+ */
+function hammingDistance(hash1: string, hash2: string): number {
+  if (hash1.length !== 16 || hash2.length !== 16) return 64; // worst-case for malformed hashes
+  let distance = 0;
+  for (let chunk = 0; chunk < 4; chunk++) {
+    const offset = chunk * 4;
+    const a = Number.parseInt(hash1.slice(offset, offset + 4), 16);
+    const b = Number.parseInt(hash2.slice(offset, offset + 4), 16);
+    let xor = (a ^ b) & 0xffff;
+    while (xor) {
+      xor &= xor - 1;
+      distance += 1;
+    }
+  }
+  return distance;
+}
+
 // ─── Utilities ──────────────────────────────────────────────────────────
 
 function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
@@ -331,7 +386,7 @@ function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
   return true;
 }
 
-function isSuperset(current: readonly string[], required: readonly string[]): boolean {
+function isSubsequence(current: readonly string[], required: readonly string[]): boolean {
   // Preserves order: required must appear as a subsequence of current.
   let ri = 0;
   for (let ci = 0; ci < current.length && ri < required.length; ci++) {
