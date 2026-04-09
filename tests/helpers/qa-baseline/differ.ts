@@ -338,7 +338,7 @@ function checkAssertionPassRate(
  * the current run step provides a screenshotHash.
  */
 function checkVisualDrift(baseline: BaselineStep, run: RecorderStepInput): DriftFinding | null {
-  const baselineHash = baseline.screenshotHashes?.['screenshot'];
+  const baselineHash = baseline.screenshotHashes?.screenshot;
   const currentHash = run.screenshotHash ?? null;
 
   if (!baselineHash || !currentHash) return null;
