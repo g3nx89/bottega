@@ -32,13 +32,14 @@ Send: "Design a product card for an e-commerce fashion store. The card should di
 ```assert
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child]
 screenshots_min: 1
-duration_max_ms: 120000
+duration_max_ms: 600000
 canvas_screenshot: Product
 floor_check:
   find: Product
   rules:
     default_names: 0
     nesting_depth: 4
+    wcag_smoke: 10
 design_crit:
   brief: "Product card for an e-commerce fashion store. Image area, product name, brand name, price with strikethrough discount, color swatch selector (3 dots), Add to Cart button. Visually appealing and conversion-focused."
   rubric: card

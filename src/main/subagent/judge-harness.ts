@@ -25,7 +25,7 @@ import type {
 
 const log = createChildLogger({ component: 'judge-harness' });
 
-const DEFAULT_JUDGE_TIMEOUT_MS = 90_000;
+const DEFAULT_JUDGE_TIMEOUT_MS = 180_000;
 
 /** Prefix marker for judge retry prompts — filtered out by extractRenderableMessages. */
 export const JUDGE_RETRY_MARKER = '[JUDGE_RETRY]';
@@ -325,7 +325,8 @@ const CRITERION_TOOL_HINTS: Record<string, string> = {
   visual_hierarchy: 'Use figma_set_text_style to adjust font size/weight for hierarchy.',
   completeness: 'Use figma_create_child or figma_render_jsx to add missing elements.',
   consistency: 'Use figma_batch_set_fills or figma_batch_transform for uniform styling.',
-  naming: 'Use figma_rename(nodeId, name) or figma_batch_rename for semantic names.',
+  naming:
+    'Use figma_batch_rename(entries: [{nodeId, newName}]) to rename all default-named nodes in one call. Also use figma_auto_layout on frames with 2+ children that lack layoutMode.',
   componentization: 'Use figma_create_component to convert frames to reusable components.',
 };
 

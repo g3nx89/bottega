@@ -53,7 +53,7 @@ export const DEFAULT_SUBAGENT_SETTINGS: SubagentSettings = {
     judge: { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
   },
   judgeMode: 'auto',
-  autoRetry: false,
+  autoRetry: true,
   maxRetries: 1,
   microJudges: buildDefaultMicroJudges(),
 };

@@ -61,6 +61,8 @@ const SUITES = {
   stress: ['20', '21', '22', '23', '24', '25', '26', '27', '28'],
   'error-injection': ['26', '27', '28'],
   'design-quality': ['30', '31', '32', '33', '34', '35', '36', '37'],
+  'design-eval': ['DE-01', 'DE-02', 'DE-03', 'DE-04', 'DE-05'],
+  'iteration-eval': ['IE-01', 'IE-02'],
 };
 
 const { values: opts } = parseArgs({
@@ -68,7 +70,7 @@ const { values: opts } = parseArgs({
     script: { type: 'string', multiple: true, default: [] },
     suite: { type: 'string', default: '' },
     output: { type: 'string', default: '/tmp/bottega-qa' },
-    timeout: { type: 'string', default: '120000' },
+    timeout: { type: 'string', default: '480000' },
     'settle-ms': { type: 'string', default: '8000' },
     resume: { type: 'boolean', default: false },
     'dry-run': { type: 'boolean', default: false },
@@ -468,16 +470,58 @@ async function runScript(scriptNum, outputDir) {
     await helpers.resetSession(page);
   } catch {}
 
-  // Canvas cleanup — create a fresh Figma page to avoid cross-run pollution
+  // Determine the fileKey of the active agent slot — this is where the agent
+  // creates designs, and where evaluators must inspect. With multi-tab (Test_A + Test_B),
+  // the WS "active file" may differ from the agent's slot file.
+  let slotFileKey = null;
+  try {
+    const tabInfo = await page.evaluate(() => {
+      const tab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+      return tab ? { slotId: tab.id, fileKey: tab.fileKey, fileName: tab.fileName } : null;
+    });
+    if (tabInfo?.fileKey) {
+      slotFileKey = tabInfo.fileKey;
+      console.log(`  Slot file: ${tabInfo.fileName} (${slotFileKey})`);
+    }
+  } catch {}
+
+  // Canvas cleanup — create a fresh Figma page to avoid cross-run pollution.
+  // Use __testFigmaExecute to bypass the agent entirely — no agent turn, no judge trigger.
+  // Target the SLOT's file, not the WS active file, to avoid multi-tab mismatch.
   if (parsed.requiresFigma) {
     try {
-      console.log(`  Canvas cleanup: creating fresh page QA-${scriptNum}-${Date.now()}`);
-      await helpers.clearFigmaPage(page, `QA-${scriptNum}-${Date.now()}`);
+      const cleanupName = `QA-${scriptNum}-${Date.now()}`;
+      console.log(`  Canvas cleanup: creating fresh page ${cleanupName}`);
+      const cleanupCode = `
+        const p = figma.createPage();
+        p.name = "${cleanupName.replace(/"/g, '\\"')}";
+        await figma.setCurrentPageAsync(p);
+        return JSON.stringify({ pageId: p.id, pageName: p.name });
+      `;
+      await page.evaluate(([c, fk]) => window.api.__testFigmaExecute(c, undefined, fk || undefined),
+        [cleanupCode, slotFileKey]);
       await page.waitForTimeout(1000);
-      // Reset session again after the cleanup turn
-      await helpers.resetSession(page);
     } catch (err) {
       console.log(`  Canvas cleanup skipped: ${err.message}`);
+    }
+
+    // Post-cleanup connection verify — the cleanup or app restart may have
+    // temporarily dropped the WS connection. Wait up to 30s for reconnect.
+    try {
+      let postCleanupConnected = false;
+      for (let i = 0; i < 30; i++) {
+        const state = await helpers.getAppState(page);
+        if (state.connectionStatus === 'connected') {
+          postCleanupConnected = true;
+          break;
+        }
+        await page.waitForTimeout(1000);
+      }
+      if (!postCleanupConnected) {
+        console.log(`  WARNING: Figma still disconnected after cleanup — results may be unreliable`);
+      }
+    } catch (err) {
+      console.log(`  Post-cleanup verify failed: ${err.message}`);
     }
   }
 
@@ -490,6 +534,33 @@ async function runScript(scriptNum, outputDir) {
   // Execute steps
   const results = [];
   const metadata = [];
+
+  // Persistent stepData — shared across steps so evaluators like iteration_delta
+  // can accumulate _roundScores across multi-round scripts (IE-01, IE-02).
+  // Per-step fields (toolsCalled, responseText, etc.) are overwritten each iteration.
+  const persistentStepData = {
+    // figmaExecute: wraps __testFigmaExecute exposed by preload (requires BOTTEGA_AGENT_TEST=1).
+    // The WS bridge wraps results in { success, result: "...json..." }. We unwrap to
+    // return the raw plugin return value (JSON string) that evaluators expect.
+    // Target the slot's fileKey to avoid multi-tab mismatch (agent on Test_A, WS active on Test_B).
+    figmaExecute: async (code) => {
+      const response = await page.evaluate(([c, fk]) => window.api.__testFigmaExecute(c, undefined, fk || undefined),
+        [code, slotFileKey]);
+      // Unwrap bridge envelope: { success: true, result: "..." } → "..."
+      if (response && typeof response === 'object' && 'result' in response) {
+        const inner = response.result;
+        return typeof inner === 'string' ? inner : JSON.stringify(inner);
+      }
+      return typeof response === 'string' ? response : JSON.stringify(response);
+    },
+    // rubricResolver: loads rubric markdown by type from tests/qa-scripts/rubrics/
+    rubricResolver: (type) => {
+      try {
+        const rubricPath = join(SCRIPTS_DIR, 'rubrics', `${type}-rubric.md`);
+        return readFileSync(rubricPath, 'utf8');
+      } catch { return null; }
+    },
+  };
 
   for (const step of parsed.steps) {
     const stepResult = {
@@ -655,7 +726,8 @@ async function runScript(scriptNum, outputDir) {
         // Fase 4: metricsBefore/metricsAfter come from the MetricsRegistry IPC.
         // null when the build wasn't compiled with BOTTEGA_AGENT_TEST=1; in that
         // case metric/metric_growth assertions fail loud with a clear error.
-        const stepData = {
+        // Merge per-step fields into persistentStepData (preserves _roundScores etc.)
+        Object.assign(persistentStepData, {
           toolsCalled: stepMeta.toolCards,
           responseText: responseTextFull,
           responseTextTruncated: stepMeta.response,
@@ -664,8 +736,8 @@ async function runScript(scriptNum, outputDir) {
           page,
           metricsBefore,
           metricsAfter,
-        };
-        const { passed: assertPassed, results: assertResults } = await evaluateAssertions(step.assertions, stepData);
+        });
+        const { passed: assertPassed, results: assertResults } = await evaluateAssertions(step.assertions, persistentStepData);
         stepMeta.assertions = assertResults;
         if (transportFailed) {
           // Transport failed but we still ran assertions for diagnostic data

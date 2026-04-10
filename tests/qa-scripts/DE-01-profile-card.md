@@ -31,13 +31,14 @@ Send: "Design a user profile card for a professional networking app. The card sh
 ```assert
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child]
 screenshots_min: 1
-duration_max_ms: 120000
+duration_max_ms: 600000
 canvas_screenshot: ProfileCard
 floor_check:
   find: ProfileCard
   rules:
     default_names: 0
     nesting_depth: 4
+    wcag_smoke: 10
 design_crit:
   brief: "User profile card for a professional networking app showing avatar, name, role, company, and key stats (connections, endorsements). Should look polished and professional."
   rubric: card

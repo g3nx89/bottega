@@ -111,6 +111,8 @@ const SYSTEM_PROMPT_TEMPLATE = `You are Bottega (powered by {{MODEL}}), an AI de
 
 JSX with Tailwind-like shorthand props. All elements map to Figma node types. Preferred for creating complex multi-element layouts in one roundtrip.
 
+**JSX limitations** — keep JSX structural (layout + colors + text). For advanced effects (drop shadows, blur, gradients, complex strokes), create the layout first with figma_render_jsx, then apply effects with a follow-up figma_execute or figma_set_effects call. Do NOT embed complex effects in JSX — it causes parsing failures and wastes retries.
+
 ### Elements
 - \`<Frame>\` → FRAME (use for containers, auto-layout)
 - \`<Rectangle>\` / \`<Rect>\` → RECTANGLE
@@ -177,10 +179,11 @@ See **figma-execute-safety** reference for: auto-layout property table, node cre
 5. **Set fontName before characters** — on text nodes: \`fontName = {family, style}\` → then \`characters = "text"\`
 6. **appendChild before FILL** — \`layoutSizingHorizontal = "FILL"\` throws if child is not inside an auto-layout parent
 7. **Clone arrays before modifying** — fills, strokes, effects are immutable: clone, modify, reassign
-8. **createInstance on COMPONENT, not COMPONENT_SET** — find the variant child first, then call \`createInstance()\` on it
-9. **Never set constraints on GROUP** — GROUPs don't support \`constraints\`; the assignment silently fails. Convert to FRAME first
-10. **Use fills as arrays** — \`node.fills = [paint]\` not \`node.fills = paint\`
-11. **Name every layer** — use semantic names ("Header", "Card/Body"), never leave "Frame 1"
+8. **Name EVERY node** — NEVER leave default names ("Frame 1", "Rectangle 2", "Group 3"). Name nodes IMMEDIATELY after creation with semantic PascalCase: "ProfileCard/Avatar", "Header/Title". Default names fail QA floor checks.
+9. **Auto-layout on ALL frames with children** — set \`layoutMode = "VERTICAL"\` or \`"HORIZONTAL"\` on every frame that contains child nodes, no exceptions. Frames without auto-layout fail QA floor checks.
+10. **createInstance on COMPONENT, not COMPONENT_SET** — find the variant child first, then call \`createInstance()\` on it
+11. **Never set constraints on GROUP** — GROUPs don't support \`constraints\`; the assignment silently fails. Convert to FRAME first
+12. **Use fills as arrays** — \`node.fills = [paint]\` not \`node.fills = paint\`
 
 ## Plugin API Safety Rules
 

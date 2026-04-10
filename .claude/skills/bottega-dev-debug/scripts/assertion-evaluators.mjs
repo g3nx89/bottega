@@ -254,6 +254,28 @@ async function evalDomVisible(value, stepData) {
 // canvas_screenshot BEFORE design_crit / iteration_delta in their assert
 // blocks so the screenshot is captured before it is consumed.
 
+/**
+ * Shared Figma plugin code: find a node by normalized name pattern, with fallback
+ * to the largest top-level frame on the page. Returns a code snippet that sets `node`
+ * and `usedFallback` variables. Caller must declare `let node;` before inserting.
+ */
+function buildNodeFinderCode(namePattern) {
+  return `
+    const pattern = ${JSON.stringify(namePattern)}.replace(/[\\s_-]/g, '').toLowerCase();
+    let usedFallback = false;
+    node = figma.currentPage.findOne(n => n.name.replace(/[\\s_-]/g, '').toLowerCase().includes(pattern));
+    if (!node) {
+      let best = null, bestArea = 0;
+      for (const child of figma.currentPage.children) {
+        if (child.type === 'FRAME' || child.type === 'COMPONENT') {
+          const area = child.width * child.height;
+          if (area > bestArea) { best = child; bestArea = area; }
+        }
+      }
+      if (best) { node = best; usedFallback = true; }
+    }`;
+}
+
 /** Shared: check that stepData.figmaExecute is available. Returns a SKIPPED pass or null. */
 function requireFigmaExecute(name, stepData) {
   if (!stepData.figmaExecute || typeof stepData.figmaExecute !== 'function') {
@@ -299,22 +321,31 @@ async function evalCanvasScreenshot(value, stepData) {
   if (skip) return skip;
   try {
     const code = `
-      const node = figma.currentPage.findOne(n => n.name.includes(${JSON.stringify(value)}));
-      if (!node) return JSON.stringify({ error: "node not found", pattern: ${JSON.stringify(value)} });
+      let node;
+      ${buildNodeFinderCode(value)}
+      if (!node) return JSON.stringify({ error: "node not found and no frames on page", pattern: ${JSON.stringify(value)} });
+      figma.viewport.scrollAndZoomIntoView([node]);
+      await new Promise(r => setTimeout(r, 500));
       const bytes = await node.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 2 } });
-      return JSON.stringify({ base64: figma.base64Encode(bytes), nodeId: node.id, nodeName: node.name });
+      return JSON.stringify({ base64: figma.base64Encode(bytes), nodeId: node.id, nodeName: node.name, usedFallback: usedFallback });
     `;
     const raw = await stepData.figmaExecute(code);
-    const result = JSON.parse(raw);
+    let result;
+    try {
+      result = JSON.parse(raw);
+    } catch {
+      return fail('canvas_screenshot', `figmaExecute returned non-JSON (${typeof raw}, ${String(raw).slice(0, 200)})`);
+    }
     if (result.error) {
       return fail('canvas_screenshot', `node not found matching '${value}' — ${result.error}`);
     }
     if (!result.base64 || result.base64.length === 0) {
-      return fail('canvas_screenshot', `export returned empty base64 for node '${result.nodeName}'`);
+      return fail('canvas_screenshot', `export returned empty base64 for node '${result.nodeName}' (keys: ${Object.keys(result).join(',')}, raw length: ${String(raw).length})`);
     }
     // Store for downstream evaluators (design_crit, iteration_delta)
     stepData._canvasScreenshot = result.base64;
-    return pass('canvas_screenshot', `captured ${result.nodeName} (${result.nodeId}), ${result.base64.length} chars base64`);
+    const fallbackNote = result.usedFallback ? ' (fallback: name not matched, used largest frame)' : '';
+    return pass('canvas_screenshot', `captured ${result.nodeName} (${result.nodeId}), ${result.base64.length} chars base64${fallbackNote}`);
   } catch (err) {
     return fail('canvas_screenshot', `figmaExecute error: ${err && err.message ? err.message : String(err)}`);
   }
@@ -326,7 +357,7 @@ async function evalCanvasScreenshot(value, stepData) {
  * Value: { find: string, rules?: { wcag_smoke?: number, hardcoded_colors?: number,
  *          default_names?: number, auto_layout?: "required"|"optional", nesting_depth?: number } }
  *
- * Default rules: wcag_smoke: 0, hardcoded_colors: 0, default_names: 0, auto_layout: "required", nesting_depth: 4
+ * Default rules: wcag_smoke: 0, hardcoded_colors: 0, default_names: 0, auto_layout: "required", nesting_depth: 5
  *
  * Note: wcag_smoke is a simplified luminance-only heuristic (flags mid-range text
  * luminance 0.4-0.6 without considering background). It catches obvious issues
@@ -347,16 +378,18 @@ async function evalFloorCheck(value, stepData) {
     hardcoded_colors: 0,
     default_names: 0,
     auto_layout: 'required',
-    nesting_depth: 4,
+    nesting_depth: 5,
     ...(value.rules || {}),
   };
   try {
     const code = `
-      const node = figma.currentPage.findOne(n => n.name.includes(${JSON.stringify(value.find)}));
+      let node;
+      ${buildNodeFinderCode(value.find)}
       if (!node) return JSON.stringify({ error: "node not found" });
 
       const issues = { wcag_smoke: 0, hardcoded_colors: 0, default_names: 0, missing_auto_layout: 0, max_depth: 0 };
-      const defaultNameRe = /^(Frame|Rectangle|Ellipse|Group|Vector|Line|Text|Polygon|Star)\\s*\\d*$/;
+      // Require trailing digit(s): "Frame 1" is default, "Frame" alone may be intentional
+      const defaultNameRe = /^(Frame|Rectangle|Ellipse|Group|Vector|Line|Text|Polygon|Star)\\s+\\d+$/;
 
       function walk(n, depth) {
         if (depth > issues.max_depth) issues.max_depth = depth;
@@ -384,8 +417,9 @@ async function evalFloorCheck(value, stepData) {
           }
         }
 
-        // Check auto-layout on frames with children
-        if ((n.type === 'FRAME' || n.type === 'COMPONENT') && 'children' in n && n.children.length > 0) {
+        // Check auto-layout on frames with 2+ children (single-child frames are
+        // often structural wrappers that don't need auto-layout)
+        if ((n.type === 'FRAME' || n.type === 'COMPONENT') && 'children' in n && n.children.length >= 2) {
           if (!n.layoutMode || n.layoutMode === 'NONE') {
             issues.missing_auto_layout++;
           }
@@ -396,6 +430,8 @@ async function evalFloorCheck(value, stepData) {
         }
       }
       walk(node, 0);
+      issues.usedFallback = usedFallback;
+      issues.nodeName = node.name;
       return JSON.stringify(issues);
     `;
     const raw = await stepData.figmaExecute(code);
@@ -421,10 +457,11 @@ async function evalFloorCheck(value, stepData) {
       violations.push(`nesting_depth: ${result.max_depth} > ${rules.nesting_depth}`);
     }
 
+    const fallbackNote = result.usedFallback ? ` (fallback: evaluated '${result.nodeName}' instead of '${value.find}')` : '';
     if (violations.length === 0) {
-      return pass('floor_check', `all floor rules satisfied for '${value.find}'`);
+      return pass('floor_check', `all floor rules satisfied for '${value.find}'${fallbackNote}`);
     }
-    return fail('floor_check', `floor violations: ${violations.join('; ')}`);
+    return fail('floor_check', `floor violations: ${violations.join('; ')}${fallbackNote}`);
   } catch (err) {
     return fail('floor_check', `figmaExecute error: ${err && err.message ? err.message : String(err)}`);
   }

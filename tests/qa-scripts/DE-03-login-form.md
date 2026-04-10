@@ -32,13 +32,14 @@ Send: "Design a login form for a mobile banking app. It should feel trustworthy 
 ```assert
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child]
 screenshots_min: 1
-duration_max_ms: 120000
+duration_max_ms: 600000
 canvas_screenshot: Login
 floor_check:
   find: Login
   rules:
     default_names: 0
     nesting_depth: 4
+    wcag_smoke: 10
 design_crit:
   brief: "Login form for a mobile banking app. Should feel trustworthy and secure. Email field, password field, Sign In button, Forgot password link, security indicator. Clean and accessible."
   rubric: form

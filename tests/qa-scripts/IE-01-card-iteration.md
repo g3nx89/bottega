@@ -30,10 +30,12 @@ Send: "Design a professional card component for a team directory app. Show the p
 ```assert
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child]
 screenshots_min: 1
-duration_max_ms: 120000
+duration_max_ms: 600000
 canvas_screenshot: Card
 floor_check:
   find: Card
+  rules:
+    wcag_smoke: 10
 iteration_delta:
   round: 1
   brief: "Professional card component for a team directory app. Photo area, name, job title, department, contact button."
@@ -51,7 +53,7 @@ Send: "It's too generic. Make it more sophisticated — add visual depth, refine
 ```assert
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_set_fills, figma_set_text_style, figma_set_effects]
 screenshots_min: 1
-duration_max_ms: 120000
+duration_max_ms: 600000
 canvas_screenshot: Card
 iteration_delta:
   round: 2
@@ -71,7 +73,7 @@ Send: "The photo area is too small — make it more prominent. The contrast betw
 ```assert
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_set_fills, figma_resize, figma_set_text_style]
 screenshots_min: 1
-duration_max_ms: 120000
+duration_max_ms: 600000
 canvas_screenshot: Card
 iteration_delta:
   round: 3

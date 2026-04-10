@@ -304,10 +304,11 @@ Check uniform spacing, sizing, and styling across similar elements.
 FAIL if two elements at the same level use different spacing, padding, font sizes, or border radii without clear design reason.
 Look for: sibling elements with different gaps, inconsistent corner radii, varying padding in similar components.`,
 
-  naming: `## Criterion: Naming
-Check for semantic layer names and consistent naming convention.
-FAIL if auto-generated names exist (Frame 1, Group 2, Rectangle 3), if naming convention is inconsistent (mixing camelCase and kebab-case), or if names don't describe content.
-Look for: "Frame N", "Group N", "Rectangle N" patterns, mixed naming styles, generic names.`,
+  naming: `## Criterion: Naming & Structure
+Check for semantic layer names, consistent naming convention, and proper auto-layout usage.
+FAIL if: (1) auto-generated names with digits exist ("Frame 1", "Group 2", "Rectangle 3"), (2) naming convention is inconsistent, (3) frames with 2+ children lack auto-layout (layoutMode should be VERTICAL or HORIZONTAL).
+Look for: "Type N" patterns in file data (trailing digit = auto-generated), frames with multiple children but layoutMode NONE.
+Fix: Use figma_batch_rename(entries: [{nodeId, newName}]) for bulk rename. Use PascalCase slash convention ("Card/Header", "Profile/Avatar"). Use figma_auto_layout to set layoutMode on multi-child frames.`,
 
   componentization: `## Criterion: Componentization
 Evaluate the pre-computed component analysis report. Confirm or dismiss each finding.

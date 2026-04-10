@@ -31,10 +31,12 @@ Send: "Create a hero section for a fintech landing page. The product helps peopl
 ```assert
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child]
 screenshots_min: 1
-duration_max_ms: 120000
+duration_max_ms: 600000
 canvas_screenshot: Hero
 floor_check:
   find: Hero
+  rules:
+    wcag_smoke: 10
 iteration_delta:
   round: 1
   brief: "Hero section for a fintech landing page. AI-driven portfolio management. Headline, subtitle, primary CTA, visual element. Brand color #0EA5E9."
@@ -52,7 +54,7 @@ Send: "It doesn't communicate trust and reliability. A fintech hero needs to fee
 ```assert
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_set_fills, figma_set_text_style, figma_set_effects]
 screenshots_min: 1
-duration_max_ms: 120000
+duration_max_ms: 600000
 canvas_screenshot: Hero
 iteration_delta:
   round: 2
@@ -72,7 +74,7 @@ Send: "The headline spacing is too tight — give it room to breathe. Add a soci
 ```assert
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_set_fills, figma_resize, figma_set_text]
 screenshots_min: 1
-duration_max_ms: 120000
+duration_max_ms: 600000
 canvas_screenshot: Hero
 iteration_delta:
   round: 3

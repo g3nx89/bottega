@@ -111,7 +111,11 @@ export function createEventRouter(deps: EventRouterDeps) {
    * in Bottega take one of: `nodeId` (string), `nodeIds` (string[]), or `parentId`
    * (string, for create-type tools like figma_render_jsx / figma_create_child /
    * figma_create_icon). Read-only tools like figma_screenshot are skipped by caller.
+   *
+   * For figma_execute: also scan the `code` string for getNodeByIdAsync("N:M")
+   * patterns since execute has no structured nodeId field.
    */
+  const NODE_ID_IN_CODE = /getNodeByIdAsync\s*\(\s*["'](\d+:\d+)["']\s*\)/g;
   function extractNodeIdsFromInput(input: any): string[] {
     if (!input || typeof input !== 'object') return [];
     const out: string[] = [];
@@ -122,6 +126,12 @@ export function createEventRouter(deps: EventRouterDeps) {
     // parentId is a good fallback for create-* tools: scoping to the parent frame
     // shows the newly created child in context.
     if (typeof input.parentId === 'string' && input.parentId) out.push(input.parentId);
+    // figma_execute: scan code string for node ID references
+    if (typeof input.code === 'string' && input.code) {
+      for (const match of input.code.matchAll(NODE_ID_IN_CODE)) {
+        if (match[1]) out.push(match[1]);
+      }
+    }
     return out;
   }
 

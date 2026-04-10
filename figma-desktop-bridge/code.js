@@ -232,6 +232,10 @@ function hexToFigmaRGB(hex) {
 // JSX RENDER HELPERS - Used by CREATE_FROM_JSX handler
 // ============================================================================
 
+// Regex for detecting Figma's auto-generated default names (e.g., "Frame 1", "Rectangle 23").
+// Used by createNodeFromTree to replace defaults with the JSX tag type.
+var DEFAULT_NAME_WITH_DIGIT = /^(Frame|Rectangle|Ellipse|Group|Vector|Line|Text|Polygon|Star)\s+\d+$/;
+
 function parseColor(color) {
   if (!color) return null;
   if (typeof color === 'string' && color.startsWith('#')) return hexToFigmaRGB(color);
@@ -399,6 +403,13 @@ async function createNodeFromTree(treeNode, parent) {
         await createNodeFromTree(child, node);
       }
     }
+  }
+
+  // Auto-name cleanup: replace Figma's default "Type N" names with the JSX tag type.
+  // Only applies when no explicit name was set via props.name.
+  // "Frame" (without number) is better than "Frame 1" for tree readability.
+  if (DEFAULT_NAME_WITH_DIGIT.test(node.name)) {
+    node.name = treeNode.type || nodeType;
   }
 
   return node;

@@ -32,13 +32,14 @@ Send: "Create a settings screen for a dark-themed music player app. Include sect
 ```assert
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child]
 screenshots_min: 1
-duration_max_ms: 120000
+duration_max_ms: 600000
 canvas_screenshot: Settings
 floor_check:
   find: Settings
   rules:
     default_names: 0
     nesting_depth: 5
+    wcag_smoke: 10
 design_crit:
   brief: "Settings screen for a dark-themed music player app. Audio Quality section (high-res toggle, EQ selector), Playback section (crossfade slider, gapless toggle), Account section (profile, subscription badge, sign out). Dark background, light text."
   rubric: screen

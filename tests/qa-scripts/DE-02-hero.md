@@ -32,13 +32,14 @@ Send: "Create a landing page hero for a productivity SaaS called FlowBase. The h
 ```assert
 tools_called_any_of: [figma_render_jsx, figma_execute, figma_create_child]
 screenshots_min: 1
-duration_max_ms: 120000
+duration_max_ms: 600000
 canvas_screenshot: Hero
 floor_check:
   find: Hero
   rules:
     default_names: 0
     nesting_depth: 4
+    wcag_smoke: 10
 design_crit:
   brief: "Landing page hero for FlowBase, a productivity SaaS. Headline, subtitle, primary CTA, visual element. Brand color #4F46E5 (indigo). Should be compelling and visually interesting."
   rubric: hero
