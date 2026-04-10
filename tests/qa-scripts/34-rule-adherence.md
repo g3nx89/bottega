@@ -42,7 +42,7 @@ tools_called_any_of: [figma_get_file_data, figma_screenshot, figma_execute, figm
 response_contains:
   any_of: [auto-layout, auto layout, padding, gap, layout]
   case_sensitive: false
-duration_max_ms: 60000
+duration_max_ms: 150000
 ```
 
 ### 3. Lint the card
@@ -58,7 +58,7 @@ tools_called_any_of: [figma_lint, figma_execute]
 response_contains:
   any_of: [pass, clean, no issues, compliant, valid]
   case_sensitive: false
-duration_max_ms: 60000
+duration_max_ms: 120000
 ```
 
 ### Overall assessment

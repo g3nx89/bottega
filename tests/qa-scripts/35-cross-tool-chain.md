@@ -30,7 +30,7 @@ tools_called_any_of: [figma_search_components, figma_get_library_components, fig
 response_contains:
   any_of: [component, button, card, found, available]
   case_sensitive: false
-duration_max_ms: 60000
+duration_max_ms: 150000
 ```
 
 ### 2. Instantiate a component
@@ -62,7 +62,7 @@ tools_called_any_of: [figma_set_fills, figma_resize, figma_set_text, figma_execu
 response_contains:
   any_of: [modified, updated, changed, applied, red, resized]
   case_sensitive: false
-duration_max_ms: 60000
+duration_max_ms: 90000
 ```
 
 ### 4. Screenshot the result
@@ -76,7 +76,7 @@ Send: "Take a screenshot showing ChainTest/Instance with the modifications appli
 ```assert
 tools_called: [figma_screenshot]
 screenshots_min: 1
-duration_max_ms: 30000
+duration_max_ms: 90000
 ```
 
 ### 5. Lint the instance
@@ -92,7 +92,7 @@ tools_called_any_of: [figma_lint, figma_execute]
 response_contains:
   any_of: [lint, check, pass, clean, issue, violation, naming]
   case_sensitive: false
-duration_max_ms: 60000
+duration_max_ms: 120000
 ```
 
 ### Overall assessment

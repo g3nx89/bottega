@@ -19,6 +19,7 @@ vi.mock('../../../src/main/agent.js', () => ({
   OAUTH_PROVIDER_MAP: { Anthropic: 'anthropic-oauth' },
   OAUTH_PROVIDER_INFO: { Anthropic: { description: 'Claude' } },
   createFigmaAgent: vi.fn(),
+  safeReloadAuth: vi.fn(),
 }));
 
 // Mock image-gen

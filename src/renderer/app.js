@@ -506,8 +506,27 @@ function appendToAssistant(tab, text) {
   scrollToBottom();
 }
 
+// UX-007: Judge running indicator timeout before auto-dismiss
+const JUDGE_TIMEOUT_MS = 60_000;
+
+/** Clear judge running indicator and its associated timeout from a tab. */
+function clearJudgeIndicator(tab) {
+  if (tab._judgeRunningTimeout) {
+    clearTimeout(tab._judgeRunningTimeout);
+    tab._judgeRunningTimeout = null;
+  }
+  if (tab._judgeRunningIndicator) {
+    tab._judgeRunningIndicator.remove();
+    tab._judgeRunningIndicator = null;
+  }
+}
+
 // Tool execution cards
+// UX-006: Internal bookkeeping tools hidden from chat UI
+const HIDDEN_TOOL_CARDS = new Set(['task_create', 'task_update', 'task_list']);
+
 function addToolCard(tab, toolName, toolCallId) {
+  if (HIDDEN_TOOL_CARDS.has(toolName)) return;
   if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
 
   // UX-004: Collapse retry noise. If the last child of the bubble is an errored
@@ -1186,10 +1205,21 @@ window.api.onAgentEnd((slotId) => {
   const tab = tabs.get(slotId);
   if (!tab) return;
   removeThinkingIndicator(tab);
-  // Clear judge running indicator if no verdict arrived
-  if (tab._judgeRunningIndicator) {
-    tab._judgeRunningIndicator.remove();
-    tab._judgeRunningIndicator = null;
+  // UX-007: Clear judge timeout + running indicator if no verdict arrived
+  clearJudgeIndicator(tab);
+  // Sweep stuck tool-card spinners: any tool card still showing a spinner
+  // at agent-end means onToolEnd never arrived. Mark them as errored.
+  if (tab.chatContainer) {
+    for (const spinner of tab.chatContainer.querySelectorAll('.tool-spinner')) {
+      const card = spinner.closest('.tool-card');
+      if (card) {
+        spinner.className = 'tool-status tool-error';
+        spinner.textContent = '?';
+        spinner.title = 'Tool result not received';
+        if (card._elapsedTimer) clearInterval(card._elapsedTimer);
+        if (card._elapsedShowTimeout) clearTimeout(card._elapsedShowTimeout);
+      }
+    }
   }
   // Render markdown on the accumulated plain text.
   // renderMarkdown() calls escapeHtml() first, so innerHTML receives
@@ -1366,10 +1396,7 @@ function finalizeBatchCard(tab, data) {
 
 function createJudgeVerdictCard(tab, verdict, attempt, maxAttempts) {
   // Remove "running" indicator if present
-  if (tab._judgeRunningIndicator) {
-    tab._judgeRunningIndicator.remove();
-    tab._judgeRunningIndicator = null;
-  }
+  clearJudgeIndicator(tab);
   if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
   const card = document.createElement('div');
   card.className = 'judge-verdict-card';
@@ -1434,6 +1461,8 @@ window.api.onSubagentStatus((slotId, data) => withTab(slotId, (tab) => updateBat
 window.api.onSubagentBatchEnd((slotId, data) => withTab(slotId, (tab) => finalizeBatchCard(tab, data)));
 window.api.onJudgeRunning((slotId) =>
   withTab(slotId, (tab) => {
+    // Guard: clear any existing indicator before creating a new one (prevents stacking)
+    clearJudgeIndicator(tab);
     if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
     const indicator = document.createElement('div');
     indicator.className = 'judge-running-indicator';
@@ -1443,6 +1472,14 @@ window.api.onJudgeRunning((slotId) =>
     indicator.appendChild(document.createTextNode(' Quality check running\u2026'));
     tab.currentAssistantBubble.appendChild(indicator);
     tab._judgeRunningIndicator = indicator;
+    // UX-007: Auto-dismiss spinner after timeout to avoid indefinite "running" state
+    tab._judgeRunningTimeout = setTimeout(() => {
+      if (tab._judgeRunningIndicator) {
+        tab._judgeRunningIndicator.textContent = 'Quality check timed out';
+        tab._judgeRunningIndicator.classList.add('judge-timeout');
+        tab._judgeRunningIndicator = null;
+      }
+    }, JUDGE_TIMEOUT_MS);
   }),
 );
 window.api.onJudgeVerdict((slotId, verdict, attempt, max) =>

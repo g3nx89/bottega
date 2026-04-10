@@ -177,6 +177,18 @@ export interface AgentInfra {
 }
 
 /**
+ * B-020: Safely reload auth storage if the method exists.
+ * Pi SDK's AuthStorage.reload() is not on the public interface but exists on
+ * the file-based implementation. Reloading picks up externally refreshed OAuth
+ * tokens before reading credentials.
+ */
+export function safeReloadAuth(authStorage: AuthStorage): void {
+  if (typeof (authStorage as any).reload === 'function') {
+    (authStorage as any).reload();
+  }
+}
+
+/**
  * Default sessions directory: ~/.bottega/sessions/
  * Each app launch creates a new JSONL session file. Model switches
  * are recorded as entries within the same session.

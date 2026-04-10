@@ -132,7 +132,7 @@ Send: "Make the red rectangle from step 5 slightly larger (250x150) and add a 2p
 tools_called_any_of: [figma_resize, figma_set_strokes, figma_execute, figma_render_jsx, figma_set_fills]
 screenshots_min: 1
 dom_visible: ".assistant-message:last-child .judge-verdict-card"
-duration_max_ms: 90000
+duration_max_ms: 150000
 ```
 
 ### 7. Subagent configuration

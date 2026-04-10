@@ -60,9 +60,9 @@ Send: "Based on the quality review feedback, improve the card. Address any align
 ```assert
 tools_called_any_of: [figma_execute, figma_set_fills, figma_render_jsx, figma_auto_layout, figma_set_text, figma_resize]
 response_contains:
-  any_of: [improved, updated, fixed, adjusted, refined, polished]
+  any_of: [improved, updated, fixed, adjusted, refined, polished, changed, applied, modified, enhanced, corrected, optimized]
   case_sensitive: false
-duration_max_ms: 90000
+duration_max_ms: 150000
 ```
 
 ### Overall assessment

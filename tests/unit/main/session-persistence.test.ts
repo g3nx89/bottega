@@ -37,6 +37,7 @@ vi.mock('../../../src/main/agent.js', () => ({
   OAUTH_PROVIDER_MAP: {} as Record<string, string>,
   OAUTH_PROVIDER_INFO: {} as Record<string, { description: string }>,
   createFigmaAgent: vi.fn(),
+  safeReloadAuth: vi.fn(),
 }));
 
 vi.mock('../../../src/main/image-gen/config.js', () => ({

@@ -74,6 +74,7 @@ vi.mock('../../../src/main/agent.js', () => ({
     google: { description: 'Gemini' },
   } as Record<string, { description: string }>,
   createFigmaAgent: vi.fn(),
+  safeReloadAuth: vi.fn(),
 }));
 
 vi.mock('../../../src/main/image-gen/config.js', () => ({
@@ -265,6 +266,46 @@ describe('setupIpcHandlers', () => {
         expect.stringContaining('API timeout'),
       );
       expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
+    });
+
+    it('should send auth-specific error message on 401 status', async () => {
+      const authErr = Object.assign(new Error('Unauthorized'), { status: 401 });
+      mockSession._promptFn.mockRejectedValueOnce(authErr);
+
+      await invokeHandler('agent:prompt', slotId, 'test');
+
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith(
+        'agent:text-delta',
+        slotId,
+        expect.stringContaining('expired'),
+      );
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith('agent:end', slotId);
+    });
+
+    it('should send auth-specific error message on 403 status', async () => {
+      const authErr = Object.assign(new Error('Forbidden'), { status: 403 });
+      mockSession._promptFn.mockRejectedValueOnce(authErr);
+
+      await invokeHandler('agent:prompt', slotId, 'test');
+
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith(
+        'agent:text-delta',
+        slotId,
+        expect.stringContaining('expired'),
+      );
+    });
+
+    it('should send auth-specific error message on EAUTH code', async () => {
+      const authErr = Object.assign(new Error('Auth failed'), { code: 'EAUTH' });
+      mockSession._promptFn.mockRejectedValueOnce(authErr);
+
+      await invokeHandler('agent:prompt', slotId, 'test');
+
+      expect(mockWindow.webContents.send).toHaveBeenCalledWith(
+        'agent:text-delta',
+        slotId,
+        expect.stringContaining('expired'),
+      );
     });
 
     it('should send agent:end when agent_end event fires', async () => {

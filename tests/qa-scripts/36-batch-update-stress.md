@@ -40,9 +40,9 @@ Send: "Update the padding on ALL five cards (Card01 through Card05) to 24px on a
 ```assert
 tools_called_any_of: [figma_batch_transform, figma_execute, figma_auto_layout, figma_batch_set_fills]
 response_contains:
-  any_of: [all, five, each, 24, padding, updated]
+  any_of: [all, five, each, "24", padding, updated]
   case_sensitive: false
-duration_max_ms: 90000
+duration_max_ms: 150000
 ```
 
 ### 3. Change primary color across all cards

@@ -5,7 +5,14 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { app, type BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { createChildLogger } from '../figma/logger.js';
-import { type AgentInfra, AVAILABLE_MODELS, CONTEXT_SIZES, isThinkingLevel, type ModelConfig } from './agent.js';
+import {
+  type AgentInfra,
+  AVAILABLE_MODELS,
+  CONTEXT_SIZES,
+  isThinkingLevel,
+  type ModelConfig,
+  safeReloadAuth,
+} from './agent.js';
 import { checkForUpdates, downloadUpdate, getAppVersion, quitAndInstall } from './auto-updater.js';
 import { exportDiagnosticsZip, formatSystemInfoForClipboard } from './diagnostics.js';
 import type { FigmaAuthStore } from './figma-auth-store.js';
@@ -319,7 +326,8 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   ipcMain.handle('agent:prompt', async (_event, slotId: string, text: string) => {
     const slot = requireSlot(slotId);
 
-    // Pre-check credentials
+    // B-020: Reload auth storage before each prompt to pick up refreshed OAuth tokens.
+    safeReloadAuth(infra.authStorage);
     const apiKey = await infra.authStorage.getApiKey(slot.modelConfig.provider);
     if (!apiKey) {
       safeSend(mainWindow.webContents, 'agent:text-delta', slot.id, MSG_NO_CREDENTIALS);
@@ -353,14 +361,14 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
       log.error({ err, slotId }, 'Prompt failed');
       eventRouter.finalizeTurn(slot);
       slot.isStreaming = false;
-      const errType = err.code === 'EAUTH' ? 'auth' : err.status === 429 ? 'rate_limit' : 'unknown';
+      const isAuth = err.code === 'EAUTH' || err.status === 401 || err.status === 403;
+      const errType = isAuth ? 'auth' : err.status === 429 ? 'rate_limit' : 'unknown';
       usageTracker?.trackAgentError(errType, err.message || 'Prompt failed');
-      safeSend(
-        mainWindow.webContents,
-        'agent:text-delta',
-        slot.id,
-        `\n\nError: ${err.message || MSG_REQUEST_FAILED_FALLBACK}`,
-      );
+      // B-020: Surface clear re-login hint for auth/token expiry errors
+      const errMsg = isAuth
+        ? 'Your API key or login session has expired. Please re-login or update your API key in Settings.'
+        : err.message || MSG_REQUEST_FAILED_FALLBACK;
+      safeSend(mainWindow.webContents, 'agent:text-delta', slot.id, `\n\nError: ${errMsg}`);
       safeSend(mainWindow.webContents, 'agent:end', slot.id);
     }
 

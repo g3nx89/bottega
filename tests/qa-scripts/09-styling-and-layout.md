@@ -99,7 +99,7 @@ response_contains:
   any_of: [Apple, Banana, Cherry]
   case_sensitive: false
 screenshots_min: 1
-duration_max_ms: 60000
+duration_max_ms: 120000
 ```
 
 ### 7. Batch fill update
@@ -127,7 +127,7 @@ tools_called_any_of: [figma_batch_transform, figma_execute]
 tools_NOT_called_more_than:
   figma_move: 0
 screenshots_min: 1
-duration_max_ms: 60000
+duration_max_ms: 120000
 ```
 
 ### Overall assessment

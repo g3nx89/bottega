@@ -5,7 +5,14 @@
  */
 import { type BrowserWindow, ipcMain, shell } from 'electron';
 import { createChildLogger } from '../figma/logger.js';
-import { type AgentInfra, AVAILABLE_MODELS, CONTEXT_SIZES, OAUTH_PROVIDER_INFO, OAUTH_PROVIDER_MAP } from './agent.js';
+import {
+  type AgentInfra,
+  AVAILABLE_MODELS,
+  CONTEXT_SIZES,
+  OAUTH_PROVIDER_INFO,
+  OAUTH_PROVIDER_MAP,
+  safeReloadAuth,
+} from './agent.js';
 import {
   MSG_GOOGLE_PROJECT_REQUIRED,
   MSG_LOGIN_CANCELLED,
@@ -51,6 +58,8 @@ export function setupAuthHandlers(deps: { infra: AgentInfra; mainWindow: Browser
   // ── OAuth status & login ─────────────────────
 
   ipcMain.handle('auth:get-auth-status', () => {
+    // B-020: Reload to show current auth state (tokens may have been refreshed externally)
+    safeReloadAuth(infra.authStorage);
     const status: Record<string, { type: 'oauth' | 'api_key' | 'none'; label: string }> = {};
     for (const [displayGroup, oauthId] of Object.entries(OAUTH_PROVIDER_MAP)) {
       const oauthCred = infra.authStorage.get(oauthId);

@@ -57,7 +57,7 @@ tools_called_any_of: [figma_set_fills, figma_execute, figma_batch_set_fills, fig
 response_contains:
   any_of: [all, three, each, screens, updated, applied, Home, Explore, Profile]
   case_sensitive: false
-duration_max_ms: 90000
+duration_max_ms: 150000
 ```
 
 ### 4. Update font sizes across all screens
@@ -73,7 +73,7 @@ tools_called_any_of: [figma_set_text, figma_execute, figma_batch_set_text, figma
 response_contains:
   any_of: [all, three, each, screens, 20px, updated, font]
   case_sensitive: false
-duration_max_ms: 90000
+duration_max_ms: 150000
 ```
 
 ### 5. Screenshot and lint

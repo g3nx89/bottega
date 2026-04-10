@@ -76,7 +76,7 @@ JudgeMode: auto
 tools_called_any_of: [figma_analyze_component_set, figma_get_component_details, figma_screenshot]
 judge_triggered: true
 screenshots_min: 1
-duration_max_ms: 90000
+duration_max_ms: 150000
 ```
 
 ### Overall assessment

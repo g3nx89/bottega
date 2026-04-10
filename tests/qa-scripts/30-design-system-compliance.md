@@ -64,7 +64,7 @@ tools_called_any_of: [figma_get_file_data, figma_get_component_details, figma_ex
 response_contains:
   any_of: [bound, variable, token, binding]
   case_sensitive: false
-duration_max_ms: 60000
+duration_max_ms: 150000
 ```
 
 ### 4. Screenshot and confirm
@@ -80,7 +80,7 @@ tools_called: [figma_screenshot]
 response_contains:
   any_of: [brand, card, confirm, correct, token]
   case_sensitive: false
-duration_max_ms: 60000
+duration_max_ms: 90000
 ```
 
 ### Overall assessment

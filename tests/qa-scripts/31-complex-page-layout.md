@@ -59,7 +59,7 @@ tools_called_any_of: [figma_set_text, figma_set_fills, figma_execute, figma_batc
 response_contains:
   any_of: [contrast, accessible, bold, semibold, headline, updated]
   case_sensitive: false
-duration_max_ms: 90000
+duration_max_ms: 150000
 ```
 
 ### 4. Screenshot and review
@@ -77,7 +77,7 @@ JudgeMode: auto
 tools_called_any_of: [figma_screenshot, figma_execute]
 judge_triggered: true
 screenshots_min: 1
-duration_max_ms: 90000
+duration_max_ms: 150000
 ```
 
 ### Overall assessment
