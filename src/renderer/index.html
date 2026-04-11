@@ -222,6 +222,11 @@
                 <label class="judge-info" for="judge-enable-componentization"><span class="judge-label">Componentization</span><span class="judge-desc">Duplicate detection, library usage, detached instances</span></label>
                 <select class="judge-model setting-select setting-select-sm" aria-label="Model for componentization judge"></select>
               </div>
+              <div class="micro-judge-row" data-judge="design_quality">
+                <input type="checkbox" id="judge-enable-design_quality" class="judge-enable" checked>
+                <label class="judge-info" for="judge-enable-design_quality"><span class="judge-label">Design Quality</span><span class="judge-desc">Vision-based critique: craft, layout, intent, cohesion (1-10, uses Sonnet)</span></label>
+                <select class="judge-model setting-select setting-select-sm" aria-label="Model for design quality judge"></select>
+              </div>
             </div>
             <div class="setting-divider" style="margin:8px 0"></div>
             <label class="setting-sublabel">Subagent Models</label>

@@ -11,6 +11,31 @@ for (const tag of tagNames) {
 }
 const jsxContext = vm.createContext(sandbox);
 
+/**
+ * Flatten fragment nodes: replace any node with type "fragment" by splicing
+ * its children into the parent's children array.
+ */
+function flattenTree(node: TreeNode): TreeNode {
+  if (!node.children || node.children.length === 0) return node;
+
+  // Recursively flatten children, splicing fragment children into parent
+  const flatChildren: (TreeNode | string)[] = [];
+  for (const child of node.children) {
+    if (typeof child === 'string') {
+      flatChildren.push(child);
+      continue;
+    }
+    const flattened = flattenTree(child);
+    if (flattened.type === 'fragment') {
+      flatChildren.push(...(flattened.children || []));
+    } else {
+      flatChildren.push(flattened);
+    }
+  }
+  node.children = flatChildren;
+  return node;
+}
+
 export function parseJsx(jsxString: string): TreeNode {
   // nosemgrep: missing-template-string-indicator — code generation: builds JS source to run in vm sandbox
   const wrappedCode = `
@@ -35,5 +60,16 @@ export function parseJsx(jsxString: string): TreeNode {
     loader: 'jsx',
   });
 
-  return vm.runInContext(compiled, jsxContext) as TreeNode;
+  const tree = vm.runInContext(compiled, jsxContext) as TreeNode;
+  let result = flattenTree(tree);
+  // Handle root-level Fragment: unwrap single child or wrap multiple in Frame
+  if (result.type === 'fragment') {
+    const realChildren = (result.children || []).filter((c): c is TreeNode => typeof c !== 'string');
+    if (realChildren.length === 1) {
+      result = realChildren[0]!;
+    } else {
+      result = { type: 'frame', props: {}, children: result.children };
+    }
+  }
+  return result;
 }

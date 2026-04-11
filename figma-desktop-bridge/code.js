@@ -2066,6 +2066,99 @@ figma.ui.onmessage = async (msg) => {
   }
 
   // ============================================================================
+  // FLATTEN_LAYERS - Collapse single-child wrapper frames to reduce nesting
+  // ============================================================================
+  else if (msg.type === 'FLATTEN_LAYERS') {
+    try {
+      console.log('🌉 [Desktop Bridge] Flattening layers for:', msg.nodeId);
+
+      var root = await figma.getNodeByIdAsync(msg.nodeId);
+      if (!root) {
+        throw new Error('Node not found: ' + msg.nodeId);
+      }
+
+      var maxDepth = typeof msg.maxDepth === 'number' && msg.maxDepth > 0 ? msg.maxDepth : 4;
+      if (maxDepth > 20) maxDepth = 20;
+      var collapsed = 0;
+      var visited = 0;
+
+      // Recursive: collapse single-child frames that are pure wrappers
+      // A "pure wrapper" is a FRAME with exactly 1 child, no fills, no strokes,
+      // no effects, and a default or empty name (not semantic slash-named).
+      async function collapseNode(node, depth) {
+        visited++;
+        if (!('children' in node) || node.children.length === 0) return;
+        // maxDepth limits recursion depth to avoid deep traversals
+        if (depth >= maxDepth) return;
+
+        // Process children bottom-up (deepest first)
+        var childrenCopy = node.children.slice();
+        for (var i = 0; i < childrenCopy.length; i++) {
+          await collapseNode(childrenCopy[i], depth + 1);
+        }
+
+        // After processing children, check if THIS node is a collapsible wrapper
+        if (depth > 0 && node.type === 'FRAME' && node.children.length === 1) {
+          var child = node.children[0];
+          var hasFills = node.fills && node.fills.length > 0 &&
+            !(node.fills.length === 1 && node.fills[0].visible === false);
+          var hasStrokes = node.strokes && node.strokes.length > 0 &&
+            !(node.strokes.length === 1 && node.strokes[0].visible === false);
+          var hasEffects = node.effects && node.effects.length > 0 &&
+            !(node.effects.length === 1 && node.effects[0].visible === false);
+          var hasSemanticName = node.name && node.name.includes('/');
+          var isDefaultName = !node.name || /^(Frame|View|Rectangle)\s*\d*$/i.test(node.name) || node.name === node.type;
+          var hasAutoLayout = node.layoutMode && node.layoutMode !== 'NONE';
+
+          if (!hasFills && !hasStrokes && !hasEffects && !hasSemanticName && isDefaultName && !hasAutoLayout) {
+            // This frame is a pure wrapper — reparent its child to this frame's parent
+            var parent = node.parent;
+            if (parent && 'children' in parent) {
+              var index = parent.children.indexOf(node);
+              if (index >= 0 && 'insertChild' in parent) {
+                // Transfer position: child inherits wrapper's position offset
+                if ('x' in child && 'x' in node) {
+                  child.x = (child.x || 0) + (node.x || 0);
+                  child.y = (child.y || 0) + (node.y || 0);
+                }
+                parent.insertChild(index, child);
+                node.remove();
+                collapsed++;
+              }
+            }
+          }
+        }
+      }
+
+      await collapseNode(root, 0);
+
+      console.log('🌉 [Desktop Bridge] Flattened: collapsed=' + collapsed + ', visited=' + visited);
+
+      figma.ui.postMessage({
+        type: 'FLATTEN_LAYERS_RESULT',
+        requestId: msg.requestId,
+        success: true,
+        result: {
+          nodeId: root.id,
+          nodeName: root.name,
+          collapsed: collapsed,
+          visited: visited
+        }
+      });
+
+    } catch (error) {
+      var errorMsg = error && error.message ? error.message : String(error);
+      console.error('🌉 [Desktop Bridge] Flatten layers error:', errorMsg);
+      figma.ui.postMessage({
+        type: 'FLATTEN_LAYERS_RESULT',
+        requestId: msg.requestId,
+        success: false,
+        error: errorMsg
+      });
+    }
+  }
+
+  // ============================================================================
   // SET_TEXT_CONTENT - Set text on a text node
   // ============================================================================
   else if (msg.type === 'SET_TEXT_CONTENT') {

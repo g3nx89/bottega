@@ -864,3 +864,107 @@ describe('Granular styles pipeline', () => {
     expect(t.events.toolResultsFor('figma_set_corner_radius')[0].text).toBe('OK node=80:1');
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 10. Flatten layers after JSX render
+// ═══════════════════════════════════════════════════════════
+
+describe('Flatten layers pipeline', () => {
+  it('render_jsx → flatten_layers chain exercises both tools', async () => {
+    const connector = createMockConnector();
+    connector.createFromJsx.mockResolvedValue({ nodeId: '100:1', childIds: ['100:2', '100:3'] });
+    connector.flattenLayers.mockResolvedValue({
+      nodeId: '100:1',
+      nodeName: 'Card',
+      collapsed: 2,
+      visited: 8,
+    });
+
+    t = await createBottegaTestSession({
+      toolDeps: { connector },
+      compressionProfile: 'minimal',
+    });
+
+    await t.run(
+      when('Create a card and clean up nesting', [
+        calls('figma_render_jsx', {
+          jsx: '<Frame name="Card" flex="col" p={16}><Frame><Text>Title</Text></Frame></Frame>',
+        }),
+        calls('figma_flatten_layers', { nodeId: '100:1' }),
+        says('Card created and flattened.'),
+      ]),
+    );
+
+    expect(t.events.toolSequence()).toEqual(['figma_render_jsx', 'figma_flatten_layers']);
+
+    // Verify createFromJsx received the parsed tree
+    expect(connector.createFromJsx).toHaveBeenCalledTimes(1);
+    const [treeNode] = connector.createFromJsx.mock.calls[0];
+    expect(treeNode.type.toLowerCase()).toBe('frame');
+
+    // Verify flattenLayers was called on the rendered root
+    expect(connector.flattenLayers).toHaveBeenCalledWith('100:1', undefined);
+
+    // Verify flatten result is in the output
+    const flattenResult = t.events.toolResultsFor('figma_flatten_layers')[0];
+    expect(flattenResult.isError).toBe(false);
+    expect(flattenResult.text).toContain('collapsed');
+  });
+
+  it('flatten_layers with maxDepth passes through to connector', async () => {
+    const connector = createMockConnector();
+    connector.flattenLayers.mockResolvedValue({
+      nodeId: '200:1',
+      nodeName: 'Layout',
+      collapsed: 5,
+      visited: 20,
+    });
+
+    t = await createBottegaTestSession({
+      toolDeps: { connector },
+      compressionProfile: 'minimal',
+    });
+
+    await t.run(
+      when('Flatten this deeply nested layout', [
+        calls('figma_flatten_layers', { nodeId: '200:1', maxDepth: 3 }),
+        says('Flattened 5 layers.'),
+      ]),
+    );
+
+    expect(connector.flattenLayers).toHaveBeenCalledWith('200:1', 3);
+  });
+
+  it('JSX with Fragment produces flattened tree (no fragment nodes)', async () => {
+    const connector = createMockConnector();
+    connector.createFromJsx.mockResolvedValue({ nodeId: '300:1', childIds: [] });
+
+    t = await createBottegaTestSession({
+      toolDeps: { connector },
+      compressionProfile: 'minimal',
+    });
+
+    await t.run(
+      when('Create layout with fragments', [
+        calls('figma_render_jsx', {
+          jsx: `<Frame>
+            <>
+              <Text>A</Text>
+              <Text>B</Text>
+            </>
+          </Frame>`,
+        }),
+        says('Created.'),
+      ]),
+    );
+
+    // The Fragment should be flattened by jsx-parser before reaching the connector
+    const [treeNode] = connector.createFromJsx.mock.calls[0];
+    expect(treeNode.type.toLowerCase()).toBe('frame');
+    // Fragment's children (2 Text nodes) should be directly in Frame
+    expect(treeNode.children).toHaveLength(2);
+    for (const child of treeNode.children) {
+      expect(child.type.toLowerCase()).toBe('text');
+    }
+  });
+});

@@ -283,5 +283,28 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
         });
       },
     },
+    {
+      name: 'figma_flatten_layers',
+      label: 'Flatten Layers',
+      description:
+        'Collapse single-child wrapper frames to reduce nesting depth. A "pure wrapper" is a FRAME with one child, no fills/strokes/effects, and a default name (not semantic slash-named). The child is reparented to the wrapper\'s parent and the wrapper is removed. Run after render_jsx to clean up excessive nesting.',
+      promptSnippet: 'figma_flatten_layers: collapse single-child wrapper frames to reduce nesting depth',
+      parameters: Type.Object({
+        nodeId: Type.String({ description: 'Root node ID to flatten (processes subtree recursively)' }),
+        maxDepth: Type.Optional(
+          Type.Number({
+            minimum: 1,
+            maximum: 20,
+            description: 'Max recursion depth for traversal (default: 4, capped at 20)',
+          }),
+        ),
+      }),
+      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+        return operationQueue.execute(async () => {
+          const result = await connector.flattenLayers(params.nodeId, params.maxDepth);
+          return textResult(result);
+        });
+      },
+    },
   ];
 }

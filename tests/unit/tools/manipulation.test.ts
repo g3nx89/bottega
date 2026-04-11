@@ -369,6 +369,50 @@ describe('Manipulation Tools', () => {
     });
   });
 
+  // ── figma_flatten_layers ─────────────────────────────────────────
+
+  describe('figma_flatten_layers', () => {
+    it('calls connector.flattenLayers with nodeId', async () => {
+      const tool = findTool('figma_flatten_layers');
+
+      await tool.execute('c26', { nodeId: '20:1' }, undefined, undefined, undefined);
+
+      expect(deps.connector.flattenLayers).toHaveBeenCalledWith('20:1', undefined);
+    });
+
+    it('passes maxDepth when provided', async () => {
+      const tool = findTool('figma_flatten_layers');
+
+      await tool.execute('c27', { nodeId: '20:1', maxDepth: 3 }, undefined, undefined, undefined);
+
+      expect(deps.connector.flattenLayers).toHaveBeenCalledWith('20:1', 3);
+    });
+
+    it('returns textResult format', async () => {
+      const tool = findTool('figma_flatten_layers');
+      const data = { nodeId: '20:1', nodeName: 'Card', collapsed: 3, visited: 12 };
+      deps.connector.flattenLayers.mockResolvedValue(data);
+
+      const result = await tool.execute('c28', { nodeId: '20:1' }, undefined, undefined, undefined);
+
+      expectTextResult(result, data);
+    });
+
+    it('is serialized through operationQueue', async () => {
+      const tool = findTool('figma_flatten_layers');
+      const flattenTool2 = findTool('figma_flatten_layers');
+
+      // Fire 2 concurrently — both should resolve (serialized by queue)
+      const [r1, r2] = await Promise.all([
+        tool.execute('q4', { nodeId: '1:1' }, undefined, undefined, undefined),
+        flattenTool2.execute('q5', { nodeId: '2:2' }, undefined, undefined, undefined),
+      ]);
+
+      expect(r1.content[0].type).toBe('text');
+      expect(r2.content[0].type).toBe('text');
+    });
+  });
+
   // ── OperationQueue serialization ──────────────────────────────────
 
   describe('OperationQueue serialization', () => {

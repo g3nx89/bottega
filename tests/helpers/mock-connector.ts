@@ -39,6 +39,7 @@ export function createMockConnector() {
     'cloneNode',
     'deleteNode',
     'renameNode',
+    'flattenLayers',
     'setTextContent',
     'createChildNode',
     'captureScreenshot',

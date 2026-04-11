@@ -328,6 +328,8 @@ const CRITERION_TOOL_HINTS: Record<string, string> = {
   naming:
     'Use figma_batch_rename(entries: [{nodeId, newName}]) to rename all default-named nodes in one call. Also use figma_auto_layout on frames with 2+ children that lack layoutMode.',
   componentization: 'Use figma_create_component to convert frames to reusable components.',
+  design_quality:
+    'Use figma_flatten_layers to reduce nesting, figma_set_text_style for typography, figma_set_fills with bindTo for token-bound colors.',
 };
 
 /** Extract node IDs from judge evidence text (format: "nodeId:128:445" or "id: 128:445") */

@@ -96,8 +96,8 @@ describe('parseJsx', () => {
         <Text>B</Text>
       </>
     `);
-    // Fragment maps to "Fragment" string via jsxFragment config
-    expect(result.type).toBe('fragment');
+    // Root Fragment with 2+ children is wrapped in a Frame
+    expect(result.type).toBe('frame');
     expect(result.children).toHaveLength(2);
   });
 
@@ -269,10 +269,10 @@ describe('parseJsx', () => {
       </Frame>
     `);
     expect(result.type).toBe('frame');
-    // The fragment becomes a child node with type 'fragment'
-    const fragmentChild = result.children[0] as TreeNode;
-    expect(fragmentChild.type).toBe('fragment');
-    expect(fragmentChild.children).toHaveLength(2);
+    // Fragment is flattened: its children are spliced into the parent
+    expect(result.children).toHaveLength(2);
+    expect((result.children[0] as TreeNode).type).toBe('text');
+    expect((result.children[1] as TreeNode).type).toBe('text');
   });
 
   it('should handle empty text content', () => {
@@ -280,6 +280,121 @@ describe('parseJsx', () => {
     const result = parseJsx('<Text>{""}</Text>');
     expect(result.type).toBe('text');
     expect(result.children).toContain('');
+  });
+
+  // ── Fragment flattening ──────────────────────────────────────────
+
+  it('should flatten top-level Fragment into its children', () => {
+    // When the root is a Fragment wrapping a single Frame, the Fragment
+    // itself is the root — flattenTree doesn't remove the root node.
+    // But Fragments as *children* get spliced out.
+    const result = parseJsx(`
+      <Frame>
+        <>
+          <Rectangle width={10} />
+        </>
+      </Frame>
+    `);
+    expect(result.type).toBe('frame');
+    // Fragment child is flattened — Rectangle is directly in Frame
+    expect(result.children).toHaveLength(1);
+    expect((result.children[0] as TreeNode).type).toBe('rectangle');
+  });
+
+  it('should flatten deeply nested Fragments', () => {
+    const result = parseJsx(`
+      <Frame>
+        <>
+          <>
+            <Text>Deep</Text>
+          </>
+          <Rectangle />
+        </>
+      </Frame>
+    `);
+    expect(result.type).toBe('frame');
+    // Both levels of Fragment are flattened
+    expect(result.children).toHaveLength(2);
+    expect((result.children[0] as TreeNode).type).toBe('text');
+    expect((result.children[1] as TreeNode).type).toBe('rectangle');
+  });
+
+  it('should flatten Fragment with mixed regular siblings', () => {
+    const result = parseJsx(`
+      <Frame>
+        <Ellipse />
+        <>
+          <Text>A</Text>
+          <Text>B</Text>
+        </>
+        <Line />
+      </Frame>
+    `);
+    expect(result.type).toBe('frame');
+    // Ellipse + 2 Text from Fragment + Line = 4 children
+    expect(result.children).toHaveLength(4);
+    expect((result.children[0] as TreeNode).type).toBe('ellipse');
+    expect((result.children[1] as TreeNode).type).toBe('text');
+    expect((result.children[2] as TreeNode).type).toBe('text');
+    expect((result.children[3] as TreeNode).type).toBe('line');
+  });
+
+  it('should handle empty Fragment (no children)', () => {
+    const result = parseJsx(`
+      <Frame>
+        <Text>Before</Text>
+        <></>
+        <Text>After</Text>
+      </Frame>
+    `);
+    expect(result.type).toBe('frame');
+    // Empty fragment contributes zero children
+    expect(result.children).toHaveLength(2);
+    expect((result.children[0] as TreeNode).type).toBe('text');
+    expect((result.children[1] as TreeNode).type).toBe('text');
+  });
+
+  it('should unwrap root-level Fragment with single child', () => {
+    const result = parseJsx(`
+      <>
+        <Frame name="Card" padding={16}>
+          <Text>Hello</Text>
+        </Frame>
+      </>
+    `);
+    // Root Fragment unwrapped — Frame becomes root
+    expect(result.type).toBe('frame');
+    expect(result.props.name).toBe('Card');
+  });
+
+  it('should wrap root-level Fragment with multiple children in Frame', () => {
+    const result = parseJsx(`
+      <>
+        <Text>A</Text>
+        <Text>B</Text>
+      </>
+    `);
+    // Root Fragment with 2+ children → wrapped in Frame
+    expect(result.type).toBe('frame');
+    expect(result.children).toHaveLength(2);
+    expect((result.children[0] as TreeNode).type).toBe('text');
+    expect((result.children[1] as TreeNode).type).toBe('text');
+  });
+
+  it('should preserve non-Fragment wrapper frames', () => {
+    const result = parseJsx(`
+      <Frame name="outer">
+        <Frame name="inner" padding={16}>
+          <Text>Keep this wrapper</Text>
+        </Frame>
+      </Frame>
+    `);
+    expect(result.type).toBe('frame');
+    expect(result.children).toHaveLength(1);
+    // Inner Frame with props is NOT a Fragment — it stays
+    const inner = result.children[0] as TreeNode;
+    expect(inner.type).toBe('frame');
+    expect(inner.props.name).toBe('inner');
   });
 
   it('should handle array map pattern commonly used by LLM', () => {

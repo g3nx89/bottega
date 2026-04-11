@@ -96,6 +96,18 @@ const JUDGE_REGISTRY = new Map<MicroJudgeId, MicroJudgeDefinition>([
       dataNeeds: ['fileData', 'libraryComponents'],
     },
   ],
+  [
+    'design_quality',
+    {
+      id: 'design_quality',
+      label: 'Design Quality',
+      description:
+        'Vision-based design critique: intent match, visual craft, decisions, layout precision, aesthetic cohesion (scores 1-10, uses Sonnet for vision)',
+      defaultModel: 'claude-sonnet-4-6',
+      tiers: new Set<ActivationTier>(['full', 'standard', 'visual']),
+      dataNeeds: ['screenshot'],
+    },
+  ],
 ]);
 
 /** All micro-judge IDs in registry order. */

@@ -93,6 +93,7 @@ const SYSTEM_PROMPT_TEMPLATE = `You are Bottega (powered by {{MODEL}}), an AI de
 | Create design token system | figma_setup_tokens (collection + modes + variables in one call) |
 | Link node to token | figma_bind_variable (fill or stroke → variable) |
 | Run design linting | figma_lint (check naming, spacing, consistency rules) |
+| Flatten excessive nesting | figma_flatten_layers (collapse single-child wrapper frames) |
 
 ### Verification & Escape Hatch
 | Task | Tool |
@@ -254,7 +255,7 @@ When applying improvements based on judge feedback or quality check results:
 
 1. \`figma_design_system\` → DS overview (tokens, rules, naming). \`figma_get_file_data\` → structural tree.
 2. \`figma_set_fills\` with \`bindTo\` → colors with variable binding. \`figma_bind_variable\` → numeric properties (padding, gap, radius, fontSize).
-3. \`figma_render_jsx\` → layout with 2+ elements. \`figma_create_child\` → single node.
+3. \`figma_render_jsx\` → layout with 2+ elements. \`figma_flatten_layers\` → ALWAYS after render_jsx to collapse wrapper frames.
 4. \`figma_execute\` → NEVER for DS operations (tokens, variables, DS page). Use dedicated DS tools.
 5. \`figma_setup_tokens\` → ALWAYS together with DS page updates for DS modifications.
 6. \`figma_set_text\` → free text. \`figma_set_instance_properties\` → text in component instances managed by property.

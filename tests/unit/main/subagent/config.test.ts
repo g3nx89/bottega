@@ -29,8 +29,8 @@ describe('SubagentConfig', () => {
       expect(DEFAULT_SUBAGENT_SETTINGS.maxRetries).toBeLessThanOrEqual(5);
     });
 
-    it('has autoRetry disabled by default', () => {
-      expect(DEFAULT_SUBAGENT_SETTINGS.autoRetry).toBe(false);
+    it('has autoRetry enabled by default', () => {
+      expect(DEFAULT_SUBAGENT_SETTINGS.autoRetry).toBe(true);
     });
 
     it('uses haiku for scout (lightweight recon)', () => {

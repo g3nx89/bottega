@@ -8,8 +8,8 @@ import {
 
 describe('judge-registry', () => {
   describe('ALL_MICRO_JUDGE_IDS', () => {
-    it('has 7 entries', () => {
-      expect(ALL_MICRO_JUDGE_IDS).toHaveLength(7);
+    it('has 8 entries', () => {
+      expect(ALL_MICRO_JUDGE_IDS).toHaveLength(8);
     });
   });
 
@@ -28,18 +28,19 @@ describe('judge-registry', () => {
   });
 
   describe('getActiveJudges', () => {
-    it('full tier with structural tool returns all 7', () => {
+    it('full tier with structural tool returns all 8', () => {
       const judges = getActiveJudges('full', ['figma_create_child']);
-      expect(judges).toHaveLength(7);
+      expect(judges).toHaveLength(8);
     });
 
-    it('visual tier returns 4 judges', () => {
+    it('visual tier returns 5 judges', () => {
       const judges = getActiveJudges('visual', ['figma_set_fills']);
-      expect(judges).toHaveLength(4);
+      expect(judges).toHaveLength(5);
       expect(judges).toContain('alignment');
       expect(judges).toContain('token_compliance');
       expect(judges).toContain('visual_hierarchy');
       expect(judges).toContain('consistency');
+      expect(judges).toContain('design_quality');
     });
 
     it('narrow tier with rename-only returns naming only (token_compliance filtered by triggerCategories)', () => {
@@ -56,7 +57,7 @@ describe('judge-registry', () => {
 
     it('excludes disabled judges', () => {
       const judges = getActiveJudges('full', ['figma_create_child'], new Set(['naming'] as any));
-      expect(judges).toHaveLength(6);
+      expect(judges).toHaveLength(7);
       expect(judges).not.toContain('naming');
     });
   });

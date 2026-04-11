@@ -125,6 +125,15 @@ function makePassVerdicts(): MicroVerdict[] {
       status: 'evaluated',
       durationMs: 100,
     },
+    {
+      judgeId: 'design_quality',
+      pass: true,
+      finding: 'ok',
+      evidence: 'verified',
+      actionItems: [],
+      status: 'evaluated',
+      durationMs: 100,
+    },
   ];
 }
 

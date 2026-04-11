@@ -58,6 +58,7 @@ export interface IFigmaConnector {
   cloneNode(nodeId: string): Promise<any>;
   deleteNode(nodeId: string): Promise<any>;
   renameNode(nodeId: string, newName: string): Promise<any>;
+  flattenLayers(nodeId: string, maxDepth?: number): Promise<any>;
   setTextContent(nodeId: string, characters: string, options?: any): Promise<any>;
   createChildNode(parentId: string, nodeType: string, properties?: any): Promise<any>;
 

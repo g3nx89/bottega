@@ -234,6 +234,10 @@ export class WebSocketConnector implements IFigmaConnector {
     return this.wsServer.sendCommand('RENAME_NODE', { nodeId, newName });
   }
 
+  async flattenLayers(nodeId: string, maxDepth?: number): Promise<any> {
+    return this.wsServer.sendCommand('FLATTEN_LAYERS', { nodeId, maxDepth });
+  }
+
   async setTextContent(nodeId: string, characters: string, options?: any): Promise<any> {
     const params: any = { nodeId, text: characters };
     if (options) {

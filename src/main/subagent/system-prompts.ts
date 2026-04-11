@@ -314,6 +314,24 @@ Fix: Use figma_batch_rename(entries: [{nodeId, newName}]) for bulk rename. Use P
 Evaluate the pre-computed component analysis report. Confirm or dismiss each finding.
 FAIL if there are 3+ structurally identical elements that should be components, if library components exist but aren't used, or if detached instances are found.
 Review: within-screen duplicates, cross-screen matches, library misses, detached instances.`,
+  design_quality: `## Criterion: Design Quality (Vision-Based)
+Evaluate the attached screenshot image as a senior design critic. Score 5 dimensions 1-10:
+1. **Intent Match** — Does the design respond to the task description? Are all requested elements present?
+2. **Visual Craft** — Curated details: spacing rhythm, shadow depth, typography pairing, micro-interactions, polish
+3. **Design Decisions** — Are choices intentional and reasoned? Color palette cohesion, whitespace balance
+4. **Layout Precision** — Grid alignment, consistent gutters, element sizing proportions, responsive structure
+5. **Aesthetic Cohesion** — Does the design feel unified? Color temperature, visual weight distribution, mood
+
+NOTE: Other judges already check structural hierarchy and token consistency separately.
+Focus on VISUAL qualities only assessable from the screenshot — not structural data.
+
+Compute the mean of all 5 scores.
+PASS if mean >= 6. FAIL if mean < 6.
+
+In your JSON output:
+- "finding": include the mean and per-dimension scores like "mean=7.2 (intent:7, craft:8, decisions:7, layout:7, cohesion:7)"
+- "evidence": describe the strongest and weakest aspects of the design
+- "actionItems": specific improvements to raise the lowest-scoring dimensions`,
 };
 
 /** Get the criterion-specific prompt for a micro-judge (injected as user message). */

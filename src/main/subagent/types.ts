@@ -100,7 +100,7 @@ export interface PrefetchedContext {
 
 // ── Micro-Judge Types ────────────────────────────────────────────────
 
-/** The 7 specialized micro-judges. */
+/** The 8 specialized micro-judges. */
 export type MicroJudgeId =
   | 'alignment'
   | 'token_compliance'
@@ -108,7 +108,8 @@ export type MicroJudgeId =
   | 'completeness'
   | 'consistency'
   | 'naming'
-  | 'componentization';
+  | 'componentization'
+  | 'design_quality';
 
 /** Output of a single micro-judge evaluation. */
 export interface MicroVerdict {

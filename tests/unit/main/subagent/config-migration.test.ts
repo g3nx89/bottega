@@ -6,8 +6,8 @@ import { DEFAULT_SUBAGENT_SETTINGS } from '../../../../src/main/subagent/config.
 import { ALL_MICRO_JUDGE_IDS } from '../../../../src/main/subagent/judge-registry.js';
 
 describe('Config Migration', () => {
-  it('DEFAULT_SUBAGENT_SETTINGS has microJudges for all 7 judges', () => {
-    expect(Object.keys(DEFAULT_SUBAGENT_SETTINGS.microJudges)).toHaveLength(7);
+  it('DEFAULT_SUBAGENT_SETTINGS has microJudges for all 8 judges', () => {
+    expect(Object.keys(DEFAULT_SUBAGENT_SETTINGS.microJudges)).toHaveLength(8);
     for (const id of ALL_MICRO_JUDGE_IDS) {
       expect(DEFAULT_SUBAGENT_SETTINGS.microJudges[id]).toBeDefined();
       expect(DEFAULT_SUBAGENT_SETTINGS.microJudges[id].enabled).toBe(true);
@@ -25,9 +25,16 @@ describe('Config Migration', () => {
     expect(validModes).toContain(DEFAULT_SUBAGENT_SETTINGS.judgeMode);
   });
 
-  it('all micro-judge configs have haiku as default model', () => {
+  it('all micro-judge configs have expected default models', () => {
     for (const id of ALL_MICRO_JUDGE_IDS) {
-      expect(DEFAULT_SUBAGENT_SETTINGS.microJudges[id].model.modelId).toBe('claude-haiku-4-5');
+      const config = DEFAULT_SUBAGENT_SETTINGS.microJudges[id];
+      expect(config.model.modelId).toBeDefined();
+      // design_quality uses Sonnet (vision-based), all others use Haiku
+      if (id === 'design_quality') {
+        expect(config.model.modelId).toBe('claude-sonnet-4-6');
+      } else {
+        expect(config.model.modelId).toBe('claude-haiku-4-5');
+      }
     }
   });
 
