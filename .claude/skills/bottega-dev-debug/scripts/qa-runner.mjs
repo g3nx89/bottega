@@ -26,6 +26,7 @@ import { execFileSync } from 'node:child_process';
 import { createConnection } from 'node:net';
 import { parse as parseYaml } from 'yaml';
 
+import Anthropic from '@anthropic-ai/sdk';
 import { evaluateAssertions } from './assertion-evaluators.mjs';
 import { computePHash } from './phash.mjs';
 import { getMetrics } from '../../../../tests/helpers/metrics-client.mjs';
@@ -40,6 +41,42 @@ const HELPERS_PATH = join(PROJECT_DIR, '.claude/skills/bottega-dev-debug/scripts
 const LEGACY_MODE = process.env.QA_RUNNER_LEGACY_MODE === '1';
 const ASSERT_FENCE_OPEN_RE = /^```assert[ \t]*$/;
 const ASSERT_FENCE_CLOSE_RE = /^```[ \t]*$/;
+
+// ── Vision eval — Level 2 design quality (design_crit + iteration_delta) ──
+// Uses the Anthropic SDK to call Claude Sonnet with a vision content block.
+// Returns { scores, mean, reasoning } matching the contract in assertion-evaluators.mjs.
+function createVisionEval(apiKey) {
+  const client = new Anthropic({ apiKey });
+  return async (imageBase64, prompt) => {
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: imageBase64 } },
+          { type: 'text', text: prompt + '\n\nRespond ONLY with the JSON object, no markdown fences.' },
+        ],
+      }],
+    });
+    const text = response.content[0].text;
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error(`visionEval: no JSON found in response: ${text.slice(0, 200)}`);
+    const parsed = JSON.parse(jsonMatch[0]);
+    // Coerce string scores to numbers
+    if (parsed.scores) {
+      for (const [k, v] of Object.entries(parsed.scores)) {
+        parsed.scores[k] = Number(v);
+      }
+    }
+    parsed.mean = Number(parsed.mean);
+    if (isNaN(parsed.mean) && parsed.scores) {
+      const vals = Object.values(parsed.scores).filter(v => typeof v === 'number' && !isNaN(v));
+      parsed.mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    }
+    return parsed;
+  };
+}
 
 // ── Model → provider map (Fase 7.1B) — NO Haiku (removed from main agent in 7.0) ──
 const MODEL_PROVIDERS = {
@@ -561,6 +598,15 @@ async function runScript(scriptNum, outputDir) {
       } catch { return null; }
     },
   };
+
+  // Wire visionEval for Level 2 design quality evaluators (design_crit, iteration_delta)
+  const visionApiKey = process.env.ANTHROPIC_API_KEY;
+  if (visionApiKey) {
+    persistentStepData.visionEval = createVisionEval(visionApiKey);
+    console.log('[qa-runner] visionEval enabled (design_crit + iteration_delta will score)');
+  } else {
+    console.log('[qa-runner] ANTHROPIC_API_KEY not set — design_crit/iteration_delta will SKIP');
+  }
 
   for (const step of parsed.steps) {
     const stepResult = {
