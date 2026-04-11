@@ -339,7 +339,20 @@ async function evalCanvasScreenshot(value, stepData) {
       if (!node) return JSON.stringify({ error: "node not found and no frames on page", pattern: ${JSON.stringify(value)} });
       figma.viewport.scrollAndZoomIntoView([node]);
       await new Promise(r => setTimeout(r, 500));
+      // Insert a white background rect as first child (z-bottom) so transparent
+      // areas export as white — prevents "blank" false negatives in vision eval.
+      let tempBg = null;
+      if ('children' in node) {
+        tempBg = figma.createRectangle();
+        tempBg.resize(node.width, node.height);
+        tempBg.x = 0;
+        tempBg.y = 0;
+        tempBg.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+        tempBg.name = '__qa_export_bg';
+        node.insertChild(0, tempBg);
+      }
       const bytes = await node.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 2 } });
+      if (tempBg) tempBg.remove();
       return JSON.stringify({ base64: figma.base64Encode(bytes), nodeId: node.id, nodeName: node.name, usedFallback: usedFallback });
     `;
     const raw = await stepData.figmaExecute(code);
