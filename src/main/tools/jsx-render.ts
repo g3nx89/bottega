@@ -86,7 +86,7 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
-          // 1. Parse JSX → TreeNode
+          // 1. Parse JSX → TreeNode (includes Fragment flattening)
           const tree = parseJsx(params.jsx);
 
           // 2. Resolve icons: single-pass collect + parallel fetch + in-place replace
@@ -98,6 +98,16 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
             y: params.y,
             parentId: params.parentId,
           });
+
+          // 4. Auto-flatten: collapse single-child wrapper frames to reduce nesting
+          if (result && result.nodeId) {
+            try {
+              await connector.flattenLayers(result.nodeId);
+            } catch {
+              // Non-critical: flatten failure doesn't invalidate the render
+            }
+          }
+
           return textResult(result);
         });
       },

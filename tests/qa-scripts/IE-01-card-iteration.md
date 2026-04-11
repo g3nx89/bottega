@@ -80,7 +80,7 @@ iteration_delta:
   brief: "Professional card component for a team directory app. Photo area, name, job title, department, contact button."
   rubric: card
   threshold_final: 6
-  threshold_delta_total: 2
+  threshold_delta_total: 1
   threshold_delta_step: 0
 ```
 

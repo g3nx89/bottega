@@ -81,7 +81,7 @@ iteration_delta:
   brief: "Hero section for a fintech landing page. AI-driven portfolio management. Headline, subtitle, primary CTA, visual element. Brand color #0EA5E9."
   rubric: hero
   threshold_final: 6
-  threshold_delta_total: 2
+  threshold_delta_total: 1
   threshold_delta_step: 0
 ```
 

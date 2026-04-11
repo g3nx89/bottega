@@ -339,7 +339,24 @@ async function evalCanvasScreenshot(value, stepData) {
       if (!node) return JSON.stringify({ error: "node not found and no frames on page", pattern: ${JSON.stringify(value)} });
       figma.viewport.scrollAndZoomIntoView([node]);
       await new Promise(r => setTimeout(r, 500));
-      const bytes = await node.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 2 } });
+      // Export with white background: create temp rect behind the node, group, export, then undo
+      const w = node.width || 400;
+      const h = node.height || 300;
+      const bg = figma.createRectangle();
+      bg.resize(w, h);
+      bg.x = node.x;
+      bg.y = node.y;
+      bg.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+      const parent = node.parent || figma.currentPage;
+      const idx = parent.children.indexOf(node);
+      if (idx >= 0) parent.insertChild(idx, bg);
+      else parent.appendChild(bg);
+      const group = figma.group([bg, node], parent);
+      const bytes = await group.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 2 } });
+      // Undo: ungroup and remove temp bg
+      parent.insertChild(idx >= 0 ? idx : parent.children.length, node);
+      bg.remove();
+      group.remove();
       return JSON.stringify({ base64: figma.base64Encode(bytes), nodeId: node.id, nodeName: node.name, usedFallback: usedFallback });
     `;
     const raw = await stepData.figmaExecute(code);
@@ -560,6 +577,8 @@ function buildDesignCritPrompt(brief, rubricType, rubricContent) {
     parts.push('4. **Hierarchy** — Does the visual hierarchy guide the eye naturally?');
     parts.push('5. **Consistency** — Does it feel like part of a design system?');
   }
+  parts.push('\n## Important context');
+  parts.push('The PNG is exported from Figma with a TRANSPARENT background. Dark-themed designs may appear as light content on a black/transparent background — this is expected. Evaluate the actual design content, not the background. If the design intentionally uses a dark theme, score the content quality, not the darkness.');
   parts.push('\nRespond in JSON: { "scores": { "intent_match": N, "visual_craft": N, "design_decisions": N, "hierarchy": N, "consistency": N }, "mean": N, "reasoning": "..." }');
   parts.push('Be calibrated: 5 = acceptable baseline, 7 = professional quality, 9 = exceptional.');
   return parts.join('\n');
