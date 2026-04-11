@@ -263,7 +263,20 @@ function buildNodeFinderCode(namePattern) {
   return `
     const pattern = ${JSON.stringify(namePattern)}.replace(/[\\s_-]/g, '').toLowerCase();
     let usedFallback = false;
-    node = figma.currentPage.findOne(n => n.name.replace(/[\\s_-]/g, '').toLowerCase().includes(pattern));
+    // Find ALL matching nodes, then pick the largest by area.
+    // findOne returns depth-first first match which may be a small child node
+    // (e.g. "BankLogin/PasswordPlaceholder" before "BankLogin" root frame).
+    const matches = figma.currentPage.findAll(n => n.name.replace(/[\\s_-]/g, '').toLowerCase().includes(pattern));
+    if (matches.length > 0) {
+      node = matches[0];
+      if (matches.length > 1) {
+        let bestArea = 0;
+        for (const m of matches) {
+          const area = (m.width || 0) * (m.height || 0);
+          if (area > bestArea) { node = m; bestArea = area; }
+        }
+      }
+    }
     if (!node) {
       let best = null, bestArea = 0;
       for (const child of figma.currentPage.children) {
