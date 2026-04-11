@@ -339,24 +339,7 @@ async function evalCanvasScreenshot(value, stepData) {
       if (!node) return JSON.stringify({ error: "node not found and no frames on page", pattern: ${JSON.stringify(value)} });
       figma.viewport.scrollAndZoomIntoView([node]);
       await new Promise(r => setTimeout(r, 500));
-      // Export with white background: create temp rect behind the node, group, export, then undo
-      const w = node.width || 400;
-      const h = node.height || 300;
-      const bg = figma.createRectangle();
-      bg.resize(w, h);
-      bg.x = node.x;
-      bg.y = node.y;
-      bg.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
-      const parent = node.parent || figma.currentPage;
-      const idx = parent.children.indexOf(node);
-      if (idx >= 0) parent.insertChild(idx, bg);
-      else parent.appendChild(bg);
-      const group = figma.group([bg, node], parent);
-      const bytes = await group.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 2 } });
-      // Undo: ungroup and remove temp bg
-      parent.insertChild(idx >= 0 ? idx : parent.children.length, node);
-      bg.remove();
-      group.remove();
+      const bytes = await node.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 2 } });
       return JSON.stringify({ base64: figma.base64Encode(bytes), nodeId: node.id, nodeName: node.name, usedFallback: usedFallback });
     `;
     const raw = await stepData.figmaExecute(code);
