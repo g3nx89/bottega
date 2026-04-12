@@ -274,46 +274,78 @@ You have NO tools. Do NOT call any tools. Evaluate from the provided data ONLY.
 Output ONLY a JSON object:
 {"pass": boolean, "finding": "one sentence", "evidence": "specific values", "actionItems": ["fix X"]}
 
-Rules: Binary PASS/FAIL. No partial credit. Evidence must be specific (node names, values, measurements). If borderline, FAIL.
+Rules:
+- Binary PASS/FAIL. No partial credit.
+- Evidence must be specific (node names, values, measurements).
+- Evaluate OBJECTIVELY based on the data provided. Do not assume or infer — judge only what you can verify from the file data and screenshot.
+- If the data clearly shows a violation of the criterion, FAIL. If the data shows compliance, PASS.
+- If the data is insufficient to evaluate (e.g., no relevant nodes found), output pass: true with finding: "Insufficient data to evaluate".
+- Action items must be concrete and actionable (include node names and target values).
 Do not add any text outside the JSON. Do not use markdown code fences.`;
 }
 
 const CRITERION_PROMPTS: Record<MicroJudgeId, string> = {
   alignment: `## Criterion: Alignment
-Check coordinates, auto-layout usage, and pixel offsets.
-FAIL if any element is misaligned by more than 1px, if auto-layout is missing where it should be used, or if absolute positioning is used unnecessarily.
-Look for: x/y coordinates not on grid, mixed alignment modes, inconsistent padding within auto-layout frames.`,
+You will receive a **Pre-Computed Evidence** report (\`AlignmentAnalysis\`) with sibling coordinates extracted directly from Figma. **Treat the report as ground truth — do NOT re-compute coordinates from the file data.** Your only job is to decide whether each reported deviation is a real defect or an intentional design choice (e.g. deliberate offset, decorative stagger).
+PASS if: \`verdict === 'aligned'\`, OR \`verdict === 'insufficient_data'\`, OR all \`findings\` describe intentional non-grid layouts (explicitly stated in the task context).
+FAIL if: \`verdict === 'misaligned'\` AND the findings describe a real alignment bug (nothing in the task context justifies the offset).
+Do NOT re-derive numbers from the file data — the report already did that with 4px tolerance and auto-layout awareness.
+
+Example PASS: {"pass": true, "finding": "All sibling groups aligned within tolerance (or use auto-layout)", "evidence": "AlignmentAnalysis.verdict=aligned, siblingGroupsChecked=3, findings=[]", "actionItems": []}
+Example FAIL: {"pass": false, "finding": "3 squares misaligned on y-axis by 15px", "evidence": "AlignmentAnalysis.verdict=misaligned, findings[0]: axis=y, values=[0,15,0], maxDeviation=15, nodeIds=[1:2,1:3,1:4]", "actionItems": ["Move node 1:3 to y=0 to match its siblings"]}`,
 
   token_compliance: `## Criterion: Token Compliance
 Check lint violations, hardcoded hex values, and design token availability.
-FAIL if any hardcoded hex/rgba value exists where a design token is available, or if lint reports token violations.
-Look for: raw hex in fills/strokes/effects, missing variable bindings, inconsistent token usage.`,
+PASS if: no design system section is provided, OR the design system has no variables/tokens defined, OR all colors reference variables. Hardcoded values are ACCEPTABLE when no matching token exists.
+FAIL only if: a design system with defined tokens IS provided AND specific elements use hardcoded hex values where a matching token clearly exists (e.g., #A259FF when --color-primary is defined as #A259FF).
+Do NOT fail just because hex values exist — they are normal when no token system is set up. Only fail when tokens ARE available but NOT used.
+Look for: raw hex in fills/strokes that match available design tokens, missing variable bindings for properties where tokens exist.
+
+Example PASS: {"pass": true, "finding": "No design token system is configured — hardcoded values are acceptable", "evidence": "Design System section is empty or absent. Lint shows 0 token violations.", "actionItems": []}
+Example FAIL: {"pass": false, "finding": "Button uses hardcoded #A259FF instead of available --color-primary token", "evidence": "CTA Button fill=#A259FF. Design system defines --color-primary=#A259FF. Lint reports 1 token violation.", "actionItems": ["Bind CTA Button (nodeId:200:10) fill to --color-primary variable"]}`,
 
   visual_hierarchy: `## Criterion: Visual Hierarchy
-Check typography scale and primary action prominence using the attached screenshot image.
-FAIL if the typography scale doesn't create clear hierarchy (heading > subheading > body), if the primary action isn't visually prominent, or if information density is inappropriate.
-Look for: font size ratios, weight contrast, color emphasis, button prominence. Use the screenshot to verify visual weight and readability.`,
+You will receive a **Pre-Computed Evidence** report (\`TypographyAnalysis\`) listing every text node's fontSize and fontStyle extracted directly from Figma, plus the screenshot for visual context. **Treat the report's numeric fields as ground truth — do NOT re-compute font values from the file data.** Decide whether the structure is intentional or a bug.
+PASS if: \`verdict === 'hierarchical'\`, OR \`verdict === 'insufficient_data'\` (fewer than 2 text nodes), OR the design is intentionally monospaced (e.g. code block, table of values) and the task context confirms this.
+FAIL if: \`verdict === 'flat'\` (\`allSameStyle === true\`) AND \`textCount >= 2\` AND the task context implies the text nodes serve different roles (title vs body, label vs value, etc.).
+
+Example PASS: {"pass": true, "finding": "Clear heading/body hierarchy", "evidence": "TypographyAnalysis.verdict=hierarchical, uniqueFontSizes=[14,24], uniqueFontStyles=[Bold,Regular], textCount=2", "actionItems": []}
+Example FAIL: {"pass": false, "finding": "All 3 text nodes flat — no hierarchy", "evidence": "TypographyAnalysis.verdict=flat, allSameStyle=true, textCount=3, uniqueFontSizes=[14], uniqueFontStyles=[Regular]. Samples: Title/1:5 Body/1:6 Caption/1:7 all at 14px Regular.", "actionItems": ["Increase Title (1:5) to fontSize=24, fontStyle=Bold to establish heading hierarchy"]}`,
 
   completeness: `## Criterion: Completeness
-Check that all requested elements are present vs the task description using the attached screenshot image and file data.
-FAIL if any specified element, state, or variant is absent. Visually verify from the screenshot that all requested UI elements are rendered.
-Look for: missing frames, placeholder content not replaced, absent states (hover, error, loading, empty).`,
+Check that all requested elements are present vs the task description.
+PASS if: the main requested elements are present in the file data. Judge completeness against what was EXPLICITLY requested in the task context, not against an ideal design.
+FAIL only if: a specific element, state, or variant that was explicitly mentioned in the task context is clearly absent from the file data.
+Do NOT fail because of: missing hover/error/loading states unless specifically requested, missing decorative elements, elements that exist but are positioned off-screen, or elements you cannot verify from the provided data.
+If the task context is vague (e.g., "create a card"), PASS as long as a reasonable card structure exists.
+
+Example PASS: {"pass": true, "finding": "All requested elements present — card with title, image, and button", "evidence": "Task asked for 'a card with title, image, and CTA'. File data shows Card frame containing: Title text, Image rectangle, Button frame.", "actionItems": []}
+Example FAIL: {"pass": false, "finding": "Missing button — task explicitly requested a CTA button", "evidence": "Task asked for 'card with title, image, and CTA button'. Card frame contains Title and Image but no button element.", "actionItems": ["Add a CTA button inside the Card frame"]}`,
 
   consistency: `## Criterion: Consistency
-Check uniform spacing, sizing, and styling across similar elements.
-FAIL if two elements at the same level use different spacing, padding, font sizes, or border radii without clear design reason.
-Look for: sibling elements with different gaps, inconsistent corner radii, varying padding in similar components.`,
+You will receive a **Pre-Computed Evidence** report (\`ConsistencyAnalysis\`) comparing padding, itemSpacing, and cornerRadius across sibling groups (3+ same-type structural frames) extracted directly from Figma. **Treat the report as ground truth — do NOT re-compute values from the file data.** Decide whether each reported deviation is a real inconsistency or an intentional difference in role.
+PASS if: \`verdict === 'consistent'\`, OR \`verdict === 'insufficient_data'\`, OR all \`findings\` describe siblings that serve different roles per the task context (e.g. primary CTA vs secondary buttons).
+FAIL if: \`verdict === 'inconsistent'\` AND the findings describe uniform-role siblings (3 cards, 3 list items) with no justification in the task context.
+
+Example PASS: {"pass": true, "finding": "All sibling groups consistent", "evidence": "ConsistencyAnalysis.verdict=consistent, siblingGroupsChecked=2, findings=[]", "actionItems": []}
+Example FAIL: {"pass": false, "finding": "3 cards have inconsistent paddingTop — the middle card deviates", "evidence": "ConsistencyAnalysis.verdict=inconsistent, findings[0]: property=paddingTop, values=[16,24,16], nodeIds=[2:10,2:11,2:12]", "actionItems": ["Set node 2:11 paddingTop to 16 to match its siblings"]}`,
 
   naming: `## Criterion: Naming & Structure
-Check for semantic layer names, consistent naming convention, and proper auto-layout usage.
-FAIL if: (1) auto-generated names with digits exist ("Frame 1", "Group 2", "Rectangle 3"), (2) naming convention is inconsistent, (3) frames with 2+ children lack auto-layout (layoutMode should be VERTICAL or HORIZONTAL).
-Look for: "Type N" patterns in file data (trailing digit = auto-generated), frames with multiple children but layoutMode NONE.
-Fix: Use figma_batch_rename(entries: [{nodeId, newName}]) for bulk rename. Use PascalCase slash convention ("Card/Header", "Profile/Avatar"). Use figma_auto_layout to set layoutMode on multi-child frames.`,
+You will receive a **Pre-Computed Evidence** report (\`NamingAnalysis\`) listing structural frames with auto-generated names AND frames with 3+ children that lack auto-layout. **Treat the report as ground truth — do NOT re-scan the file data.** Your job is to confirm the reported findings and produce concrete rename / auto-layout action items.
+PASS if: \`verdict === 'ok'\`, OR \`verdict === 'insufficient_data'\`, OR both \`autoNamedFrames\` and \`framesWithoutAutoLayout\` are empty.
+FAIL if: \`autoNamedFrames.length > 0\` (structural frames with auto-generated names like "Frame 1", "Group 2") OR \`framesWithoutAutoLayout.length > 0\` (container frames with 3+ children and \`layoutMode === 'NONE'\`).
+
+Example PASS: {"pass": true, "finding": "All structural frames have semantic names and use auto-layout", "evidence": "NamingAnalysis.verdict=ok, autoNamedFrames=[], framesWithoutAutoLayout=[]", "actionItems": []}
+Example FAIL: {"pass": false, "finding": "1 frame has auto-generated name, 1 container missing auto-layout", "evidence": "NamingAnalysis.verdict=hasAutoNames. autoNamedFrames: 1:2 'Frame 1'. framesWithoutAutoLayout: 1:5 'Cards Container' with 4 children.", "actionItems": ["Rename node 1:2 from 'Frame 1' to a semantic name", "Apply HORIZONTAL auto-layout to node 1:5 ('Cards Container')"]}`,
 
   componentization: `## Criterion: Componentization
 Evaluate the pre-computed component analysis report. Confirm or dismiss each finding.
-FAIL if there are 3+ structurally identical elements that should be components, if library components exist but aren't used, or if detached instances are found.
-Review: within-screen duplicates, cross-screen matches, library misses, detached instances.`,
+PASS if: no component analysis data is provided, OR duplicate count is below 3, OR library misses are LOW confidence only, OR the design is a single-screen simple layout.
+FAIL only if: the analysis shows 3+ HIGH-confidence structurally identical subtrees that should clearly be components, OR library components with exact name matches exist but detached instances are used instead.
+Dismiss LOW-confidence findings. Single-screen designs with fewer than 3 repeated patterns always PASS. Not every repeated element needs componentization — only clear, obvious candidates.
+
+Example PASS: {"pass": true, "finding": "2 similar cards found but below componentization threshold", "evidence": "Component analysis: 2 within-screen duplicates (below threshold of 3), 0 library misses, 0 detached instances.", "actionItems": []}
+Example FAIL: {"pass": false, "finding": "4 identical card structures should be a reusable component", "evidence": "Component analysis: 4 HIGH-confidence within-screen duplicates with fingerprint FRAME>TEXT+IMAGE+FRAME. Library has 'Card' component but it's not used.", "actionItems": ["Convert repeated card structure to instances of library 'Card' component"]}`,
   design_quality: `## Criterion: Design Quality (Vision-Based)
 Evaluate the attached screenshot image as a senior design critic. Score 5 dimensions 1-10:
 1. **Intent Match** — Does the design respond to the task description? Are all requested elements present?
@@ -325,8 +357,10 @@ Evaluate the attached screenshot image as a senior design critic. Score 5 dimens
 NOTE: Other judges already check structural hierarchy and token consistency separately.
 Focus on VISUAL qualities only assessable from the screenshot — not structural data.
 
+Score generously for simple designs: a single element (button, card, icon) that is functionally correct and visually clean deserves at least 5/10 on each dimension. Reserve scores below 5 for designs with clear visual defects. Complex multi-section layouts with intentional design choices should score 6-8.
+
 Compute the mean of all 5 scores.
-PASS if mean >= 6. FAIL if mean < 6.
+PASS if mean >= 5. FAIL if mean < 5.
 
 In your JSON output:
 - "finding": include the mean and per-dimension scores like "mean=7.2 (intent:7, craft:8, decisions:7, layout:7, cohesion:7)"

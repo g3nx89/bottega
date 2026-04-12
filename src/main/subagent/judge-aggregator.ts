@@ -3,6 +3,7 @@
  * Pure function, no I/O.
  */
 
+import { getBlockingJudgeIds } from './judge-registry.js';
 import type { JudgeCriterion, JudgeVerdict, MicroJudgeId, MicroVerdict } from './types.js';
 
 /**
@@ -19,7 +20,7 @@ export function aggregateVerdicts(verdicts: MicroVerdict[], allJudgeIds: MicroJu
   const verdictMap = new Map(verdicts.map((v) => [v.judgeId, v]));
   const criteria: JudgeCriterion[] = [];
   const allActionItems: string[] = [];
-  const failedNames: string[] = [];
+  const failedNames: MicroJudgeId[] = [];
   let evaluatedCount = 0;
   let failCount = 0;
 
@@ -73,13 +74,20 @@ export function aggregateVerdicts(verdicts: MicroVerdict[], allJudgeIds: MicroJu
     }
   }
 
-  // Majority-pass aggregation: PASS if majority of evaluated criteria pass.
-  // For minimal tier (1 judge), must pass 1/1.
-  // For standard tier (2-3 judges), must pass all but 1.
-  // For full tier (5-7 judges), must pass majority (>50%).
-  const passThreshold = evaluatedCount <= 1 ? evaluatedCount : Math.ceil(evaluatedCount / 2);
+  // Blocking-criteria aggregation: certain evidence-backed criteria cause
+  // immediate FAIL regardless of how many other criteria pass. Derived from
+  // the judge registry (blocking: true) so adding a new evidence-backed judge
+  // automatically makes it blocking — no manual sync needed.
+  const blockingIds = getBlockingJudgeIds();
+  const hasBlockingFail = failedNames.some((n) => blockingIds.has(n));
   const passCount = evaluatedCount - failCount;
-  const verdict: 'PASS' | 'FAIL' = passCount >= passThreshold ? 'PASS' : 'FAIL';
+  let verdict: 'PASS' | 'FAIL';
+  if (hasBlockingFail) {
+    verdict = 'FAIL';
+  } else {
+    const passThreshold = evaluatedCount <= 1 ? evaluatedCount : Math.ceil(evaluatedCount / 2);
+    verdict = passCount >= passThreshold ? 'PASS' : 'FAIL';
+  }
 
   let summary: string;
   if (failCount === 0) {

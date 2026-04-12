@@ -22,6 +22,29 @@ describe('judge-registry', () => {
       expect(def.dataNeeds).toBeInstanceOf(Array);
     });
 
+    it('all judges have a valid defaultThinking level', () => {
+      for (const id of ALL_MICRO_JUDGE_IDS) {
+        const def = getJudgeDefinition(id);
+        expect(['low', 'medium']).toContain(def.defaultThinking);
+      }
+    });
+
+    it('reasoning-heavy judges use sonnet + medium thinking', () => {
+      for (const id of ['alignment', 'visual_hierarchy', 'completeness', 'consistency', 'design_quality'] as const) {
+        const def = getJudgeDefinition(id);
+        expect(def.defaultModel).toBe('claude-sonnet-4-6');
+        expect(def.defaultThinking).toBe('medium');
+      }
+    });
+
+    it('pattern-matching judges use haiku + low thinking', () => {
+      for (const id of ['token_compliance', 'naming', 'componentization'] as const) {
+        const def = getJudgeDefinition(id);
+        expect(def.defaultModel).toBe('claude-haiku-4-5');
+        expect(def.defaultThinking).toBe('low');
+      }
+    });
+
     it('throws for unknown judge ID', () => {
       expect(() => getJudgeDefinition('unknown' as any)).toThrow('Unknown micro-judge: unknown');
     });

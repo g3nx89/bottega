@@ -26,6 +26,7 @@ vi.mock('../../../../src/main/subagent/context-prefetch.js', () => ({
     lint: null,
     libraryComponents: null,
     componentAnalysis: null,
+    judgeEvidence: null,
   }),
 }));
 
@@ -156,7 +157,7 @@ describe('buildRetryPrompt', () => {
     expect(prompt.startsWith(JUDGE_RETRY_MARKER)).toBe(true);
   });
 
-  it('includes "Do NOT re-screenshot" instruction', () => {
+  it('includes "take a screenshot" instruction (verify-first approach)', () => {
     const verdicts: MicroVerdict[] = [
       makeVerdict({
         judgeId: 'consistency',
@@ -169,7 +170,56 @@ describe('buildRetryPrompt', () => {
 
     const prompt = buildRetryPrompt(verdicts);
 
-    expect(prompt).toContain('Do NOT re-screenshot');
+    expect(prompt).toContain('take a screenshot');
+    expect(prompt).not.toContain('Do NOT re-screenshot');
+  });
+
+  it('includes attempt info and previous summary when provided', () => {
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({
+        judgeId: 'alignment',
+        pass: false,
+        finding: 'Still misaligned',
+        evidence: '',
+        actionItems: ['Fix padding'],
+      }),
+    ];
+
+    const prompt = buildRetryPrompt(verdicts, {
+      attempt: 2,
+      maxAttempts: 3,
+      previousSummary: 'FAIL: 1/3 criteria failed (alignment)',
+    });
+
+    expect(prompt).toContain('Retry attempt 2/3');
+    expect(prompt).toContain('previous fix did NOT fully resolve');
+    expect(prompt).toContain('FAIL: 1/3 criteria failed');
+  });
+
+  it('orders structural issues before styling issues', () => {
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({
+        judgeId: 'naming',
+        pass: false,
+        finding: 'Bad names',
+        evidence: '',
+        actionItems: ['Rename frame'],
+      }),
+      makeVerdict({
+        judgeId: 'completeness',
+        pass: false,
+        finding: 'Missing element',
+        evidence: '',
+        actionItems: ['Add header'],
+      }),
+    ];
+
+    const prompt = buildRetryPrompt(verdicts);
+
+    // completeness (structural) should appear before naming (styling)
+    const completenessIdx = prompt.indexOf('[completeness]');
+    const namingIdx = prompt.indexOf('[naming]');
+    expect(completenessIdx).toBeLessThan(namingIdx);
   });
 
   it('skips non-evaluated verdicts (timeout/error)', () => {

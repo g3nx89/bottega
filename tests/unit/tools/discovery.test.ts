@@ -220,6 +220,7 @@ describe('discovery tools', () => {
           components: expect.any(Array),
         }),
         undefined,
+        undefined,
       );
     });
 
@@ -267,6 +268,7 @@ describe('discovery tools', () => {
           variables: expect.any(Array),
           components: expect.any(Array),
         }),
+        undefined,
         undefined,
       );
     });

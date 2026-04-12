@@ -25,6 +25,7 @@ export interface SemanticNode {
     dimensions?: { width?: number; height?: number };
     position?: 'absolute';
     overflow?: ('x' | 'y')[];
+    absolutePos?: { x: number; y: number };
   };
   // Text
   text?: string;

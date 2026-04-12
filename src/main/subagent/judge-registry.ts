@@ -10,8 +10,16 @@ export interface MicroJudgeDefinition {
   label: string;
   description: string;
   defaultModel: string;
+  /** Thinking level for this judge — reasoning-heavy judges use 'medium', pattern-matching use 'low'. */
+  defaultThinking: 'low' | 'medium';
   tiers: Set<ActivationTier>;
   dataNeeds: PrefetchDataKey[];
+  /**
+   * When true, a FAIL from this judge causes immediate overall FAIL regardless
+   * of majority-pass. Used for evidence-backed criteria where verdicts are
+   * deterministic facts (alignment offsets, flat typography, inconsistent padding).
+   */
+  blocking: boolean;
   /** For narrow tier: specific tool categories that trigger this judge. */
   triggerCategories?: Set<string>;
 }
@@ -23,9 +31,11 @@ const JUDGE_REGISTRY = new Map<MicroJudgeId, MicroJudgeDefinition>([
       id: 'alignment',
       label: 'Alignment',
       description: 'Layout precision, auto-layout, pixel offsets',
-      defaultModel: 'claude-haiku-4-5',
+      defaultModel: 'claude-sonnet-4-6',
+      defaultThinking: 'medium',
       tiers: new Set<ActivationTier>(['full', 'standard', 'visual']),
-      dataNeeds: ['fileData'],
+      dataNeeds: ['fileData', 'judgeEvidence'],
+      blocking: true,
     },
   ],
   [
@@ -35,8 +45,10 @@ const JUDGE_REGISTRY = new Map<MicroJudgeId, MicroJudgeDefinition>([
       label: 'Token Compliance',
       description: 'Design token usage, hardcoded values, lint violations',
       defaultModel: 'claude-haiku-4-5',
+      defaultThinking: 'low',
       tiers: new Set<ActivationTier>(['full', 'visual', 'narrow']),
       dataNeeds: ['lint', 'designSystem'],
+      blocking: false,
       triggerCategories: new Set(['ds']),
     },
   ],
@@ -46,9 +58,11 @@ const JUDGE_REGISTRY = new Map<MicroJudgeId, MicroJudgeDefinition>([
       id: 'visual_hierarchy',
       label: 'Visual Hierarchy',
       description: 'Typography scale, primary action prominence',
-      defaultModel: 'claude-haiku-4-5',
+      defaultModel: 'claude-sonnet-4-6',
+      defaultThinking: 'medium',
       tiers: new Set<ActivationTier>(['full', 'standard', 'visual']),
-      dataNeeds: ['screenshot', 'designSystem'],
+      dataNeeds: ['screenshot', 'designSystem', 'judgeEvidence'],
+      blocking: true,
     },
   ],
   [
@@ -57,9 +71,11 @@ const JUDGE_REGISTRY = new Map<MicroJudgeId, MicroJudgeDefinition>([
       id: 'completeness',
       label: 'Completeness',
       description: 'All requested elements present vs task description',
-      defaultModel: 'claude-haiku-4-5',
-      tiers: new Set<ActivationTier>(['full', 'standard', 'minimal']),
+      defaultModel: 'claude-sonnet-4-6',
+      defaultThinking: 'medium',
+      tiers: new Set<ActivationTier>(['full', 'standard']),
       dataNeeds: ['screenshot', 'fileData'],
+      blocking: false,
     },
   ],
   [
@@ -68,9 +84,11 @@ const JUDGE_REGISTRY = new Map<MicroJudgeId, MicroJudgeDefinition>([
       id: 'consistency',
       label: 'Consistency',
       description: 'Uniform spacing, sizing across similar elements',
-      defaultModel: 'claude-haiku-4-5',
-      tiers: new Set<ActivationTier>(['full', 'visual']),
-      dataNeeds: ['fileData', 'lint'],
+      defaultModel: 'claude-sonnet-4-6',
+      defaultThinking: 'medium',
+      tiers: new Set<ActivationTier>(['full', 'standard', 'visual']),
+      dataNeeds: ['fileData', 'lint', 'judgeEvidence'],
+      blocking: true,
     },
   ],
   [
@@ -80,8 +98,10 @@ const JUDGE_REGISTRY = new Map<MicroJudgeId, MicroJudgeDefinition>([
       label: 'Naming',
       description: 'Semantic names, no auto-generated names, consistent convention',
       defaultModel: 'claude-haiku-4-5',
-      tiers: new Set<ActivationTier>(['full', 'narrow']),
-      dataNeeds: ['fileData'],
+      defaultThinking: 'low',
+      tiers: new Set<ActivationTier>(['full', 'standard', 'narrow']),
+      dataNeeds: ['fileData', 'judgeEvidence'],
+      blocking: false,
       triggerCategories: new Set(['mutation']),
     },
   ],
@@ -92,8 +112,10 @@ const JUDGE_REGISTRY = new Map<MicroJudgeId, MicroJudgeDefinition>([
       label: 'Componentization',
       description: 'Duplicate detection, library usage, detached instances',
       defaultModel: 'claude-haiku-4-5',
+      defaultThinking: 'low',
       tiers: new Set<ActivationTier>(['full']),
       dataNeeds: ['fileData', 'libraryComponents'],
+      blocking: false,
     },
   ],
   [
@@ -104,14 +126,25 @@ const JUDGE_REGISTRY = new Map<MicroJudgeId, MicroJudgeDefinition>([
       description:
         'Vision-based design critique: intent match, visual craft, decisions, layout precision, aesthetic cohesion (scores 1-10, uses Sonnet for vision)',
       defaultModel: 'claude-sonnet-4-6',
+      defaultThinking: 'medium',
       tiers: new Set<ActivationTier>(['full', 'standard', 'visual']),
       dataNeeds: ['screenshot'],
+      blocking: false,
     },
   ],
 ]);
 
 /** All micro-judge IDs in registry order. */
 export const ALL_MICRO_JUDGE_IDS: MicroJudgeId[] = [...JUDGE_REGISTRY.keys()];
+
+/** IDs of judges where FAIL causes immediate overall FAIL (evidence-backed criteria). */
+export function getBlockingJudgeIds(): Set<MicroJudgeId> {
+  const ids = new Set<MicroJudgeId>();
+  for (const [id, def] of JUDGE_REGISTRY) {
+    if (def.blocking) ids.add(id);
+  }
+  return ids;
+}
 
 /** Get a judge definition by ID. Throws if not found. */
 export function getJudgeDefinition(id: MicroJudgeId): MicroJudgeDefinition {

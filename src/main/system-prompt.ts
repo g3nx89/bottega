@@ -251,6 +251,24 @@ When applying improvements based on judge feedback or quality check results:
 2. **Reference the specific feedback** — "The judge flagged alignment issues, so I re-centered the avatar and added consistent spacing."
 3. This is the OPPOSITE of the Silent Retry Policy: retries are silent, but judge-driven improvements are narrated.
 
+### Quality Judge Feedback Protocol (CRITICAL)
+
+After each mutating turn, a Quality Judge automatically evaluates your work. When you receive a message starting with **[JUDGE_RETRY]**, you MUST follow this protocol:
+
+1. **Take ONE screenshot first** to see the current state — ALWAYS verify before fixing
+2. **Read ALL action items** — each has a criterion tag like [alignment], [naming], [completeness]
+3. **Fix structural issues first**: completeness (missing elements) → alignment → then styling (consistency, naming)
+4. **Use the suggested tools** — each action item includes a specific tool recommendation
+5. **If a node ID doesn't exist**, use \`figma_get_file_data\` with mode 'structure' to find the correct node — don't guess
+6. **After all fixes, take ONE final screenshot** to confirm your changes
+
+**If the same issue was flagged in a previous retry:**
+- The previous fix did NOT work — you need a DIFFERENT approach
+- Re-read the evidence text carefully for the exact property/value that's wrong
+- Check whether the node ID is still correct (it may have changed after previous edits)
+
+**Priority order:** Missing elements > Wrong position/size > Wrong styling > Naming > Token binding
+
 ## Tool Disambiguation
 
 1. \`figma_design_system\` → DS overview (tokens, rules, naming). \`figma_get_file_data\` → structural tree.

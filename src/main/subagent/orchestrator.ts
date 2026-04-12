@@ -33,6 +33,9 @@ const log = createChildLogger({ component: 'subagent-orchestrator' });
 
 const MAX_OUTPUT_CHARS = 50_000;
 
+/** Judges that receive per-criterion pre-computed evidence slices from JudgeEvidence. */
+const EVIDENCE_JUDGES = new Set<MicroJudgeId>(['alignment', 'visual_hierarchy', 'consistency', 'naming']);
+
 interface SubagentRequest {
   role: SubagentRole;
   context: SubagentContext;
@@ -333,13 +336,13 @@ export async function runMicroJudgeBatch(
         modelId: def.defaultModel,
       };
 
-      // Create zero-tool session with low thinking
+      // Create zero-tool session with per-judge thinking level from registry
       const sessionResult = await createSubagentSession(
         infra,
         [], // Zero tools — micro-judges don't call tools
         modelConfig,
         systemPrompt,
-        'low', // Light thinking for speed
+        def.defaultThinking, // Per-judge: 'medium' for reasoning-heavy, 'low' for pattern-matching
       );
       const session = sessionResult.session;
 
@@ -359,7 +362,10 @@ export async function runMicroJudgeBatch(
       const dataSections: string[] = [];
 
       if (prefetchedData.fileData && def.dataNeeds.includes('fileData')) {
-        dataSections.push(`## File Data\n${prefetchedData.fileData.slice(0, 15_000)}`);
+        const targetDirective = prefetchedData.targetNodeId
+          ? `\n**TARGET NODE: ${prefetchedData.targetNodeId}** — This is the node that was just created or modified. Focus your evaluation on this node and its siblings/children. Other nodes in the tree are pre-existing context.`
+          : '';
+        dataSections.push(`## File Data${targetDirective}\n${prefetchedData.fileData.slice(0, 15_000)}`);
       }
       // Screenshot is passed as an image attachment via session.prompt({ images }), not as text
       const hasScreenshot = prefetchedData.screenshot && def.dataNeeds.includes('screenshot');
@@ -390,6 +396,18 @@ export async function runMicroJudgeBatch(
         dataSections.push(
           `## Component Analysis (pre-computed)\n${JSON.stringify(prefetchedData.componentAnalysis, null, 2).slice(0, 10_000)}`,
         );
+      }
+      // Per-judge evidence slicing — only the 4 "measurement" judges receive
+      // the pre-computed numeric facts relevant to their criterion. Slicing
+      // (rather than dumping the whole report) keeps each prompt focused and
+      // prevents one judge's context from leaking into another's reasoning.
+      if (prefetchedData.judgeEvidence && EVIDENCE_JUDGES.has(judgeId)) {
+        const evidenceForJudge = prefetchedData.judgeEvidence[judgeId as keyof typeof prefetchedData.judgeEvidence];
+        if (evidenceForJudge && typeof evidenceForJudge === 'object') {
+          dataSections.push(
+            `## Pre-Computed Evidence (authoritative — numeric facts extracted directly from Figma)\n${JSON.stringify(evidenceForJudge, null, 2).slice(0, 6_000)}`,
+          );
+        }
       }
 
       const userPrompt = [criterionPrompt, `\n## Task Context\n${taskContext}`, ...dataSections].join('\n\n');

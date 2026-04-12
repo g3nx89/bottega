@@ -118,8 +118,28 @@ export const layoutExtractor: ExtractorFn = (raw: any, result: SemanticNode) => 
     }
   }
 
+  // Absolute position (x, y) from absoluteBoundingBox — essential for alignment evaluation.
+  // Only included for non-auto-layout children (absolute positioning or page-level elements).
+  let absolutePos: { x: number; y: number } | undefined;
+  if (raw.absoluteBoundingBox && typeof raw.absoluteBoundingBox.x === 'number') {
+    const bb = raw.absoluteBoundingBox;
+    absolutePos = { x: Math.round(bb.x), y: Math.round(bb.y) };
+  }
+
   // Only set layout if there's something to report
-  if (mode || justifyContent || alignItems || wrap || gap || padding || sizing || dimensions || overflow || position) {
+  if (
+    mode ||
+    justifyContent ||
+    alignItems ||
+    wrap ||
+    gap ||
+    padding ||
+    sizing ||
+    dimensions ||
+    overflow ||
+    position ||
+    absolutePos
+  ) {
     const layout: NonNullable<typeof result.layout> = {};
     if (mode) layout.mode = mode;
     if (justifyContent) layout.justifyContent = justifyContent;
@@ -131,6 +151,7 @@ export const layoutExtractor: ExtractorFn = (raw: any, result: SemanticNode) => 
     if (dimensions) layout.dimensions = dimensions;
     if (position) layout.position = position;
     if (overflow) layout.overflow = overflow;
+    if (absolutePos) layout.absolutePos = absolutePos;
     result.layout = layout;
   }
 };

@@ -41,7 +41,7 @@ describe('aggregateVerdicts', () => {
     expect(result.summary).toContain('PASS');
   });
 
-  it('returns PASS when minority of criteria fail (majority-pass aggregation)', () => {
+  it('returns FAIL when blocking criterion fails (alignment is evidence-backed)', () => {
     const verdicts: MicroVerdict[] = [
       makeVerdict({ judgeId: 'alignment', pass: false, finding: 'Misaligned button', actionItems: ['Fix button'] }),
       makeVerdict({ judgeId: 'naming' }),
@@ -49,9 +49,23 @@ describe('aggregateVerdicts', () => {
 
     const result = aggregateVerdicts(verdicts, ['alignment', 'naming']);
 
-    // 1/2 pass, threshold = ceil(2/2) = 1 → PASS with suggestions
-    expect(result.verdict).toBe('PASS');
+    // alignment is a blocking criterion → immediate FAIL
+    expect(result.verdict).toBe('FAIL');
     expect(result.summary).toContain('alignment');
+  });
+
+  it('returns PASS when non-blocking minority criterion fails (majority-pass)', () => {
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({ judgeId: 'design_quality', pass: false, finding: 'Low polish', actionItems: ['Improve'] }),
+      makeVerdict({ judgeId: 'naming' }),
+      makeVerdict({ judgeId: 'completeness' }),
+    ];
+
+    const result = aggregateVerdicts(verdicts, ['design_quality', 'naming', 'completeness']);
+
+    // design_quality is not blocking → 2/3 pass → PASS with suggestions
+    expect(result.verdict).toBe('PASS');
+    expect(result.summary).toContain('design_quality');
   });
 
   it('does NOT cause FAIL for timeout criteria (marked as skipped)', () => {
@@ -186,7 +200,7 @@ describe('aggregateVerdicts', () => {
 
   // ── Edge cases ──────────────────────────────────────────────────────
 
-  it('exactly 50% fail with 6 judges → PASS (passThreshold = ceil(6/2) = 3, passCount = 3)', () => {
+  it('blocking criterion fail overrides majority-pass even with 50% passing', () => {
     const judges: MicroJudgeId[] = [
       'alignment',
       'token_compliance',
@@ -206,10 +220,25 @@ describe('aggregateVerdicts', () => {
 
     const result = aggregateVerdicts(verdicts, judges);
 
-    // passCount=3 >= passThreshold=ceil(6/2)=3 → PASS
-    expect(result.verdict).toBe('PASS');
+    // alignment, visual_hierarchy, consistency are blocking → any fail = FAIL
+    expect(result.verdict).toBe('FAIL');
     expect(result.actionItems).toHaveLength(3);
-    expect(result.summary).toContain('PASS');
+  });
+
+  it('50% non-blocking fail → PASS (majority-pass for non-blocking criteria)', () => {
+    const judges: MicroJudgeId[] = ['design_quality', 'token_compliance', 'completeness', 'naming'];
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({ judgeId: 'design_quality', pass: false, finding: 'Bad', actionItems: ['A'] }),
+      makeVerdict({ judgeId: 'token_compliance', pass: false, finding: 'Bad', actionItems: ['B'] }),
+      makeVerdict({ judgeId: 'completeness' }),
+      makeVerdict({ judgeId: 'naming' }),
+    ];
+
+    const result = aggregateVerdicts(verdicts, judges);
+
+    // No blocking criteria failed, passCount=2 >= threshold=ceil(4/2)=2 → PASS
+    expect(result.verdict).toBe('PASS');
+    expect(result.actionItems).toHaveLength(2);
     expect(result.summary).toContain('suggestions');
   });
 
@@ -264,17 +293,17 @@ describe('aggregateVerdicts', () => {
     expect(result.summary).toContain('3/3');
   });
 
-  it('PASS-with-suggestions summary contains "suggestions"', () => {
+  it('PASS-with-suggestions summary contains "suggestions" (non-blocking criteria only)', () => {
     const verdicts: MicroVerdict[] = [
-      makeVerdict({ judgeId: 'alignment', pass: false, finding: 'Minor', actionItems: ['Tweak'] }),
+      makeVerdict({ judgeId: 'design_quality', pass: false, finding: 'Minor polish', actionItems: ['Tweak'] }),
       makeVerdict({ judgeId: 'naming' }),
       makeVerdict({ judgeId: 'completeness' }),
     ];
 
-    const result = aggregateVerdicts(verdicts, ['alignment', 'naming', 'completeness']);
+    const result = aggregateVerdicts(verdicts, ['design_quality', 'naming', 'completeness']);
 
     expect(result.verdict).toBe('PASS');
     expect(result.summary).toContain('suggestion');
-    expect(result.summary).toContain('alignment');
+    expect(result.summary).toContain('design_quality');
   });
 });

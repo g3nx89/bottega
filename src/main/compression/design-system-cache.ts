@@ -217,7 +217,7 @@ export class DesignSystemCache {
   private entries = new Map<string, CacheEntry>();
   private readonly getTtlMs: () => number;
 
-  constructor(ttlMs: number | (() => number) = 60_000) {
+  constructor(ttlMs: number | (() => number) = 300_000) {
     this.getTtlMs = typeof ttlMs === 'function' ? ttlMs : () => ttlMs;
   }
 
@@ -235,9 +235,12 @@ export class DesignSystemCache {
     return compact ? entry.compact : entry.raw;
   }
 
-  set(raw: any, fileKey?: string): { compact: CompactDesignSystem; raw: any } {
+  set(raw: any, fileKey?: string, ttlOverrideMs?: number): { compact: CompactDesignSystem; raw: any } {
     const compact = compactDesignSystem(raw);
-    this.entries.set(fileKey || DEFAULT_FILE_KEY, { compact, raw, timestamp: Date.now() });
+    // ttlOverrideMs allows shorter TTL for partial results (e.g. component fetch failed).
+    // Uses backdated timestamp so the entry expires sooner without changing eviction logic.
+    const effectiveTimestamp = ttlOverrideMs != null ? Date.now() - (this.getTtlMs() - ttlOverrideMs) : Date.now();
+    this.entries.set(fileKey || DEFAULT_FILE_KEY, { compact, raw, timestamp: effectiveTimestamp });
     return { compact, raw };
   }
 

@@ -2,6 +2,8 @@
  * Shared types for the read-only parallel subagent system.
  */
 
+import type { JudgeEvidence } from './judge-evidence.js';
+
 export type SubagentRole = 'scout' | 'analyst' | 'auditor' | 'judge';
 
 export interface SubagentContext {
@@ -91,6 +93,13 @@ export interface PrefetchedContext {
   libraryComponents: string | null;
   componentAnalysis: ComponentAnalysis | null;
   /**
+   * Pre-computed numeric evidence for the 4 "measurement" judges
+   * (alignment, visual_hierarchy, consistency, naming). Extracted by
+   * running a JS payload inside the Figma plugin via `executeCodeViaUI`.
+   * When `null`, the judges fall back to raw file-data inspection.
+   */
+  judgeEvidence: JudgeEvidence | null;
+  /**
    * UX-003: the node ID the prefetch screenshot was scoped to. When set,
    * judges must frame their findings as "about this target node" to avoid
    * false positives on unrelated canvas content.
@@ -123,10 +132,16 @@ export interface MicroVerdict {
 }
 
 /** Activation tier — determines which judges run based on complexity. */
-export type ActivationTier = 'full' | 'standard' | 'minimal' | 'visual' | 'narrow';
+export type ActivationTier = 'full' | 'standard' | 'visual' | 'narrow';
 
 /** Data keys available for selective prefetch. */
-export type PrefetchDataKey = 'screenshot' | 'fileData' | 'lint' | 'designSystem' | 'libraryComponents';
+export type PrefetchDataKey =
+  | 'screenshot'
+  | 'fileData'
+  | 'lint'
+  | 'designSystem'
+  | 'libraryComponents'
+  | 'judgeEvidence';
 
 // ── Component Analysis Types ─────────────────────────────────────────
 

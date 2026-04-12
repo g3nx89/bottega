@@ -40,7 +40,8 @@ vi.mock('../../../../src/main/subagent/judge-registry.js', () => ({
     id: 'alignment',
     label: 'Alignment',
     description: 'Layout precision',
-    defaultModel: 'claude-haiku-4-5',
+    defaultModel: 'claude-sonnet-4-6',
+    defaultThinking: 'medium',
     tiers: new Set(['full', 'standard', 'visual']),
     dataNeeds: ['fileData'],
   }),
@@ -240,6 +241,7 @@ describe('Orchestrator', () => {
       lint: null,
       libraryComponents: null,
       componentAnalysis: null,
+      judgeEvidence: null,
     };
 
     /** Helper: create a mock session that emits a JSON verdict via subscribe, then resolves prompt. */
@@ -653,6 +655,256 @@ describe('Orchestrator', () => {
       expect(onProgress).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'completed', role: 'judge', summary: 'alignment:PASS' }),
       );
+    });
+
+    // Per-judge evidence slicing — the 4 "measurement" judges each receive
+    // ONLY their relevant slice of JudgeEvidence. The other 4 judges never
+    // see any evidence section. This block verifies the isolation.
+    describe('judgeEvidence injection', () => {
+      /** Build a full JudgeEvidence report with distinct markers per slice. */
+      function buildFullEvidence(): any {
+        return {
+          alignment: {
+            verdict: 'misaligned',
+            tolerancePx: 4,
+            siblingGroupsChecked: 1,
+            findings: [
+              {
+                parentId: '1:1',
+                parentName: 'Parent',
+                axis: 'y',
+                values: [0, 15, 0],
+                maxDeviation: 15,
+                nodeIds: ['1:2', '1:3', '1:4'],
+              },
+            ],
+          },
+          visual_hierarchy: {
+            verdict: 'flat',
+            textCount: 3,
+            uniqueFontSizes: [14],
+            uniqueFontStyles: ['Regular'],
+            allSameStyle: true,
+            samples: [],
+          },
+          consistency: {
+            verdict: 'inconsistent',
+            siblingGroupsChecked: 1,
+            findings: [
+              {
+                parentId: '2:1',
+                parentName: 'Cards',
+                property: 'paddingTop',
+                values: [16, 24, 16],
+                nodeIds: ['2:2', '2:3', '2:4'],
+              },
+            ],
+          },
+          naming: {
+            verdict: 'hasAutoNames',
+            autoNamedFrames: [{ id: '3:1', name: 'Frame 1' }],
+            framesWithoutAutoLayout: [],
+          },
+          targetNodeId: '1:1',
+          nodeCount: 10,
+        };
+      }
+
+      /**
+       * Run a batch with capture: returns a map of judgeId → user prompt text
+       * passed to session.prompt(). Uses getJudgeDefinition mockImplementation
+       * so each judge id gets the right dataNeeds.
+       */
+      async function runBatchCapturingPrompts(
+        judgeIds: MicroJudgeId[],
+        prefetchedOverrides: Partial<PrefetchedContext>,
+      ): Promise<Record<string, string>> {
+        // Map each judge to its real dataNeeds shape
+        const judgeDefs: Record<string, any> = {
+          alignment: {
+            id: 'alignment',
+            dataNeeds: ['fileData', 'judgeEvidence'],
+            defaultModel: 'claude-sonnet-4-6',
+            defaultThinking: 'medium',
+          },
+          visual_hierarchy: {
+            id: 'visual_hierarchy',
+            dataNeeds: ['screenshot', 'designSystem', 'judgeEvidence'],
+            defaultModel: 'claude-sonnet-4-6',
+            defaultThinking: 'medium',
+          },
+          consistency: {
+            id: 'consistency',
+            dataNeeds: ['fileData', 'lint', 'judgeEvidence'],
+            defaultModel: 'claude-sonnet-4-6',
+            defaultThinking: 'medium',
+          },
+          naming: {
+            id: 'naming',
+            dataNeeds: ['fileData', 'judgeEvidence'],
+            defaultModel: 'claude-haiku-4-5',
+            defaultThinking: 'low',
+          },
+          completeness: {
+            id: 'completeness',
+            dataNeeds: ['screenshot', 'fileData'],
+            defaultModel: 'claude-sonnet-4-6',
+            defaultThinking: 'medium',
+          },
+          componentization: {
+            id: 'componentization',
+            dataNeeds: ['fileData', 'libraryComponents'],
+            defaultModel: 'claude-haiku-4-5',
+            defaultThinking: 'low',
+          },
+          token_compliance: {
+            id: 'token_compliance',
+            dataNeeds: ['lint', 'designSystem'],
+            defaultModel: 'claude-haiku-4-5',
+            defaultThinking: 'low',
+          },
+          design_quality: {
+            id: 'design_quality',
+            dataNeeds: ['screenshot'],
+            defaultModel: 'claude-sonnet-4-6',
+            defaultThinking: 'medium',
+          },
+        };
+        mockGetJudgeDefinition.mockImplementation(((id: string) => judgeDefs[id]) as any);
+        mockGetMicroJudgeCriterionPrompt.mockImplementation(((id: string) => `Evaluate ${id}.`) as any);
+
+        // Capture user prompts per call. createSubagentSession is called once per judge.
+        const calls: Array<{ judgeIdx: number; prompt: string }> = [];
+        let idx = 0;
+        mockCreateSubagentSession.mockImplementation(async () => {
+          const myIdx = idx++;
+          let subscribeCb: ((event: any) => void) | null = null;
+          return {
+            session: {
+              subscribe: vi.fn((cb: any) => {
+                subscribeCb = cb;
+              }),
+              newSession: vi.fn().mockResolvedValue(undefined),
+              prompt: vi.fn().mockImplementation(async (userPrompt: string) => {
+                calls.push({ judgeIdx: myIdx, prompt: userPrompt });
+                if (subscribeCb) {
+                  subscribeCb({
+                    assistantMessageEvent: {
+                      type: 'text_delta',
+                      delta: JSON.stringify({ pass: true, finding: 'ok', evidence: '', actionItems: [] }),
+                    },
+                  });
+                }
+              }),
+              abort: vi.fn().mockResolvedValue(undefined),
+            },
+          } as any;
+        });
+
+        const prefetched: PrefetchedContext = {
+          screenshot: null,
+          fileData: '{"pages":[]}',
+          designSystem: '{"tokens":[]}',
+          lint: 'lint-data',
+          libraryComponents: null,
+          componentAnalysis: null,
+          judgeEvidence: null,
+          ...prefetchedOverrides,
+        };
+
+        await runMicroJudgeBatch(
+          microBatchInfra,
+          judgeIds,
+          prefetched,
+          microBatchSettings,
+          'Test turn',
+          'batch-evidence',
+          new AbortController().signal,
+          vi.fn(),
+        );
+
+        // Map calls back to judgeId (order is preserved by Promise.all over judgeIds)
+        const result: Record<string, string> = {};
+        calls.sort((a, b) => a.judgeIdx - b.judgeIdx);
+        for (let i = 0; i < judgeIds.length; i++) {
+          result[judgeIds[i]!] = calls[i]?.prompt ?? '';
+        }
+        return result;
+      }
+
+      it('injects only the alignment slice into the alignment judge prompt', async () => {
+        const evidence = buildFullEvidence();
+        const prompts = await runBatchCapturingPrompts(['alignment', 'completeness'], { judgeEvidence: evidence });
+        expect(prompts.alignment).toContain('## Pre-Computed Evidence');
+        expect(prompts.alignment).toContain('"verdict": "misaligned"');
+        expect(prompts.alignment).toContain('"maxDeviation": 15');
+        // Other slices must NOT leak into alignment's prompt
+        expect(prompts.alignment).not.toContain('"allSameStyle"');
+        expect(prompts.alignment).not.toContain('"autoNamedFrames"');
+        // Unchanged judge sees no evidence section at all
+        expect(prompts.completeness).not.toContain('## Pre-Computed Evidence');
+      });
+
+      it('injects only the typography slice into visual_hierarchy', async () => {
+        const evidence = buildFullEvidence();
+        const prompts = await runBatchCapturingPrompts(['visual_hierarchy'], { judgeEvidence: evidence });
+        expect(prompts.visual_hierarchy).toContain('"allSameStyle": true');
+        expect(prompts.visual_hierarchy).toContain('"verdict": "flat"');
+        expect(prompts.visual_hierarchy).not.toContain('"maxDeviation"');
+        expect(prompts.visual_hierarchy).not.toContain('"paddingTop"');
+      });
+
+      it('injects only the consistency slice into consistency', async () => {
+        const evidence = buildFullEvidence();
+        const prompts = await runBatchCapturingPrompts(['consistency'], { judgeEvidence: evidence });
+        expect(prompts.consistency).toContain('"property": "paddingTop"');
+        expect(prompts.consistency).toContain('[\n        16,\n        24,\n        16\n      ]');
+        expect(prompts.consistency).not.toContain('"allSameStyle"');
+      });
+
+      it('injects only the naming slice into naming', async () => {
+        const evidence = buildFullEvidence();
+        const prompts = await runBatchCapturingPrompts(['naming'], { judgeEvidence: evidence });
+        expect(prompts.naming).toContain('"autoNamedFrames"');
+        expect(prompts.naming).toContain('"Frame 1"');
+        expect(prompts.naming).not.toContain('"maxDeviation"');
+      });
+
+      it('omits the evidence section when judgeEvidence is null', async () => {
+        const prompts = await runBatchCapturingPrompts(['alignment'], { judgeEvidence: null });
+        expect(prompts.alignment).not.toContain('## Pre-Computed Evidence');
+      });
+
+      it('does NOT inject evidence into componentization / design_quality / token_compliance / completeness', async () => {
+        const evidence = buildFullEvidence();
+        const prompts = await runBatchCapturingPrompts(
+          ['componentization', 'design_quality', 'token_compliance', 'completeness'],
+          { judgeEvidence: evidence },
+        );
+        for (const [, prompt] of Object.entries(prompts)) {
+          expect(prompt).not.toContain('## Pre-Computed Evidence');
+        }
+      });
+
+      it('caps the evidence slice at 6000 characters', async () => {
+        // Build an alignment slice with 500 findings to blow past the 6KB cap
+        const huge: any = buildFullEvidence();
+        huge.alignment.findings = [];
+        for (let i = 0; i < 500; i++) {
+          huge.alignment.findings.push({
+            parentId: `p${i}`,
+            parentName: 'Parent' + i,
+            axis: 'y',
+            values: [0, 10, 0],
+            maxDeviation: 10,
+            nodeIds: [`${i}:1`, `${i}:2`, `${i}:3`],
+          });
+        }
+        const prompts = await runBatchCapturingPrompts(['alignment'], { judgeEvidence: huge });
+        const section = prompts.alignment.split('## Pre-Computed Evidence')[1] ?? '';
+        // The section (everything from the header onward) should be ≤ ~6KB + header + newlines
+        expect(section.length).toBeLessThanOrEqual(6200);
+      });
     });
   });
 });

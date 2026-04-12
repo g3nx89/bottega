@@ -33,6 +33,7 @@ vi.mock('../../../../src/main/subagent/context-prefetch.js', () => ({
     lint: null,
     libraryComponents: null,
     componentAnalysis: null,
+    judgeEvidence: null,
   }),
 }));
 
@@ -353,5 +354,33 @@ describe('Judge Harness Integration', () => {
     expect(verdict?.verdict).toBe('FAIL');
     // Only 1 micro-judge batch run (the retry was attempted but parent failed)
     expect(mockRunMicroBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('threads the ScopedConnector through to prefetchForMicroJudges for evidence extraction', async () => {
+    mockRunMicroBatch.mockResolvedValueOnce(makePassVerdicts());
+
+    // Spy on the mocked prefetchForMicroJudges so we can inspect the call args
+    const prefetchModule = await import('../../../../src/main/subagent/context-prefetch.js');
+    const prefetchSpy = vi.mocked(prefetchModule.prefetchForMicroJudges);
+    prefetchSpy.mockClear();
+
+    const connector = { fileKey: 'fk', executeCodeViaUI: vi.fn() } as any;
+    await runJudgeHarness(
+      makeInfra(),
+      connector,
+      makeSlot(),
+      defaultSettings,
+      ['figma_render_jsx'],
+      ['1:2'],
+      new AbortController().signal,
+      makeCallbacks(),
+    );
+
+    expect(prefetchSpy).toHaveBeenCalledTimes(1);
+    const callArgs = prefetchSpy.mock.calls[0]!;
+    // Signature: (tools, neededData, signal, fileKey, targetNodeId, connector)
+    expect(callArgs[3]).toBe('fk'); // fileKey
+    expect(callArgs[4]).toBe('1:2'); // targetNodeId
+    expect(callArgs[5]).toBe(connector); // connector threaded through
   });
 });

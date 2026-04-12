@@ -141,7 +141,7 @@ export function createEventRouter(deps: EventRouterDeps) {
    * responses. Create/clone/instantiate tools return `{ id: "N:M", ... }` or
    * `{ nodeId: "N:M", ... }` in their payload — match both.
    */
-  const NODE_ID_IN_RESULT = /"(?:id|nodeId)"\s*:\s*"(\d+:\d+)"/g;
+  const NODE_ID_IN_RESULT = /"(?:id|nodeId)"\s*:\s*"(\d+:\d+)"|(?:^|\s)node[=:](\d+:\d+)/gm;
   function extractNodeIdsFromResult(result: any): string[] {
     const content = result?.content;
     if (!Array.isArray(content)) return [];
@@ -149,7 +149,8 @@ export function createEventRouter(deps: EventRouterDeps) {
     for (const c of content) {
       if (c?.type !== 'text' || typeof c.text !== 'string') continue;
       for (const match of c.text.matchAll(NODE_ID_IN_RESULT)) {
-        if (match[1]) out.push(match[1]);
+        const id = match[1] ?? match[2]; // group 1 = JSON format, group 2 = text format (node=N:M)
+        if (id && !out.includes(id)) out.push(id);
       }
     }
     return out;
@@ -243,6 +244,8 @@ export function createEventRouter(deps: EventRouterDeps) {
     // appear in the result payload, not the input.
     if (!event.isError && !READ_ONLY_CATEGORIES.has(category)) {
       const createdIds = extractNodeIdsFromResult(event.result);
+      // (UX-003 diagnostic logging removed — nodeId extraction regex now handles both
+      // JSON format {"nodeId":"N:M"} and text format "node=N:M")
       if (createdIds.length > 0) {
         const existing = turnMutatedNodeIds.get(slot.id) ?? [];
         existing.push(...createdIds);
@@ -335,9 +338,14 @@ export function createEventRouter(deps: EventRouterDeps) {
     if (judgeInProgress.has(slot.id)) return;
 
     const toolNames = turnToolNames.get(slot.id) ?? [];
-    // UX-003: dedupe while preserving insertion order — first mutated node is
-    // the most "focused" target for the judge screenshot.
-    const mutatedNodeIds = Array.from(new Set(turnMutatedNodeIds.get(slot.id) ?? []));
+    // UX-003: dedupe and prioritize CREATED node IDs (from tool results) over
+    // parent IDs (from tool inputs). Parent IDs like "0:1" (page root) scope
+    // the screenshot to the entire canvas, which defeats scoped evaluation.
+    // Strategy: filter out page-level IDs ("0:N" pattern = top-level pages),
+    // then dedupe. If all IDs are page-level, keep them as fallback.
+    const rawNodeIds = [...new Set(turnMutatedNodeIds.get(slot.id) ?? [])];
+    const nonPageIds = rawNodeIds.filter((id) => !id.startsWith('0:'));
+    const mutatedNodeIds = nonPageIds.length > 0 ? nonPageIds : rawNodeIds;
 
     // Save tool names for force re-run — only overwrite when turn had tools,
     // so subsequent no-tool turns don't clear the list needed by re-judge

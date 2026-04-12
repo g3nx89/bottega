@@ -102,7 +102,7 @@ function validateConfig(raw: any): SubagentSettings {
   const autoRetry = typeof raw.autoRetry === 'boolean' ? raw.autoRetry : defaults.autoRetry;
   const maxRetries =
     typeof raw.maxRetries === 'number' && Number.isFinite(raw.maxRetries)
-      ? Math.max(1, Math.min(5, Math.round(raw.maxRetries)))
+      ? Math.max(1, Math.min(10, Math.round(raw.maxRetries)))
       : defaults.maxRetries;
 
   // Migrate or validate microJudges

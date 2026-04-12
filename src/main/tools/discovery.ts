@@ -239,16 +239,29 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
           if (cached) return textResult(cached, format);
         }
 
-        // Fetch fresh from Figma
-        // getVariables() may return a wrapper { variables, variableCollections } or a plain array.
-        // Normalize to the shape compactDesignSystem expects: { variables: collections[], components: [] }
-        const [varsResult, compsResult] = await Promise.all([connector.getVariables(), connector.getLocalComponents()]);
-        const rawCollections = Array.isArray(varsResult)
-          ? varsResult
-          : (varsResult?.variableCollections ?? varsResult?.variables ?? varsResult);
-        const rawComponents = Array.isArray(compsResult) ? compsResult : (compsResult?.components ?? compsResult);
+        // Fetch fresh from Figma — use allSettled so variables succeed even if
+        // getLocalComponents times out (GET_LOCAL_COMPONENTS hangs on large files).
+        // This populates the cache with at least the variables, avoiding repeated
+        // 45s timeouts on subsequent calls.
+        const [varsSettled, compsSettled] = await Promise.allSettled([
+          connector.getVariables(),
+          connector.getLocalComponents(),
+        ]);
+        const varsResult = varsSettled.status === 'fulfilled' ? varsSettled.value : null;
+        const compsResult = compsSettled.status === 'fulfilled' ? compsSettled.value : null;
+        // getLocalComponents failure is expected on large files — variables are still cached
+        const rawCollections = varsResult
+          ? Array.isArray(varsResult)
+            ? varsResult
+            : (varsResult?.variableCollections ?? varsResult?.variables ?? varsResult)
+          : [];
+        const rawComponents = compsResult
+          ? Array.isArray(compsResult)
+            ? compsResult
+            : (compsResult?.components ?? compsResult)
+          : [];
         // Preserve both flat variables AND collections for compactDesignSystem's shape detection
-        const flatVars = !Array.isArray(varsResult) ? varsResult?.variables : undefined;
+        const flatVars = varsResult && !Array.isArray(varsResult) ? varsResult?.variables : undefined;
         const raw = {
           variables: Array.isArray(rawCollections) ? rawCollections : [],
           ...(flatVars && Array.isArray(flatVars) ? { flatVariables: flatVars } : {}),
@@ -256,8 +269,10 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
           components: Array.isArray(rawComponents) ? rawComponents : [],
         };
 
-        // Store in cache and return appropriate form
-        const { compact } = designSystemCache.set(raw, fileKey);
+        // Store in cache — use shorter TTL for partial results (components failed)
+        // so subsequent calls retry the component fetch sooner.
+        const isPartial = compsResult === null;
+        const { compact } = designSystemCache.set(raw, fileKey, isPartial ? 30_000 : undefined);
         return textResult(shouldCompact ? compact : raw, format);
       },
     },

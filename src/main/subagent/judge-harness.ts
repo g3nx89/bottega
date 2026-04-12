@@ -25,7 +25,16 @@ import type {
 
 const log = createChildLogger({ component: 'judge-harness' });
 
-const DEFAULT_JUDGE_TIMEOUT_MS = 180_000;
+const DEFAULT_JUDGE_TIMEOUT_MS = 600_000;
+
+/** Max action items included in retry task context to prevent prompt bloat. */
+const MAX_TASK_CONTEXT_ITEMS = 5;
+
+/** Max action items per retry prompt — focused retries converge faster. */
+const MAX_RETRY_ITEMS = 3;
+
+/** Stop iterating after this many consecutive attempts with no improvement. */
+const MAX_CONSECUTIVE_NO_IMPROVEMENT = 2;
 
 /** Prefix marker for judge retry prompts — filtered out by extractRenderableMessages. */
 export const JUDGE_RETRY_MARKER = '[JUDGE_RETRY]';
@@ -49,6 +58,24 @@ export interface JudgeHarnessCallbacks {
   onRetryStart: (attempt: number, maxAttempts: number) => void;
 }
 
+/** Build task context string for judge evaluation — progressive on retries. */
+export function buildTaskContext(
+  attempt: number,
+  maxAttempts: number,
+  turnToolNames: string[],
+  lastVerdict: JudgeVerdict | null,
+): string {
+  if (attempt === 1) {
+    return `The agent just completed a turn with these tools: ${[...new Set(turnToolNames)].join(', ')}`;
+  }
+  const items = lastVerdict?.actionItems.slice(0, MAX_TASK_CONTEXT_ITEMS).join('; ') ?? '';
+  const overflow =
+    (lastVerdict?.actionItems.length ?? 0) > MAX_TASK_CONTEXT_ITEMS
+      ? ` (and ${(lastVerdict?.actionItems.length ?? 0) - MAX_TASK_CONTEXT_ITEMS} more)`
+      : '';
+  return `Retry evaluation ${attempt}/${maxAttempts}. The agent was asked to fix: ${items}${overflow}. Previous verdict: ${lastVerdict?.summary ?? 'FAIL'}. Evaluate whether the fixes were actually applied — if the same issues persist, the agent's fix attempt failed.`;
+}
+
 /** Read-only tool categories that do NOT trigger the judge. */
 export const READ_ONLY_CATEGORIES = new Set(['discovery', 'screenshot', 'task', 'other']);
 
@@ -64,11 +91,14 @@ const STRUCTURAL_TOOLS = new Set([
 
 /**
  * Determine activation tier based on complexity — estimated from structural tool call count.
- * - minimal: 1-2 structural calls → only completeness judge
- * - standard: 3-8 structural calls → completeness + alignment + visual_hierarchy
- * - full: 9+ structural calls → all judges
+ * - standard: 1-4 structural calls → core quality judges (completeness, alignment, visual_hierarchy, design_quality)
+ * - full: 5+ structural calls → all judges including naming, componentization, consistency
  * - visual: styling-only (no structural) → styling-relevant subset
  * - narrow: rename or token-only changes
+ *
+ * Note: the old 'minimal' tier (1 judge) was removed because it provided
+ * insufficient quality signal — most creation turns used 1-2 structural tools
+ * and only got a completeness check, missing alignment/hierarchy/quality issues.
  */
 const NAMING_ONLY_TOOLS = new Set(['figma_rename']);
 
@@ -83,10 +113,9 @@ export function determineTier(turnToolNames: string[]): ActivationTier {
     else if (cat === 'mutation' || cat === 'ds') hasVisual = true;
   }
 
-  // Complexity-based: use structural tool count to determine tier
-  if (structuralCount >= 9) return 'full';
-  if (structuralCount >= 3) return 'standard';
-  if (structuralCount >= 1) return 'minimal';
+  // Complexity-based: standard for any creation, full for complex multi-element designs
+  if (structuralCount >= 5) return 'full';
+  if (structuralCount >= 1) return 'standard';
 
   // No structural tools — check for visual-only or narrow
   if (!hasVisual && turnToolNames.some((t) => NAMING_ONLY_TOOLS.has(t))) return 'narrow';
@@ -178,6 +207,8 @@ export async function runJudgeHarness(
   let lastVerdict: JudgeVerdict | null = null;
   let currentJudgeIds = activeJudgeIds;
   let previousMicroVerdicts: MicroVerdict[] = [];
+  let previousFailCount = Infinity;
+  let consecutiveNoImprovement = 0;
 
   try {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -198,6 +229,7 @@ export async function runJudgeHarness(
           signal,
           connector.fileKey,
           targetNodeId,
+          connector,
         );
       } catch (err: unknown) {
         if ((err as Error)?.name === 'AbortError') break;
@@ -205,11 +237,8 @@ export async function runJudgeHarness(
         break;
       }
 
-      // Task context for judges
-      const taskContext =
-        attempt === 1
-          ? `The agent just completed a turn with these tools: ${[...new Set(turnToolNames)].join(', ')}`
-          : `The agent attempted to fix issues from the previous judge verdict. Previous action items: ${lastVerdict?.actionItems.join('; ')}`;
+      // Task context for judges — progressive on retries so judges know what was attempted
+      const taskContext = buildTaskContext(attempt, maxAttempts, turnToolNames, lastVerdict);
 
       // Run micro-judges in parallel
       const microVerdicts = await runMicroJudgeBatch(
@@ -271,6 +300,35 @@ export async function runJudgeHarness(
         break;
       }
 
+      // Track convergence: is the number of failures decreasing?
+      const currentFailCount = allVerdicts.filter((v) => v.status === 'evaluated' && !v.pass).length;
+      if (attempt > 1) {
+        if (currentFailCount >= previousFailCount) {
+          consecutiveNoImprovement++;
+          if (consecutiveNoImprovement >= MAX_CONSECUTIVE_NO_IMPROVEMENT) {
+            log.info(
+              { slotId: slot.id, attempt, currentFailCount, previousFailCount, tier },
+              'Judge FAIL — no convergence, stopping retries',
+            );
+            break;
+          }
+        } else {
+          consecutiveNoImprovement = 0; // improving — reset counter
+        }
+      }
+      previousFailCount = currentFailCount;
+      log.info(
+        {
+          slotId: slot.id,
+          attempt,
+          maxAttempts,
+          tier,
+          failCount: currentFailCount,
+          failedCriteria: lastVerdict.criteria.filter((c) => !c.pass).map((c) => c.name),
+        },
+        'Judge FAIL',
+      );
+
       // FAIL — create remediation tasks directly from micro-verdicts (no string matching)
       if (slot.taskStore) {
         for (const mv of allVerdicts) {
@@ -295,8 +353,12 @@ export async function runJudgeHarness(
         const failedJudgeIds = allVerdicts.filter((v) => v.status === 'evaluated' && !v.pass).map((v) => v.judgeId);
         currentJudgeIds = failedJudgeIds.length > 0 ? failedJudgeIds : currentJudgeIds;
 
-        // Build enriched retry prompt with node IDs and tool hints from judge evidence
-        const retryPrompt = buildRetryPrompt(allVerdicts);
+        // Build enriched retry prompt with node IDs, tool hints, and progressive context
+        const retryPrompt = buildRetryPrompt(allVerdicts, {
+          attempt: attempt + 1,
+          maxAttempts,
+          previousSummary: lastVerdict?.summary,
+        });
 
         try {
           await slot.session.prompt(retryPrompt);
@@ -346,9 +408,20 @@ export function extractNodeIds(evidence: string): string[] {
   return ids;
 }
 
+/** Optional retry context — provided together or not at all. */
+export interface RetryContext {
+  attempt: number;
+  maxAttempts: number;
+  previousSummary?: string;
+}
+
 /** Build enriched retry prompt with node IDs and tool suggestions from judge evidence. */
-export function buildRetryPrompt(allVerdicts: MicroVerdict[]): string {
-  const failedItems: string[] = [];
+export function buildRetryPrompt(allVerdicts: MicroVerdict[], retry?: RetryContext): string {
+  // Separate structural from styling issues for priority ordering
+  const STRUCTURAL_CRITERIA = new Set(['completeness', 'alignment', 'visual_hierarchy']);
+  const structuralItems: string[] = [];
+  const stylingItems: string[] = [];
+
   for (const mv of allVerdicts) {
     if (mv.status !== 'evaluated' || mv.pass) continue;
 
@@ -357,15 +430,32 @@ export function buildRetryPrompt(allVerdicts: MicroVerdict[]): string {
     const toolHint = CRITERION_TOOL_HINTS[mv.judgeId] || '';
 
     for (const item of mv.actionItems) {
-      failedItems.push(`[${mv.judgeId}] ${item}${nodeHint}\n   → ${toolHint}`);
+      const line = `[${mv.judgeId}] ${item}${nodeHint}\n   → ${toolHint}`;
+      if (STRUCTURAL_CRITERIA.has(mv.judgeId)) {
+        structuralItems.push(line);
+      } else {
+        stylingItems.push(line);
+      }
     }
   }
 
-  if (failedItems.length === 0) {
+  // Focus each retry on at most MAX_RETRY_ITEMS — smaller scope converges faster
+  const allItems = [...structuralItems, ...stylingItems].slice(0, MAX_RETRY_ITEMS);
+  const remainingCount = structuralItems.length + stylingItems.length - allItems.length;
+
+  if (allItems.length === 0) {
     return `${JUDGE_RETRY_MARKER}\nThe quality judge found minor issues but no specific action items. Take a screenshot to verify current state.`;
   }
 
-  return `${JUDGE_RETRY_MARKER}\nFix these specific issues. Do NOT re-screenshot or re-analyze first — apply fixes directly using the suggested tools:\n\n${failedItems.map((item, i) => `${i + 1}. ${item}`).join('\n\n')}\n\nAfter all fixes, take ONE screenshot to verify.`;
+  const attemptInfo = retry ? `\n(Retry attempt ${retry.attempt}/${retry.maxAttempts})` : '';
+  const previousInfo = retry?.previousSummary
+    ? `\nPrevious evaluation: ${retry.previousSummary}. The previous fix did NOT fully resolve the issues — try a different approach for recurring items.`
+    : '';
+
+  const remainingNote =
+    remainingCount > 0 ? `\n(${remainingCount} more items will be addressed in the next iteration)` : '';
+
+  return `${JUDGE_RETRY_MARKER}${attemptInfo}${previousInfo}\nFirst take a screenshot to see the current state, then fix these issues using the suggested tools:\n\n${allItems.map((item, i) => `${i + 1}. ${item}`).join('\n\n')}${remainingNote}\n\nAfter all fixes, take ONE final screenshot to verify.`;
 }
 
 /**

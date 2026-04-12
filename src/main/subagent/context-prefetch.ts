@@ -5,10 +5,35 @@
 
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { createChildLogger } from '../../figma/logger.js';
+import type { WebSocketConnector } from '../../figma/websocket-connector.js';
 import { analyzeComponents } from './component-analysis.js';
+import { buildEvidenceCode, computeJudgeEvidence, type EvidenceNode } from './judge-evidence.js';
 import type { PrefetchDataKey, PrefetchedContext, ScreenshotImage } from './types.js';
 
 const log = createChildLogger({ component: 'subagent-prefetch' });
+
+/**
+ * Per-fetch soft timeout for judge prefetch. If a single data fetch
+ * exceeds this, it resolves with null and the judge proceeds without
+ * that data. Prevents slow WS commands (e.g., GET_LOCAL_COMPONENTS)
+ * from blocking the entire judge pipeline.
+ */
+const PREFETCH_PER_FETCH_TIMEOUT_MS = 15_000;
+
+/** Wrap a promise with a soft timeout — resolves null on timeout instead of rejecting. */
+function withPrefetchTimeout<T>(promise: Promise<T>, label: string): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => {
+      log.info(
+        { label, timeoutMs: PREFETCH_PER_FETCH_TIMEOUT_MS },
+        'Prefetch fetch timed out — proceeding without data',
+      );
+      resolve(null);
+    }, PREFETCH_PER_FETCH_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 /**
  * Call a named tool's execute function. Returns the text content or null on error.
@@ -102,6 +127,7 @@ export async function prefetchCommonContext(tools: ToolDefinition[], signal?: Ab
     lint: null,
     libraryComponents: null,
     componentAnalysis: null,
+    judgeEvidence: null,
   };
 }
 
@@ -143,6 +169,13 @@ export async function prefetchForMicroJudges(
    * pre-existing canvas content as "missing" or "misaligned".
    */
   targetNodeId?: string,
+  /**
+   * Optional raw connector — used only when `neededData` includes `judgeEvidence`.
+   * Enables direct `executeCodeViaUI` calls for deterministic fact extraction
+   * (see `judge-evidence.ts`). When omitted, evidence fetch is silently skipped
+   * so the prefetch stays backwards compatible with existing tests.
+   */
+  connector?: WebSocketConnector,
 ): Promise<PrefetchedContext> {
   const result: PrefetchedContext = {
     screenshot: null,
@@ -151,6 +184,7 @@ export async function prefetchForMicroJudges(
     lint: null,
     libraryComponents: null,
     componentAnalysis: null,
+    judgeEvidence: null,
     targetNodeId: targetNodeId ?? null,
   };
 
@@ -161,24 +195,44 @@ export async function prefetchForMicroJudges(
     // returns a cropped image of that node only. `zoom` is deliberately
     // omitted when scoped — the tool auto-fits the node to the frame.
     const screenshotParams = targetNodeId ? { nodeId: targetNodeId } : { zoom: 2 };
-    screenshotPromise = callToolForImage(tools, 'figma_screenshot', screenshotParams, signal);
+    screenshotPromise = withPrefetchTimeout(
+      callToolForImage(tools, 'figma_screenshot', screenshotParams, signal),
+      'screenshot',
+    );
   }
 
-  // Build parallel fetch list for text-based data
+  // Build parallel fetch list for text-based data — each wrapped with soft timeout
+  // to prevent slow WS commands from blocking the entire judge pipeline.
   const fetches: Array<{ key: PrefetchDataKey; promise: Promise<string | null> }> = [];
   if (neededData.has('fileData')) {
-    fetches.push({ key: 'fileData', promise: callTool(tools, 'figma_get_file_data', { mode: 'full' }, signal) });
+    // fileData is NOT scoped to targetNodeId — judges need the full page tree to
+    // evaluate cross-sibling criteria (alignment, consistency, componentization).
+    // The targetNodeId is passed to judges as a directive instead (orchestrator.ts).
+    // Screenshot remains scoped to prevent visual confusion.
+    fetches.push({
+      key: 'fileData',
+      promise: withPrefetchTimeout(callTool(tools, 'figma_get_file_data', { mode: 'full' }, signal), 'fileData'),
+    });
   }
   if (neededData.has('lint')) {
-    fetches.push({ key: 'lint', promise: callTool(tools, 'figma_lint', {}, signal) });
+    fetches.push({
+      key: 'lint',
+      promise: withPrefetchTimeout(callTool(tools, 'figma_lint', {}, signal), 'lint'),
+    });
   }
   if (neededData.has('designSystem')) {
-    fetches.push({ key: 'designSystem', promise: callTool(tools, 'figma_design_system', {}, signal) });
+    fetches.push({
+      key: 'designSystem',
+      promise: withPrefetchTimeout(callTool(tools, 'figma_design_system', {}, signal), 'designSystem'),
+    });
   }
   if (neededData.has('libraryComponents') && fileKey) {
     fetches.push({
       key: 'libraryComponents',
-      promise: callTool(tools, 'figma_get_library_components', { fileKey }, signal),
+      promise: withPrefetchTimeout(
+        callTool(tools, 'figma_get_library_components', { fileKey }, signal),
+        'libraryComponents',
+      ),
     });
   }
 
@@ -243,6 +297,27 @@ export async function prefetchForMicroJudges(
       result.componentAnalysis = analyzeComponents(result.fileData, componentNames);
     } catch (err) {
       log.warn({ err }, 'Component analysis failed — skipping');
+    }
+  }
+
+  // Post-process: extract judge evidence by running a JS payload inside the
+  // Figma plugin. Requires a live connector AND a target node. The payload
+  // itself is trivial (a tree walker); all analysis logic lives in
+  // `computeJudgeEvidence` which is pure and unit-tested.
+  if (neededData.has('judgeEvidence') && connector && targetNodeId) {
+    try {
+      const rawTree = await withPrefetchTimeout(
+        connector.executeCodeViaUI(buildEvidenceCode(targetNodeId), 20_000) as Promise<EvidenceNode[]>,
+        'judgeEvidence',
+      );
+      if (Array.isArray(rawTree)) {
+        result.judgeEvidence = computeJudgeEvidence(rawTree, targetNodeId);
+      } else if (rawTree !== null) {
+        log.warn({ targetNodeId, type: typeof rawTree }, 'judgeEvidence plugin payload returned non-array — skipping');
+      }
+    } catch (err: unknown) {
+      if ((err as Error)?.name === 'AbortError') throw err;
+      log.warn({ err, targetNodeId }, 'Judge evidence extraction failed — skipping');
     }
   }
 

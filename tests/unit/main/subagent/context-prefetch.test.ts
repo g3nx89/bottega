@@ -15,6 +15,7 @@ import {
   prefetchForMicroJudges,
 } from '../../../../src/main/subagent/context-prefetch.js';
 import type { PrefetchDataKey, PrefetchedContext } from '../../../../src/main/subagent/types.js';
+import { threeMisalignedSquares as threeMisalignedSquaresFixture } from '../../../helpers/evidence-fixtures.js';
 
 function makeMockTools(overrides: Record<string, any> = {}) {
   const defaultResults: Record<string, any> = {
@@ -127,7 +128,7 @@ describe('Context Pre-fetch', () => {
   });
 
   describe('formatBriefing', () => {
-    const nullExtras = { lint: null, libraryComponents: null, componentAnalysis: null };
+    const nullExtras = { lint: null, libraryComponents: null, componentAnalysis: null, judgeEvidence: null };
 
     it('formats full context into briefing string', () => {
       const context: PrefetchedContext = {
@@ -224,6 +225,118 @@ describe('Context Pre-fetch', () => {
       const tools = makeMockTools();
       const result = await prefetchForMicroJudges(tools as any, screenshotNeeds);
       expect(result.targetNodeId).toBeNull();
+    });
+  });
+
+  // Judge evidence extraction — runs a JS payload inside the Figma plugin via
+  // the connector's `executeCodeViaUI`. This exercises the wiring between
+  // `prefetchForMicroJudges`, `buildEvidenceCode`, and `computeJudgeEvidence`.
+  describe('prefetchForMicroJudges — judgeEvidence extraction', () => {
+    const evidenceNeeds = new Set<PrefetchDataKey>(['judgeEvidence']);
+
+    // Use shared fixture — 3 misaligned squares from evidence-fixtures.ts
+    const threeMisalignedSquaresRaw = threeMisalignedSquaresFixture;
+
+    function makeMockConnector(executeImpl?: (...args: any[]) => any): any {
+      return {
+        executeCodeViaUI: executeImpl ? vi.fn(executeImpl) : vi.fn().mockResolvedValue([]),
+        fileKey: 'test-file',
+      };
+    }
+
+    it('calls connector.executeCodeViaUI with the generated code when judgeEvidence is needed', async () => {
+      const tools = makeMockTools();
+      const connector = makeMockConnector(() => Promise.resolve(threeMisalignedSquaresRaw));
+      const result = await prefetchForMicroJudges(
+        tools as any,
+        evidenceNeeds,
+        undefined,
+        'test-file',
+        '1:1',
+        connector,
+      );
+      expect(connector.executeCodeViaUI).toHaveBeenCalledTimes(1);
+      const [code, timeout] = (connector.executeCodeViaUI as any).mock.calls[0];
+      // JSON.stringify wraps the ID in double quotes
+      expect(code).toContain('"1:1"');
+      expect(code).toContain('figma.getNodeById');
+      expect(timeout).toBe(20_000);
+      expect(result.judgeEvidence?.alignment.verdict).toBe('misaligned');
+      expect(result.judgeEvidence?.targetNodeId).toBe('1:1');
+    });
+
+    it('skips evidence extraction when targetNodeId is absent', async () => {
+      const tools = makeMockTools();
+      const connector = makeMockConnector();
+      const result = await prefetchForMicroJudges(
+        tools as any,
+        evidenceNeeds,
+        undefined,
+        'test-file',
+        undefined,
+        connector,
+      );
+      expect(connector.executeCodeViaUI).not.toHaveBeenCalled();
+      expect(result.judgeEvidence).toBeNull();
+    });
+
+    it('skips evidence extraction when connector is omitted (back-compat)', async () => {
+      const tools = makeMockTools();
+      const result = await prefetchForMicroJudges(tools as any, evidenceNeeds, undefined, 'test-file', '1:1');
+      expect(result.judgeEvidence).toBeNull();
+    });
+
+    it('resolves judgeEvidence=null when executeCodeViaUI rejects (does not throw)', async () => {
+      const tools = makeMockTools();
+      const connector = makeMockConnector(() => Promise.reject(new Error('plugin timeout')));
+      const result = await prefetchForMicroJudges(
+        tools as any,
+        evidenceNeeds,
+        undefined,
+        'test-file',
+        '1:1',
+        connector,
+      );
+      expect(result.judgeEvidence).toBeNull();
+    });
+
+    it('resolves judgeEvidence=null when the plugin returns a non-array payload', async () => {
+      const tools = makeMockTools();
+      const connector = makeMockConnector(() => Promise.resolve({ error: 'bad' }));
+      const result = await prefetchForMicroJudges(
+        tools as any,
+        evidenceNeeds,
+        undefined,
+        'test-file',
+        '1:1',
+        connector,
+      );
+      expect(result.judgeEvidence).toBeNull();
+    });
+
+    it('does not fetch evidence when neededData lacks judgeEvidence', async () => {
+      const tools = makeMockTools();
+      const connector = makeMockConnector();
+      await prefetchForMicroJudges(
+        tools as any,
+        new Set<PrefetchDataKey>(['fileData']),
+        undefined,
+        'test-file',
+        '1:1',
+        connector,
+      );
+      expect(connector.executeCodeViaUI).not.toHaveBeenCalled();
+    });
+
+    it('applies the 15s withPrefetchTimeout wrapper — never-resolving payload → null', async () => {
+      vi.useFakeTimers();
+      const tools = makeMockTools();
+      const connector = makeMockConnector(() => new Promise(() => {}));
+      const promise = prefetchForMicroJudges(tools as any, evidenceNeeds, undefined, 'test-file', '1:1', connector);
+      await vi.advanceTimersByTimeAsync(16_000);
+      const result = await promise;
+      expect(result.judgeEvidence).toBeNull();
+      vi.useRealTimers();
     });
   });
 });

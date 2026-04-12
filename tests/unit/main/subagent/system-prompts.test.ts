@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { getSystemPrompt } from '../../../../src/main/subagent/system-prompts.js';
-import type { SubagentRole } from '../../../../src/main/subagent/types.js';
+import {
+  getMicroJudgeCriterionPrompt,
+  getMicroJudgeSystemPrompt,
+  getSystemPrompt,
+} from '../../../../src/main/subagent/system-prompts.js';
+import type { MicroJudgeId, SubagentRole } from '../../../../src/main/subagent/types.js';
 
 const ROLES: SubagentRole[] = ['scout', 'analyst', 'auditor', 'judge'];
 
@@ -90,5 +94,49 @@ describe('System Prompts', () => {
         expect(prompt.length).toBeGreaterThan(100);
       });
     }
+  });
+
+  describe('micro-judge prompts — balanced calibration', () => {
+    it('system prompt instructs objective evaluation', () => {
+      const prompt = getMicroJudgeSystemPrompt();
+      expect(prompt).toContain('Evaluate OBJECTIVELY');
+      expect(prompt).toContain('clearly shows a violation');
+    });
+
+    const CRITERIA_WITH_EXPLICIT_CONDITIONS: MicroJudgeId[] = [
+      'alignment',
+      'token_compliance',
+      'completeness',
+      'consistency',
+      'componentization',
+      'visual_hierarchy',
+      'naming',
+    ];
+
+    for (const id of CRITERIA_WITH_EXPLICIT_CONDITIONS) {
+      it(`${id} criterion prompt contains explicit PASS and FAIL conditions`, () => {
+        const prompt = getMicroJudgeCriterionPrompt(id);
+        expect(prompt).toContain('PASS if');
+        expect(prompt).toContain('FAIL');
+      });
+    }
+
+    it('token_compliance criterion explains that missing token system = PASS', () => {
+      const prompt = getMicroJudgeCriterionPrompt('token_compliance' as MicroJudgeId);
+      expect(prompt).toContain('no design system section is provided');
+      expect(prompt).toContain('no variables/tokens defined');
+    });
+
+    it('completeness criterion judges against explicit request, not ideal design', () => {
+      const prompt = getMicroJudgeCriterionPrompt('completeness' as MicroJudgeId);
+      expect(prompt).toContain('EXPLICITLY requested');
+      expect(prompt).not.toContain('absent states');
+    });
+
+    it('componentization criterion dismisses LOW-confidence findings', () => {
+      const prompt = getMicroJudgeCriterionPrompt('componentization' as MicroJudgeId);
+      expect(prompt).toContain('Dismiss LOW-confidence');
+      expect(prompt).toContain('HIGH-confidence');
+    });
   });
 });

@@ -28,6 +28,7 @@ vi.mock('../../../../src/main/subagent/context-prefetch.js', () => ({
     lint: null,
     libraryComponents: null,
     componentAnalysis: null,
+    judgeEvidence: null,
   }),
 }));
 

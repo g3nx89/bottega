@@ -26,11 +26,12 @@ describe('Config Migration', () => {
   });
 
   it('all micro-judge configs have expected default models', () => {
+    const SONNET_JUDGES = new Set(['alignment', 'visual_hierarchy', 'completeness', 'consistency', 'design_quality']);
     for (const id of ALL_MICRO_JUDGE_IDS) {
       const config = DEFAULT_SUBAGENT_SETTINGS.microJudges[id];
       expect(config.model.modelId).toBeDefined();
-      // design_quality uses Sonnet (vision-based), all others use Haiku
-      if (id === 'design_quality') {
+      // Reasoning-heavy judges use Sonnet, pattern-matching judges use Haiku
+      if (SONNET_JUDGES.has(id)) {
         expect(config.model.modelId).toBe('claude-sonnet-4-6');
       } else {
         expect(config.model.modelId).toBe('claude-haiku-4-5');

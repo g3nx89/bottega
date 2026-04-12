@@ -152,7 +152,7 @@ export class WebSocketConnector implements IFigmaConnector {
   }
 
   async getLocalComponents(): Promise<any> {
-    return this.wsServer.sendCommand('GET_LOCAL_COMPONENTS', {}, 300000);
+    return this.wsServer.sendCommand('GET_LOCAL_COMPONENTS', {}, 45000);
   }
 
   async setNodeDescription(nodeId: string, description: string, descriptionMarkdown?: string): Promise<any> {
@@ -288,7 +288,7 @@ export class WebSocketConnector implements IFigmaConnector {
     if (rules) params.rules = rules;
     if (maxDepth !== undefined) params.maxDepth = maxDepth;
     if (maxFindings !== undefined) params.maxFindings = maxFindings;
-    return this.wsServer.sendCommand('LINT_DESIGN', params, 120000);
+    return this.wsServer.sendCommand('LINT_DESIGN', params, 45000);
   }
 
   // ============================================================================

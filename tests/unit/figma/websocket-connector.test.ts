@@ -59,13 +59,13 @@ describe('WebSocketConnector', () => {
     );
   });
 
-  it('lintDesign sends LINT_DESIGN with 120s timeout', async () => {
+  it('lintDesign sends LINT_DESIGN with 45s timeout', async () => {
     await connector.lintDesign('0:1', ['color', 'spacing'], 5, 100);
 
     expect(mockSendCommand).toHaveBeenCalledWith(
       'LINT_DESIGN',
       { nodeId: '0:1', rules: ['color', 'spacing'], maxDepth: 5, maxFindings: 100 },
-      120000,
+      45000,
     );
   });
 
