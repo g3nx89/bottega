@@ -113,7 +113,7 @@ const JUDGE_REGISTRY = new Map<MicroJudgeId, MicroJudgeDefinition>([
       description: 'Duplicate detection, library usage, detached instances',
       defaultModel: 'claude-haiku-4-5',
       defaultThinking: 'low',
-      tiers: new Set<ActivationTier>(['full']),
+      tiers: new Set<ActivationTier>(['full', 'standard']),
       dataNeeds: ['fileData', 'libraryComponents'],
       blocking: false,
     },

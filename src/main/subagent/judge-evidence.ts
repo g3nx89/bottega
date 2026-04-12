@@ -71,6 +71,8 @@ export interface ConsistencyFinding {
   property: 'paddingTop' | 'paddingBottom' | 'paddingLeft' | 'paddingRight' | 'itemSpacing' | 'cornerRadius';
   values: number[];
   nodeIds: string[];
+  /** Node names for each sibling — enables the judge to distinguish different-role siblings. */
+  nodeNames: string[];
 }
 
 export interface ConsistencyAnalysis {
@@ -359,6 +361,7 @@ export function analyzeConsistency(nodes: EvidenceNode[], nodeMap?: Map<string, 
           property: prop,
           values,
           nodeIds: structural.map((s) => s.id),
+          nodeNames: structural.map((s) => s.name),
         });
       }
     }

@@ -11,6 +11,7 @@ import type { SessionSlot } from '../slot-manager.js';
 import type { SubagentSettings } from './config.js';
 import { prefetchForMicroJudges } from './context-prefetch.js';
 import { aggregateVerdicts } from './judge-aggregator.js';
+import type { JudgeEvidence } from './judge-evidence.js';
 import { getActiveJudges, getDataNeedsForJudges } from './judge-registry.js';
 import { computeDowngradedJudges } from './judge-severity.js';
 import { runMicroJudgeBatch } from './orchestrator.js';
@@ -294,11 +295,20 @@ export async function runJudgeHarness(
       // not blockers. This keeps judges honest but makes retry more effective — the
       // agent focuses on ONE major issue instead of three issues at once.
       const downgraded = computeDowngradedJudges(currentJudgeIds, prefetchedData.judgeEvidence);
+      if (downgraded.size > 0) {
+        log.info(
+          { slotId: slot.id, attempt, downgradedJudges: [...downgraded] },
+          'Severity downgrade: minor findings become suggestions',
+        );
+      }
       lastVerdict = aggregateVerdicts(allVerdicts, activeJudgeIds, downgraded);
       callbacks.onVerdict(lastVerdict, attempt, maxAttempts);
 
       if (lastVerdict.verdict === 'PASS') {
-        log.info({ slotId: slot.id, attempt, tier }, 'Judge PASS');
+        log.info(
+          { slotId: slot.id, attempt, tier, downgradedCriteria: downgraded.size > 0 ? [...downgraded] : undefined },
+          'Judge PASS',
+        );
         break;
       }
 
@@ -327,6 +337,7 @@ export async function runJudgeHarness(
           tier,
           failCount: currentFailCount,
           failedCriteria: lastVerdict.criteria.filter((c) => !c.pass).map((c) => c.name),
+          downgradedCriteria: downgraded.size > 0 ? [...downgraded] : undefined,
         },
         'Judge FAIL',
       );
@@ -355,12 +366,12 @@ export async function runJudgeHarness(
         const failedJudgeIds = allVerdicts.filter((v) => v.status === 'evaluated' && !v.pass).map((v) => v.judgeId);
         currentJudgeIds = failedJudgeIds.length > 0 ? failedJudgeIds : currentJudgeIds;
 
-        // Build enriched retry prompt with node IDs, tool hints, and progressive context
-        const retryPrompt = buildRetryPrompt(allVerdicts, {
-          attempt: attempt + 1,
-          maxAttempts,
-          previousSummary: lastVerdict?.summary,
-        });
+        // Build enriched retry prompt with node IDs, tool hints, evidence values, and progressive context
+        const retryPrompt = buildRetryPrompt(
+          allVerdicts,
+          { attempt: attempt + 1, maxAttempts, previousSummary: lastVerdict?.summary },
+          prefetchedData.judgeEvidence,
+        );
 
         try {
           await slot.session.prompt(retryPrompt);
@@ -388,7 +399,8 @@ const CRITERION_TOOL_HINTS: Record<string, string> = {
   token_compliance: 'Use figma_bind_variable(nodeId, variableName, property) to bind tokens.',
   visual_hierarchy: 'Use figma_set_text_style to adjust font size/weight for hierarchy.',
   completeness: 'Use figma_create_child or figma_render_jsx to add missing elements.',
-  consistency: 'Use figma_batch_set_fills or figma_batch_transform for uniform styling.',
+  consistency:
+    'Use figma_execute to set paddingTop/Bottom/Left/Right and itemSpacing to uniform values across sibling nodes. Use figma_set_corner_radius for uniform radii. Check the evidence values to determine the correct target value.',
   naming:
     'Use figma_batch_rename(entries: [{nodeId, newName}]) to rename all default-named nodes in one call. Also use figma_auto_layout on frames with 2+ children that lack layoutMode.',
   componentization: 'Use figma_create_component to convert frames to reusable components.',
@@ -417,8 +429,16 @@ export interface RetryContext {
   previousSummary?: string;
 }
 
-/** Build enriched retry prompt with node IDs and tool suggestions from judge evidence. */
-export function buildRetryPrompt(allVerdicts: MicroVerdict[], retry?: RetryContext): string {
+/**
+ * Build enriched retry prompt with node IDs, tool suggestions, and numeric evidence.
+ * @param evidence Optional pre-computed evidence — when provided, numeric facts are
+ *   appended for evidence-backed criteria so the agent knows the exact values to target.
+ */
+export function buildRetryPrompt(
+  allVerdicts: MicroVerdict[],
+  retry?: RetryContext,
+  evidence?: JudgeEvidence | null,
+): string {
   // Separate structural from styling issues for priority ordering
   const STRUCTURAL_CRITERIA = new Set(['completeness', 'alignment', 'visual_hierarchy']);
 
@@ -469,9 +489,26 @@ export function buildRetryPrompt(allVerdicts: MicroVerdict[], retry?: RetryConte
   const remainingNote =
     remainingCount > 0 ? `\n(${remainingCount} more items will be addressed in later iterations)` : '';
 
+  // Append numeric evidence for the focused criterion so the agent knows exact values.
+  let evidenceNote = '';
+  if (evidence && focusCriterion) {
+    const slice = evidence[focusCriterion as keyof JudgeEvidence];
+    if (slice && typeof slice === 'object' && 'findings' in (slice as any)) {
+      const findings = (slice as any).findings;
+      if (Array.isArray(findings) && findings.length > 0) {
+        const summaryLines = findings.slice(0, 3).map((f: any) => {
+          const names = f.nodeNames ? ` (${f.nodeNames.join(', ')})` : '';
+          const vals = Array.isArray(f.values) ? f.values.join(', ') : '';
+          return `  ${f.property ?? f.axis ?? 'offset'}: [${vals}]${names}`;
+        });
+        evidenceNote = `\n\nEvidence (exact values from Figma):\n${summaryLines.join('\n')}`;
+      }
+    }
+  }
+
   const itemsText = focusedItems.map((item, i) => `${i + 1}. ${item}`).join('\n\n');
   const toolWord = focusedItems.length === 1 ? 'the suggested tool' : 'the suggested tools';
-  return `${JUDGE_RETRY_MARKER}${attemptInfo}${previousInfo}\nFirst take a screenshot to see the current state, then fix ${focusedItems.length === 1 ? 'this issue' : 'these issues'} using ${toolWord}:\n\n${itemsText}${remainingNote}\n\nAfter all fixes, take ONE final screenshot to verify.`;
+  return `${JUDGE_RETRY_MARKER}${attemptInfo}${previousInfo}\nFirst take a screenshot to see the current state, then fix ${focusedItems.length === 1 ? 'this issue' : 'these issues'} using ${toolWord}:\n\n${itemsText}${evidenceNote}${remainingNote}\n\nAfter all fixes, take ONE final screenshot to verify.`;
 }
 
 /**
