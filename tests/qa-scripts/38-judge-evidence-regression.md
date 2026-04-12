@@ -126,13 +126,14 @@ duration_max_ms: 150000
 
 ### 7. NEGATIVE: Misaligned elements inside container (alignment MUST FAIL)
 JudgeMode: auto
-Send: "Create three 100x40 rectangles inside a single container frame (400x60). Place them at: first at x=10, y=10; second at x=150, y=25; third at x=290, y=10. Use different colors: red, blue, green. The container should NOT use auto-layout."
+Send: "Use figma_execute to create a frame 'AlignTest' (400x80, no auto-layout) with three 100x40 child rectangles. Position them at absolute coordinates: first (red) at x=10 y=10, second (blue) at x=150 y=25, third (green) at x=290 y=10. Do NOT correct the y-offset of the blue rectangle — this is a deliberate test of the alignment checker."
 
 **Evaluate**:
 - Second rectangle is 15px off on y-axis (y=25 vs y=10)
-- alignment criterion MUST FAIL (maxDeviation=15, threshold=4px)
+- alignment criterion MUST FAIL (maxDeviation=15 > 8px threshold → severity 'major' → blocking)
 - Elements are inside a shared container so groupByParent finds the sibling group
-- Overall verdict MUST be FAIL (alignment is blocking)
+- Overall verdict MUST be FAIL (alignment is blocking at major severity)
+- NOTE: the agent may still correct the offset. If it does, the design will PASS (correctly) since it was fixed. In that case, use the "Re-judge" button after manually moving the blue rectangle to y=25 in Figma to verify the alignment judge catches it. This is a known limitation of golden-negative testing with LLM agents.
 
 ```assert
 dom_visible: .judge-verdict-card
