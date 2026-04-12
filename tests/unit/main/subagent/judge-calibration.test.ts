@@ -140,6 +140,42 @@ describe('Judge Calibration — Golden-File Scenarios', () => {
       expect(prompt).toContain('textCount >= 2');
     });
   });
+
+  describe('design_quality: vision-based scoring', () => {
+    it('evaluates 5 visual dimensions from screenshot', () => {
+      const prompt = getFullPrompt('design_quality');
+      expect(prompt).toContain('Intent Match');
+      expect(prompt).toContain('Visual Craft');
+      expect(prompt).toContain('Design Decisions');
+      expect(prompt).toContain('Layout Precision');
+      expect(prompt).toContain('Aesthetic Cohesion');
+    });
+
+    it('PASS threshold is mean >= 5', () => {
+      const prompt = getMicroJudgeCriterionPrompt('design_quality');
+      expect(prompt).toContain('mean >= 5');
+      expect(prompt).toContain('mean < 5');
+    });
+
+    it('scores generously for simple designs', () => {
+      const prompt = getMicroJudgeCriterionPrompt('design_quality');
+      expect(prompt).toContain('simple designs');
+      expect(prompt).toContain('at least 5/10');
+    });
+
+    it('output format includes per-dimension scores', () => {
+      const prompt = getMicroJudgeCriterionPrompt('design_quality');
+      expect(prompt).toContain('mean=');
+      expect(prompt).toContain('intent:');
+      expect(prompt).toContain('craft:');
+    });
+
+    it('defers structural checks to other judges', () => {
+      const prompt = getMicroJudgeCriterionPrompt('design_quality');
+      expect(prompt).toContain('Other judges already check');
+      expect(prompt).toContain('VISUAL qualities only');
+    });
+  });
 });
 
 // ── Model & Thinking Level Configuration ─────────────────────────────

@@ -115,7 +115,7 @@ describe('buildRetryPrompt', () => {
     expect(prompt).toContain('Fix button alignment');
   });
 
-  it('produces numbered list for multiple fails', () => {
+  it('focuses on single highest-priority criterion for multiple criterion fails', () => {
     const verdicts: MicroVerdict[] = [
       makeVerdict({
         judgeId: 'alignment',
@@ -135,10 +135,12 @@ describe('buildRetryPrompt', () => {
 
     const prompt = buildRetryPrompt(verdicts);
 
+    // Single-criterion focus: only alignment (structural, higher priority) is included
     expect(prompt).toContain('1.');
-    expect(prompt).toContain('2.');
     expect(prompt).toContain('[alignment]');
-    expect(prompt).toContain('[naming]');
+    // naming is from a different criterion — deferred
+    expect(prompt).not.toContain('[naming]');
+    expect(prompt).toContain('more items');
   });
 
   it('starts with JUDGE_RETRY_MARKER', () => {
@@ -196,7 +198,7 @@ describe('buildRetryPrompt', () => {
     expect(prompt).toContain('FAIL: 1/3 criteria failed');
   });
 
-  it('orders structural issues before styling issues', () => {
+  it('prioritizes structural criterion over styling criterion', () => {
     const verdicts: MicroVerdict[] = [
       makeVerdict({
         judgeId: 'naming',
@@ -216,10 +218,11 @@ describe('buildRetryPrompt', () => {
 
     const prompt = buildRetryPrompt(verdicts);
 
-    // completeness (structural) should appear before naming (styling)
-    const completenessIdx = prompt.indexOf('[completeness]');
-    const namingIdx = prompt.indexOf('[naming]');
-    expect(completenessIdx).toBeLessThan(namingIdx);
+    // Single-criterion focus: completeness (structural) is the focused criterion
+    expect(prompt).toContain('[completeness]');
+    // naming (styling) is deferred since a structural criterion exists
+    expect(prompt).not.toContain('[naming]');
+    expect(prompt).toContain('more items');
   });
 
   it('skips non-evaluated verdicts (timeout/error)', () => {

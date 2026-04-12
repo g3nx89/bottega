@@ -221,8 +221,9 @@ describe('Judge evidence pipeline — end-to-end', () => {
     expect(vhPrompt!.userPrompt).toContain('"verdict": "flat"');
     const vhCriterion = verdict?.criteria.find((c) => c.name === 'visual_hierarchy');
     expect(vhCriterion?.pass).toBe(false);
-    // visual_hierarchy is blocking → overall FAIL
-    expect(verdict?.verdict).toBe('FAIL');
+    // visual_hierarchy with textCount=3 is minor severity → downgraded from blocking
+    // → appears as suggestion, overall PASS (with suggestions)
+    expect(verdict?.verdict).toBe('PASS');
   });
 
   it('consistency: 3 cards with padding=[16,24,16] → judge sees "inconsistent" paddingTop finding', async () => {

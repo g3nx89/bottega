@@ -228,6 +228,127 @@ describe('Context Pre-fetch', () => {
     });
   });
 
+  // ── Data needs routing — verifies that only the tools matching the requested
+  // PrefetchDataKey set are invoked, and no unneeded WS roundtrips occur.
+  describe('prefetchForMicroJudges — data needs routing', () => {
+    function makeMockToolsNamed() {
+      const results: Record<string, any> = {
+        figma_screenshot: { content: [{ type: 'image', data: 'png-data' }] },
+        figma_get_file_data: { content: [{ type: 'text', text: '{"pages":[]}' }] },
+        figma_design_system: { content: [{ type: 'text', text: '{"tokens":[]}' }] },
+        figma_lint: { content: [{ type: 'text', text: '{"violations":[]}' }] },
+        figma_get_library_components: {
+          content: [{ type: 'text', text: '{"components":[],"componentSets":[]}' }],
+        },
+      };
+      return Object.entries(results).map(([name, result]) => ({
+        name,
+        execute: vi.fn().mockResolvedValue(result),
+      }));
+    }
+
+    it('fetches only fileData when that is the sole need', async () => {
+      const tools = makeMockToolsNamed();
+      await prefetchForMicroJudges(tools as any, new Set<PrefetchDataKey>(['fileData']));
+
+      expect(tools.find((t) => t.name === 'figma_get_file_data')!.execute).toHaveBeenCalledTimes(1);
+      expect(tools.find((t) => t.name === 'figma_screenshot')!.execute).not.toHaveBeenCalled();
+      expect(tools.find((t) => t.name === 'figma_lint')!.execute).not.toHaveBeenCalled();
+      expect(tools.find((t) => t.name === 'figma_design_system')!.execute).not.toHaveBeenCalled();
+      expect(tools.find((t) => t.name === 'figma_get_library_components')!.execute).not.toHaveBeenCalled();
+    });
+
+    it('fetches lint + designSystem together when both are needed', async () => {
+      const tools = makeMockToolsNamed();
+      await prefetchForMicroJudges(tools as any, new Set<PrefetchDataKey>(['lint', 'designSystem']));
+
+      expect(tools.find((t) => t.name === 'figma_lint')!.execute).toHaveBeenCalledTimes(1);
+      expect(tools.find((t) => t.name === 'figma_design_system')!.execute).toHaveBeenCalledTimes(1);
+      expect(tools.find((t) => t.name === 'figma_screenshot')!.execute).not.toHaveBeenCalled();
+      expect(tools.find((t) => t.name === 'figma_get_file_data')!.execute).not.toHaveBeenCalled();
+    });
+
+    it('skips libraryComponents when fileKey is not provided', async () => {
+      const tools = makeMockToolsNamed();
+      await prefetchForMicroJudges(
+        tools as any,
+        new Set<PrefetchDataKey>(['libraryComponents']),
+        undefined,
+        undefined, // no fileKey
+      );
+
+      expect(tools.find((t) => t.name === 'figma_get_library_components')!.execute).not.toHaveBeenCalled();
+    });
+
+    it('fetches libraryComponents when fileKey is provided', async () => {
+      const tools = makeMockToolsNamed();
+      await prefetchForMicroJudges(tools as any, new Set<PrefetchDataKey>(['libraryComponents']), undefined, 'abc123');
+
+      expect(tools.find((t) => t.name === 'figma_get_library_components')!.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('populates componentAnalysis when both fileData and libraryComponents are fetched', async () => {
+      const tools = makeMockToolsNamed();
+      // Override fileData with a minimal valid page structure
+      const fileDataTool = tools.find((t) => t.name === 'figma_get_file_data')!;
+      fileDataTool.execute = vi.fn().mockResolvedValue({
+        content: [{ type: 'text', text: JSON.stringify({ pages: [{ name: 'Page', children: [] }] }) }],
+      });
+      // Override libraryComponents with a named component
+      const libTool = tools.find((t) => t.name === 'figma_get_library_components')!;
+      libTool.execute = vi.fn().mockResolvedValue({
+        content: [{ type: 'text', text: JSON.stringify({ components: [{ name: 'Button' }] }) }],
+      });
+
+      const result = await prefetchForMicroJudges(
+        tools as any,
+        new Set<PrefetchDataKey>(['fileData', 'libraryComponents']),
+        undefined,
+        'abc123',
+      );
+
+      expect(result.fileData).not.toBeNull();
+      expect(result.libraryComponents).not.toBeNull();
+      // componentAnalysis is a post-processing step — should be populated (even if empty stats)
+      expect(result.componentAnalysis).not.toBeNull();
+      expect(result.componentAnalysis).toHaveProperty('stats');
+    });
+
+    it('returns null componentAnalysis when libraryComponents is missing', async () => {
+      const tools = makeMockToolsNamed();
+      const result = await prefetchForMicroJudges(tools as any, new Set<PrefetchDataKey>(['fileData']));
+
+      expect(result.fileData).not.toBeNull();
+      expect(result.componentAnalysis).toBeNull();
+    });
+
+    it('returns all null fields for an empty needs set', async () => {
+      const tools = makeMockToolsNamed();
+      const result = await prefetchForMicroJudges(tools as any, new Set<PrefetchDataKey>());
+
+      expect(result.screenshot).toBeNull();
+      expect(result.fileData).toBeNull();
+      expect(result.designSystem).toBeNull();
+      expect(result.lint).toBeNull();
+      expect(result.libraryComponents).toBeNull();
+      expect(result.componentAnalysis).toBeNull();
+      expect(result.judgeEvidence).toBeNull();
+      for (const tool of tools) {
+        expect(tool.execute).not.toHaveBeenCalled();
+      }
+    });
+
+    it('rethrows AbortError from within prefetchForMicroJudges', async () => {
+      const tools = makeMockToolsNamed();
+      const abortError = Object.assign(new Error('Aborted'), { name: 'AbortError' });
+      tools.find((t) => t.name === 'figma_get_file_data')!.execute = vi.fn().mockRejectedValue(abortError);
+
+      await expect(prefetchForMicroJudges(tools as any, new Set<PrefetchDataKey>(['fileData']))).rejects.toThrow(
+        'Aborted',
+      );
+    });
+  });
+
   // Judge evidence extraction — runs a JS payload inside the Figma plugin via
   // the connector's `executeCodeViaUI`. This exercises the wiring between
   // `prefetchForMicroJudges`, `buildEvidenceCode`, and `computeJudgeEvidence`.

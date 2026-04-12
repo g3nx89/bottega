@@ -51,11 +51,11 @@ test('subagent settings section is visible with default values', async () => {
   expect(microJudgeList).not.toBeNull();
 });
 
-test('micro-judge list shows 7 judges', async () => {
+test('micro-judge list shows 8 judges', async () => {
   await ensureSettings(true);
 
   const rows = await window.$$('.micro-judge-row');
-  expect(rows.length).toBe(7);
+  expect(rows.length).toBe(8);
 });
 
 test('micro-judge rows have enable checkbox, label, and model select', async () => {

@@ -306,4 +306,71 @@ describe('aggregateVerdicts', () => {
     expect(result.summary).toContain('suggestion');
     expect(result.summary).toContain('design_quality');
   });
+
+  // ── Severity-based downgrade (downgradedFromBlocking) ──────────────
+
+  it('downgrades blocking criterion to suggestion when in downgraded set', () => {
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({ judgeId: 'alignment', pass: false, finding: '6px offset', actionItems: ['Fix it'] }),
+      makeVerdict({ judgeId: 'completeness' }),
+      makeVerdict({ judgeId: 'naming' }),
+    ];
+
+    // alignment is normally blocking, but downgraded to non-blocking (minor severity)
+    const downgraded = new Set<MicroJudgeId>(['alignment']);
+    const result = aggregateVerdicts(verdicts, ['alignment', 'completeness', 'naming'], downgraded);
+
+    // alignment FAIL is NOT blocking → 2/3 pass → PASS with suggestions
+    expect(result.verdict).toBe('PASS');
+    expect(result.summary).toContain('suggestion');
+    expect(result.summary).toContain('alignment');
+  });
+
+  it('still FAILs on blocking criterion NOT in downgraded set', () => {
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({ judgeId: 'alignment', pass: false, finding: '15px offset', actionItems: ['Fix it'] }),
+      makeVerdict({ judgeId: 'consistency', pass: false, finding: '2px padding', actionItems: ['Standardize'] }),
+      makeVerdict({ judgeId: 'completeness' }),
+    ];
+
+    // consistency is downgraded (minor), but alignment is NOT (major)
+    const downgraded = new Set<MicroJudgeId>(['consistency']);
+    const result = aggregateVerdicts(verdicts, ['alignment', 'consistency', 'completeness'], downgraded);
+
+    // alignment (NOT downgraded) still blocks → FAIL
+    expect(result.verdict).toBe('FAIL');
+  });
+
+  it('works without downgraded set (backwards compatible)', () => {
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({ judgeId: 'alignment', pass: false, finding: 'Bad', actionItems: ['Fix'] }),
+      makeVerdict({ judgeId: 'naming' }),
+    ];
+
+    // No downgraded set → behaves exactly as before
+    const result = aggregateVerdicts(verdicts, ['alignment', 'naming']);
+    expect(result.verdict).toBe('FAIL');
+  });
+
+  it('multiple minor-severity blocking criteria → PASS with suggestions', () => {
+    const verdicts: MicroVerdict[] = [
+      makeVerdict({ judgeId: 'alignment', pass: false, finding: '5px offset', actionItems: ['Fix align'] }),
+      makeVerdict({ judgeId: 'consistency', pass: false, finding: '3px padding', actionItems: ['Fix padding'] }),
+      makeVerdict({ judgeId: 'visual_hierarchy', pass: false, finding: 'Flat', actionItems: ['Add hierarchy'] }),
+      makeVerdict({ judgeId: 'completeness' }),
+      makeVerdict({ judgeId: 'naming' }),
+    ];
+
+    // All three blocking criteria downgraded → none blocks
+    const downgraded = new Set<MicroJudgeId>(['alignment', 'consistency', 'visual_hierarchy']);
+    const result = aggregateVerdicts(
+      verdicts,
+      ['alignment', 'consistency', 'visual_hierarchy', 'completeness', 'naming'],
+      downgraded,
+    );
+
+    // 3 non-blocking fails out of 5 → passCount=2 < threshold=3 → still FAIL via majority
+    expect(result.verdict).toBe('FAIL');
+    expect(result.summary).toContain('FAIL');
+  });
 });

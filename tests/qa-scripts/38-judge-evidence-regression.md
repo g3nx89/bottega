@@ -6,7 +6,7 @@ requires_figma: true
 
 # 38 — Judge Evidence Pipeline Regression
 
-**Goal**: Verify the judge evidence pipeline correctly FAILs on designs with real defects AND correctly PASSes on good designs. Tests both false positives AND false negatives to catch regressions in evidence extraction, analysis, blocking criteria, and subtree separation.
+**Goal**: Verify the judge evidence pipeline correctly FAILs on designs with real defects (major severity), flags minor issues as suggestions (minor severity), AND correctly PASSes on good designs. Tests false positives, false negatives, severity classification, and subtree separation.
 
 **Prerequisite**: Clean page, judge auto-enabled, session reset.
 
@@ -47,19 +47,22 @@ duration_max_ms: 120000
 
 ---
 
-### 3. NEGATIVE: Flat typography (visual_hierarchy MUST FAIL)
+### 3. SUGGESTION: Flat typography (visual_hierarchy flagged, not blocking)
 JudgeMode: auto
 Send: "Create a simple notification card with a title, a description paragraph, and a timestamp. Use 14px regular weight for ALL text elements. Make the card 300px wide with 16px padding. Do NOT use different font sizes - keep everything at 14px Regular."
 
 **Evaluate**:
 - Agent creates the card with uniform 14px text
 - Evidence: TypographyAnalysis.verdict=flat, allSameStyle=true, textCount=3
-- visual_hierarchy criterion MUST FAIL
-- Overall verdict MUST be FAIL (visual_hierarchy is blocking)
-- Action items should suggest fontSize/fontStyle changes with specific nodeIds
+- visual_hierarchy criterion MUST FAIL (judge correctly detects flat typography)
+- Overall verdict is PASS-with-suggestions (NOT FAIL) because textCount=3 → severity 'minor' → downgraded from blocking
+- The issue IS visible in the UI as a ✗ suggestion — it is NOT hidden
+- No retry triggered (minor severity does not block)
+- Rationale: textCount < 4 is a borderline case for simple components. The judge still flags it, but the agent is not forced to retry on what may be an intentional design choice.
 
 ```assert
 dom_visible: .judge-verdict-card
+judge_verdict: PASS
 judge_criterion_fail: visual_hierarchy
 duration_max_ms: 120000
 ```
@@ -83,15 +86,17 @@ duration_max_ms: 120000
 
 ---
 
-### 5. NEGATIVE: Inconsistent styling (consistency MUST FAIL)
+### 5. NEGATIVE: Inconsistent styling (consistency MUST FAIL → retry → PASS)
 JudgeMode: auto
 Send: "Create a row of three pricing cards. First card: 16px padding, 8px corner radius. Second card: 24px padding, 12px corner radius. Third card: 16px padding, 8px corner radius. Each card should have a title and price. Do NOT make them consistent - use the exact values I specified for each card."
 
 **Evaluate**:
 - Cards 1 and 3 match, card 2 differs (padding 24 vs 16, radius 12 vs 8)
-- consistency criterion MUST FAIL (now active in standard tier)
+- consistency criterion MUST FAIL on attempt 1 (deviation 8px > 4px threshold → severity 'major' → blocking)
 - Evidence: ConsistencyAnalysis.verdict=inconsistent, findings include paddingTop and cornerRadius
-- Overall verdict MUST be FAIL (consistency is blocking)
+- Retry prompt focuses on the single consistency criterion (single-criterion retry)
+- After retry, agent should correct the inconsistency → attempt 2 PASS
+- Final verdict should be PASS (agent fixed the real issue)
 
 ```assert
 dom_visible: .judge-verdict-card
@@ -158,13 +163,21 @@ duration_max_ms: 120000
 ## Overall Assessment
 
 **Evaluate**:
-- Count PASS vs FAIL verdicts across 7 judged steps (step 1 is cleanup)
-- Expected: 4 PASS (steps 2, 4, 6, 8), 3 FAIL (steps 3, 5, 7)
-- Each FAIL must fire the CORRECT blocking criterion:
-  - Step 3: visual_hierarchy FAIL (flat typography)
-  - Step 5: consistency FAIL (inconsistent padding/radius)
-  - Step 7: alignment FAIL (15px y-offset)
-- Each PASS must have 0 failed blocking criteria
-- Step 4 PASS is critical: validates subtree separation (flat card on same page must not contaminate hero analysis)
-- If ALL 7 PASS: evidence pipeline regression (judges not receiving evidence)
-- If PASS steps FAIL: false positive regression (blocking criteria too aggressive or cross-design contamination)
+- Count final verdicts across 7 judged steps (step 1 is cleanup)
+- Expected outcomes (with severity system):
+  - Step 2: PASS (clean hierarchy)
+  - Step 3: PASS-with-suggestion (visual_hierarchy detected but minor severity, textCount=3)
+  - Step 4: PASS (subtree separation — flat card must NOT contaminate hero)
+  - Step 5: FAIL → retry → PASS (consistency major deviation 8px, agent corrects on retry)
+  - Step 6: PASS (consistent cards, no false positives)
+  - Step 7: FAIL (alignment major deviation 15px) — NOTE: agent may self-correct the misalignment
+  - Step 8: PASS (minimal button, no false positives)
+- Severity system validation:
+  - Step 3 proves minor severity works: issue is DETECTED (✗ visible) but does NOT block
+  - Step 5 proves major severity works: issue BLOCKS, triggers focused retry, agent corrects it
+  - If step 3 becomes FAIL: severity threshold regression (minor not applied)
+  - If step 5 becomes PASS without retry: evidence pipeline regression (consistency not detecting 8px deviation)
+- False positive checks:
+  - Steps 2, 4, 6, 8 MUST pass with 0 failed blocking criteria
+  - Step 4 is critical: validates subtree separation (flat card on same page must not contaminate hero analysis)
+  - If PASS steps have blocking FAILs: false positive regression

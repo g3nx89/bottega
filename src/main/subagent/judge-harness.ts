@@ -12,6 +12,7 @@ import type { SubagentSettings } from './config.js';
 import { prefetchForMicroJudges } from './context-prefetch.js';
 import { aggregateVerdicts } from './judge-aggregator.js';
 import { getActiveJudges, getDataNeedsForJudges } from './judge-registry.js';
+import { computeDowngradedJudges } from './judge-severity.js';
 import { runMicroJudgeBatch } from './orchestrator.js';
 import { createReadOnlyTools } from './read-only-tools.js';
 import type {
@@ -29,9 +30,6 @@ const DEFAULT_JUDGE_TIMEOUT_MS = 600_000;
 
 /** Max action items included in retry task context to prevent prompt bloat. */
 const MAX_TASK_CONTEXT_ITEMS = 5;
-
-/** Max action items per retry prompt — focused retries converge faster. */
-const MAX_RETRY_ITEMS = 3;
 
 /** Stop iterating after this many consecutive attempts with no improvement. */
 const MAX_CONSECUTIVE_NO_IMPROVEMENT = 2;
@@ -292,7 +290,11 @@ export async function runJudgeHarness(
       }
 
       previousMicroVerdicts = allVerdicts;
-      lastVerdict = aggregateVerdicts(allVerdicts, activeJudgeIds);
+      // Compute severity-based downgrade: minor evidence findings become suggestions,
+      // not blockers. This keeps judges honest but makes retry more effective — the
+      // agent focuses on ONE major issue instead of three issues at once.
+      const downgraded = computeDowngradedJudges(currentJudgeIds, prefetchedData.judgeEvidence);
+      lastVerdict = aggregateVerdicts(allVerdicts, activeJudgeIds, downgraded);
       callbacks.onVerdict(lastVerdict, attempt, maxAttempts);
 
       if (lastVerdict.verdict === 'PASS') {
@@ -419,8 +421,10 @@ export interface RetryContext {
 export function buildRetryPrompt(allVerdicts: MicroVerdict[], retry?: RetryContext): string {
   // Separate structural from styling issues for priority ordering
   const STRUCTURAL_CRITERIA = new Set(['completeness', 'alignment', 'visual_hierarchy']);
-  const structuralItems: string[] = [];
-  const stylingItems: string[] = [];
+
+  // Group items by criterion, preserving structural-first priority order.
+  const criterionOrder: MicroJudgeId[] = [];
+  const itemsByCriterion = new Map<MicroJudgeId, string[]>();
 
   for (const mv of allVerdicts) {
     if (mv.status !== 'evaluated' || mv.pass) continue;
@@ -429,21 +433,31 @@ export function buildRetryPrompt(allVerdicts: MicroVerdict[], retry?: RetryConte
     const nodeHint = nodeIds.length > 0 ? ` Affected nodes: ${nodeIds.join(', ')}.` : '';
     const toolHint = CRITERION_TOOL_HINTS[mv.judgeId] || '';
 
+    const items: string[] = [];
     for (const item of mv.actionItems) {
-      const line = `[${mv.judgeId}] ${item}${nodeHint}\n   → ${toolHint}`;
-      if (STRUCTURAL_CRITERIA.has(mv.judgeId)) {
-        structuralItems.push(line);
-      } else {
-        stylingItems.push(line);
-      }
+      items.push(`[${mv.judgeId}] ${item}${nodeHint}\n   → ${toolHint}`);
+    }
+    if (items.length > 0) {
+      itemsByCriterion.set(mv.judgeId, items);
+      criterionOrder.push(mv.judgeId);
     }
   }
 
-  // Focus each retry on at most MAX_RETRY_ITEMS — smaller scope converges faster
-  const allItems = [...structuralItems, ...stylingItems].slice(0, MAX_RETRY_ITEMS);
-  const remainingCount = structuralItems.length + stylingItems.length - allItems.length;
+  // Sort: structural criteria first, then styling
+  criterionOrder.sort((a, b) => {
+    const aStruct = STRUCTURAL_CRITERIA.has(a) ? 0 : 1;
+    const bStruct = STRUCTURAL_CRITERIA.has(b) ? 0 : 1;
+    return aStruct - bStruct;
+  });
 
-  if (allItems.length === 0) {
+  // Focus retry on the SINGLE highest-priority CRITERION (all its items).
+  // Asking the agent to fix multiple criteria at once reduces convergence rate.
+  const focusCriterion = criterionOrder[0];
+  const focusedItems = focusCriterion ? (itemsByCriterion.get(focusCriterion) ?? []) : [];
+  const totalItems = [...itemsByCriterion.values()].reduce((sum, items) => sum + items.length, 0);
+  const remainingCount = totalItems - focusedItems.length;
+
+  if (focusedItems.length === 0) {
     return `${JUDGE_RETRY_MARKER}\nThe quality judge found minor issues but no specific action items. Take a screenshot to verify current state.`;
   }
 
@@ -453,9 +467,11 @@ export function buildRetryPrompt(allVerdicts: MicroVerdict[], retry?: RetryConte
     : '';
 
   const remainingNote =
-    remainingCount > 0 ? `\n(${remainingCount} more items will be addressed in the next iteration)` : '';
+    remainingCount > 0 ? `\n(${remainingCount} more items will be addressed in later iterations)` : '';
 
-  return `${JUDGE_RETRY_MARKER}${attemptInfo}${previousInfo}\nFirst take a screenshot to see the current state, then fix these issues using the suggested tools:\n\n${allItems.map((item, i) => `${i + 1}. ${item}`).join('\n\n')}${remainingNote}\n\nAfter all fixes, take ONE final screenshot to verify.`;
+  const itemsText = focusedItems.map((item, i) => `${i + 1}. ${item}`).join('\n\n');
+  const toolWord = focusedItems.length === 1 ? 'the suggested tool' : 'the suggested tools';
+  return `${JUDGE_RETRY_MARKER}${attemptInfo}${previousInfo}\nFirst take a screenshot to see the current state, then fix ${focusedItems.length === 1 ? 'this issue' : 'these issues'} using ${toolWord}:\n\n${itemsText}${remainingNote}\n\nAfter all fixes, take ONE final screenshot to verify.`;
 }
 
 /**
