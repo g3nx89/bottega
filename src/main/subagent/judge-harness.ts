@@ -104,12 +104,23 @@ const NAMING_ONLY_TOOLS = new Set(['figma_rename']);
 export function determineTier(turnToolNames: string[]): ActivationTier {
   let structuralCount = 0;
   let hasVisual = false;
+  let executeCount = 0;
 
   for (const t of turnToolNames) {
     const cat = categorizeToolName(t);
-    if (cat === 'execute' || STRUCTURAL_TOOLS.has(t)) structuralCount++;
-    else if (NAMING_ONLY_TOOLS.has(t)) continue;
-    else if (cat === 'mutation' || cat === 'ds') hasVisual = true;
+    if (STRUCTURAL_TOOLS.has(t)) {
+      structuralCount++;
+    } else if (cat === 'execute') {
+      // figma_execute is used for both structural (create) and non-structural (modify)
+      // operations. Count only the first one as structural — subsequent calls are
+      // typically property modifications (padding, fills, corner radius) which don't
+      // indicate design complexity. This prevents tier inflation from modify-heavy turns.
+      executeCount++;
+      if (executeCount <= 1) structuralCount++;
+    } else if (NAMING_ONLY_TOOLS.has(t)) {
+    } else if (cat === 'mutation' || cat === 'ds') {
+      hasVisual = true;
+    }
   }
 
   // Complexity-based: standard for any creation, full for complex multi-element designs
@@ -219,7 +230,26 @@ export async function runJudgeHarness(
       // turn touched multiple nodes we still scope to the first one — the judge
       // prompts explicitly mention this limitation so findings are always framed
       // relative to the target node.
-      const targetNodeId = turnMutatedNodeIds[0];
+      let targetNodeId = turnMutatedNodeIds[0];
+
+      // Fallback: when turnMutatedNodeIds is empty (e.g., figma_execute without
+      // getNodeByIdAsync in code), try to get the current Figma selection. Without
+      // a targetNodeId the evidence pipeline is disabled and the severity system
+      // cannot function — all criteria stay blocking, causing false FAIL verdicts.
+      if (!targetNodeId && dataNeeds.has('judgeEvidence')) {
+        try {
+          const selectionId = await connector.executeCodeViaUI(
+            'return figma.currentPage.selection[0]?.id ?? null',
+            5_000,
+          );
+          if (typeof selectionId === 'string' && selectionId.includes(':')) {
+            targetNodeId = selectionId;
+            log.info({ slotId: slot.id, targetNodeId }, 'Fallback targetNodeId from Figma selection');
+          }
+        } catch {
+          // Best-effort — if selection lookup fails, proceed without evidence
+        }
+      }
       let prefetchedData: PrefetchedContext;
       try {
         prefetchedData = await prefetchForMicroJudges(
