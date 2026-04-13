@@ -326,6 +326,35 @@ export async function runMicroJudgeBatch(
       return makeSkipVerdict(judgeId, 'timeout', 'Aborted', start);
     }
 
+    // ── Evidence fast-paths ────────────────────────────────────────────
+    // When deterministic evidence already provides a conclusive answer,
+    // skip the LLM call entirely. This saves ~8-12s per judge without
+    // losing quality — the evidence IS the answer in these cases.
+
+    // Componentization: skip LLM when ComponentAnalysis shows zero findings.
+    // The analysis is pre-computed from file data + library components —
+    // if it finds nothing, an LLM cannot find more.
+    if (judgeId === 'componentization' && prefetchedData.componentAnalysis) {
+      const ca = prefetchedData.componentAnalysis;
+      if (ca.withinScreen.length === 0 && ca.libraryMisses.length === 0 && ca.detachedInstances.length === 0) {
+        const verdict: MicroVerdict = {
+          judgeId,
+          pass: true,
+          finding: `No componentization issues detected; analysis shows zero duplicates, library misses, or detached instances.`,
+          evidence: `ComponentAnalysis: ${ca.stats.totalScreens} screens, ${ca.stats.totalNodes} nodes, ${ca.stats.instanceCount} instances, ratio=${ca.stats.componentizationRatio.toFixed(2)}`,
+          actionItems: [],
+          status: 'evaluated',
+          durationMs: Date.now() - start,
+        };
+        log.info(
+          { subagentId, judgeId, pass: true, durationMs: verdict.durationMs },
+          'Micro-judge completed (evidence fast-path)',
+        );
+        onProgress({ batchId, subagentId, role: 'judge', type: 'completed', summary: 'PASS (fast-path)' });
+        return verdict;
+      }
+    }
+
     // P-003: Per-judge timeout — declared outside try for catch access
     const judgeSignal = AbortSignal.any([signal, AbortSignal.timeout(PER_JUDGE_TIMEOUT_MS)]);
 
@@ -362,10 +391,24 @@ export async function runMicroJudgeBatch(
       const dataSections: string[] = [];
 
       if (prefetchedData.fileData && def.dataNeeds.includes('fileData')) {
-        const targetDirective = prefetchedData.targetNodeId
-          ? `\n**TARGET NODE: ${prefetchedData.targetNodeId}** — This is the node that was just created or modified. Focus your evaluation on this node and its siblings/children. Other nodes in the tree are pre-existing context.`
-          : '';
-        dataSections.push(`## File Data${targetDirective}\n${prefetchedData.fileData.slice(0, 15_000)}`);
+        // Consistency fast-path: when evidence verdict is 'consistent' with no
+        // findings, the file data is redundant — the evidence WAS derived from
+        // the file data and already confirms no deviations. Omitting the ~15K
+        // chars of file data reduces LLM processing from ~12s to ~3s.
+        // NOTE: This optimization is tied to the consistency criterion's scope
+        // (padding, spacing, cornerRadius). If new properties are added to the
+        // criterion prompt, verify they are also covered by the evidence analyzer.
+        const isConsistencyConclusivePass =
+          judgeId === 'consistency' &&
+          prefetchedData.judgeEvidence?.consistency.verdict === 'consistent' &&
+          prefetchedData.judgeEvidence.consistency.findings.length === 0;
+
+        if (!isConsistencyConclusivePass) {
+          const targetDirective = prefetchedData.targetNodeId
+            ? `\n**TARGET NODE: ${prefetchedData.targetNodeId}** — This is the node that was just created or modified. Focus your evaluation on this node and its siblings/children. Other nodes in the tree are pre-existing context.`
+            : '';
+          dataSections.push(`## File Data${targetDirective}\n${prefetchedData.fileData.slice(0, 15_000)}`);
+        }
       }
       // Screenshot is passed as an image attachment via session.prompt({ images }), not as text
       const hasScreenshot = prefetchedData.screenshot && def.dataNeeds.includes('screenshot');

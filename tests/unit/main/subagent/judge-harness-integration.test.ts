@@ -383,4 +383,92 @@ describe('Judge Harness Integration', () => {
     expect(callArgs[4]).toBe('1:2'); // targetNodeId
     expect(callArgs[5]).toBe(connector); // connector threaded through
   });
+
+  // ── Fallback targetNodeId from Figma selection ──────────────────────
+
+  it('falls back to Figma selection when turnMutatedNodeIds is empty', async () => {
+    mockRunMicroBatch.mockResolvedValueOnce(makePassVerdicts());
+
+    const prefetchModule = await import('../../../../src/main/subagent/context-prefetch.js');
+    const prefetchSpy = vi.mocked(prefetchModule.prefetchForMicroJudges);
+    prefetchSpy.mockClear();
+
+    const connector = {
+      fileKey: 'fk',
+      executeCodeViaUI: vi.fn().mockResolvedValue('250:100'),
+    } as any;
+
+    await runJudgeHarness(
+      makeInfra(),
+      connector,
+      makeSlot(),
+      defaultSettings,
+      ['figma_render_jsx'],
+      [], // empty turnMutatedNodeIds — triggers fallback
+      new AbortController().signal,
+      makeCallbacks(),
+    );
+
+    // Should have called executeCodeViaUI for selection fallback
+    expect(connector.executeCodeViaUI).toHaveBeenCalledWith(expect.stringContaining('selection[0]'), 5_000);
+    // Prefetch should receive the fallback targetNodeId
+    expect(prefetchSpy).toHaveBeenCalledTimes(1);
+    expect(prefetchSpy.mock.calls[0]![4]).toBe('250:100');
+  });
+
+  it('proceeds without targetNodeId when Figma selection returns null', async () => {
+    mockRunMicroBatch.mockResolvedValueOnce(makePassVerdicts());
+
+    const prefetchModule = await import('../../../../src/main/subagent/context-prefetch.js');
+    const prefetchSpy = vi.mocked(prefetchModule.prefetchForMicroJudges);
+    prefetchSpy.mockClear();
+
+    const connector = {
+      fileKey: 'fk',
+      executeCodeViaUI: vi.fn().mockResolvedValue(null),
+    } as any;
+
+    await runJudgeHarness(
+      makeInfra(),
+      connector,
+      makeSlot(),
+      defaultSettings,
+      ['figma_render_jsx'],
+      [],
+      new AbortController().signal,
+      makeCallbacks(),
+    );
+
+    // Selection returned null — targetNodeId stays undefined
+    expect(prefetchSpy).toHaveBeenCalledTimes(1);
+    expect(prefetchSpy.mock.calls[0]![4]).toBeUndefined();
+  });
+
+  it('proceeds without targetNodeId when Figma selection throws', async () => {
+    mockRunMicroBatch.mockResolvedValueOnce(makePassVerdicts());
+
+    const prefetchModule = await import('../../../../src/main/subagent/context-prefetch.js');
+    const prefetchSpy = vi.mocked(prefetchModule.prefetchForMicroJudges);
+    prefetchSpy.mockClear();
+
+    const connector = {
+      fileKey: 'fk',
+      executeCodeViaUI: vi.fn().mockRejectedValue(new Error('WS disconnected')),
+    } as any;
+
+    await runJudgeHarness(
+      makeInfra(),
+      connector,
+      makeSlot(),
+      defaultSettings,
+      ['figma_render_jsx'],
+      [],
+      new AbortController().signal,
+      makeCallbacks(),
+    );
+
+    // Error caught silently — targetNodeId stays undefined
+    expect(prefetchSpy).toHaveBeenCalledTimes(1);
+    expect(prefetchSpy.mock.calls[0]![4]).toBeUndefined();
+  });
 });
