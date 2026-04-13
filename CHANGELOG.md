@@ -6,6 +6,33 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-04-13
+
+### Added
+- Evidence-based severity system for micro-judge verdicts with deterministic pipeline
+- Design quality vision judge with figma_flatten_layers tool
+- Figma REST API Personal Access Token persistence with safeStorage encryption
+- Workflow engine with knowledge layer for guided agent steps
+- Task orchestration layer (Fase 1.5) with TaskStore and task panel
+- QA assertion DSL: phase 2 sentinels, metric/metric_growth expressions (Fase 4)
+- MetricsRegistry runtime instrumentation for agent performance tracking
+- Runtime baseline oracle (Fase 3) and UX oracle baseline (Fase 3b)
+- Design quality evaluators with rubrics and judge integration
+- Visual regression, process metrics, and error injection in QA pipeline
+
+### Changed
+- Replace monolithic judge with 7 parallel micro-judges for faster evaluation
+- Remove Haiku from main agent model selector
+- Evidence fast-paths and consistency file data optimization in judge harness
+
+### Fixed
+- Judge: fallback targetNodeId from selection, fix tier inflation
+- Judge: improve consistency accuracy, retry quality, and observability
+- Resolve all 14 open bugs from QA Run 2 and Run 3/4/5 pattern occurrences
+- Auto-flatten after render_jsx, lower IE thresholds, white bg export
+- Canvas screenshot node finder uses findAll with largest-area selection
+- CI: resolve eslint and biome lint errors, bump bundle size limit
+
 ## [0.12.0] - 2026-04-02
 
 ### Added
@@ -224,7 +251,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 - Settings panel with window transparency slider
 - Graceful shutdown, persistent WS reconnect, pin window, structured logging
 
-[Unreleased]: https://github.com/g3nx89/bottega/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/g3nx89/bottega/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/g3nx89/bottega/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/g3nx89/bottega/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/g3nx89/bottega/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/g3nx89/bottega/compare/v0.9.0...v0.10.0
