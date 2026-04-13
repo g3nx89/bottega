@@ -14,5 +14,5 @@ export default {
     'semgrep',  // optional linter, checked with `which` guard
     'tsx',      // used for benchmark scripts
   ],
-  exclude: ['unresolved', 'exports', 'types'],  // exported types are API surface
+  exclude: ['unresolved', 'exports', 'types', 'duplicates'],  // exported types are API surface; duplicates = intentional aliases
 };

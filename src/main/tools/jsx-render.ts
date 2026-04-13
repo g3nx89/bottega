@@ -100,7 +100,7 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
           });
 
           // 4. Auto-flatten: collapse single-child wrapper frames to reduce nesting
-          if (result && result.nodeId) {
+          if (result?.nodeId) {
             try {
               await connector.flattenLayers(result.nodeId);
             } catch {

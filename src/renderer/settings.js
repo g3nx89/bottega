@@ -678,7 +678,7 @@ async function saveSubagentSettings() {
     // Collect per-role model configs from dropdowns
     const models = { ...(current.models || {}) };
     for (const [role, select] of Object.entries(roleModelSelects)) {
-      if (select && select.value) {
+      if (select?.value) {
         const [provider, modelId] = select.value.split(':');
         if (provider && modelId) models[role] = { provider, modelId };
       }
@@ -696,7 +696,7 @@ async function saveSubagentSettings() {
           enabled: checkbox ? checkbox.checked : true,
           model: existing.model || { provider: 'anthropic', modelId: 'claude-haiku-4-5' },
         };
-        if (modelSelect && modelSelect.value) {
+        if (modelSelect?.value) {
           const [provider, modelId] = modelSelect.value.split(':');
           if (provider && modelId) microJudges[judgeId].model = { provider, modelId };
         }

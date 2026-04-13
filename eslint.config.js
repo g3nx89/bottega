@@ -72,6 +72,8 @@ export default tseslint.config(
       'src/main/preload.ts',
       'src/main/ipc-handlers.ts',
       'src/main/ipc-handlers-auth.ts',
+      'src/main/ipc-handlers-figma-auth.ts',
+      'src/main/figma-auth-store.ts',
       'src/main/auto-updater.ts',
       'src/main/diagnostics.ts',
       'src/main/startup-guards.ts',

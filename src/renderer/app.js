@@ -535,7 +535,7 @@ function addToolCard(tab, toolName, toolCallId) {
   let retryCount = 0;
   const parent = tab.currentAssistantBubble;
   const lastChild = parent.lastElementChild;
-  if (lastChild && lastChild.classList?.contains('tool-card')) {
+  if (lastChild?.classList?.contains('tool-card')) {
     const prevName = lastChild.querySelector('.tool-name')?.textContent;
     const prevStatus = lastChild.querySelector('.tool-status');
     const wasError = prevStatus?.classList.contains('tool-error');
@@ -959,7 +959,7 @@ resetSessionBtn.addEventListener('click', async () => {
 
 sendBtn.addEventListener('click', () => {
   const tab = getActiveTab();
-  if (tab && tab.isStreaming && !inputField.value.trim()) {
+  if (tab?.isStreaming && !inputField.value.trim()) {
     window.api.abort(tab.id);
     return;
   }
@@ -975,7 +975,7 @@ function handleInputEscape() {
   }
   // Abort streaming on Escape
   const tab = getActiveTab();
-  if (tab && tab.isStreaming) {
+  if (tab?.isStreaming) {
     window.api.abort(tab.id);
   }
 }
@@ -1896,8 +1896,7 @@ function showSuggestions(suggestions) {
       if (!tab.isStreaming) {
         _initTurn(tab, text, []);
       }
-      window.api.sendPrompt(tab.id, text).catch((err) => {
-        console.error('[suggestion-chip] sendPrompt failed:', err);
+      window.api.sendPrompt(tab.id, text).catch((_err) => {
         // Show the error inline so the user knows the click didn't work
         if (tab.currentAssistantBubble) {
           const errEl = document.createElement('div');
