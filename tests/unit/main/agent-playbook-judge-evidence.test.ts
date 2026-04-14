@@ -175,9 +175,11 @@ describe('Judge evidence pipeline — end-to-end', () => {
       { onProgress: vi.fn(), onVerdict: vi.fn(), onRetryStart: vi.fn() },
     );
 
-    // The connector was called with the plugin payload for the target node
-    expect(connector.executeCodeViaUI).toHaveBeenCalledTimes(1);
-    const [code] = (connector.executeCodeViaUI as any).mock.calls[0];
+    // The connector was called for raw tree (component analysis) + evidence payload
+    expect(connector.executeCodeViaUI).toHaveBeenCalledTimes(2);
+    // The evidence call targets the specific node (contains "1:1")
+    const evidenceCall = (connector.executeCodeViaUI as any).mock.calls.find(([c]: [string]) => c.includes('"1:1"'));
+    const [code] = evidenceCall;
     expect(code).toContain('"1:1"');
 
     // The alignment judge's prompt contained the real numeric evidence

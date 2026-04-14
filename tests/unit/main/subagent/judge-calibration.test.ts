@@ -94,20 +94,20 @@ describe('Judge Calibration — Golden-File Scenarios', () => {
     });
   });
 
-  describe('componentization: single screen = PASS', () => {
-    it('dismisses LOW-confidence findings', () => {
+  describe('componentization: flags 2+ repeated structures', () => {
+    it('mentions LOW confidence dismissal for genuinely different nodes', () => {
       const prompt = getFullPrompt('componentization');
-      expect(prompt).toContain('Dismiss LOW-confidence');
+      expect(prompt).toContain('LOW confidence');
     });
 
-    it('requires 3+ HIGH-confidence duplicates to FAIL', () => {
+    it('requires 2+ structurally identical subtrees to FAIL', () => {
       const prompt = getMicroJudgeCriterionPrompt('componentization');
-      expect(prompt).toContain('3+ HIGH-confidence');
+      expect(prompt).toContain('2+ structurally identical subtrees');
     });
 
-    it('no component analysis data = PASS', () => {
+    it('passes only when duplicate count is zero', () => {
       const prompt = getMicroJudgeCriterionPrompt('componentization');
-      expect(prompt).toContain('no component analysis data is provided');
+      expect(prompt).toContain('duplicate count is zero');
     });
   });
 

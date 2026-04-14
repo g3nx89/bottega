@@ -314,12 +314,15 @@ describe('Context Pre-fetch', () => {
       expect(result.componentAnalysis).toHaveProperty('stats');
     });
 
-    it('returns null componentAnalysis when libraryComponents is missing', async () => {
+    it('computes componentAnalysis from fileData alone when libraryComponents is missing', async () => {
       const tools = makeMockToolsNamed();
       const result = await prefetchForMicroJudges(tools as any, new Set<PrefetchDataKey>(['fileData']));
 
       expect(result.fileData).not.toBeNull();
-      expect(result.componentAnalysis).toBeNull();
+      // Within-screen duplicate detection works without library data
+      expect(result.componentAnalysis).not.toBeNull();
+      expect(result.componentAnalysis).toHaveProperty('withinScreen');
+      expect(result.componentAnalysis).toHaveProperty('stats');
     });
 
     it('returns all null fields for an empty needs set', async () => {
@@ -397,6 +400,7 @@ describe('Context Pre-fetch', () => {
         undefined,
         connector,
       );
+      // No fileData in needs → no raw tree call, and no targetNodeId → no evidence call
       expect(connector.executeCodeViaUI).not.toHaveBeenCalled();
       expect(result.judgeEvidence).toBeNull();
     });
@@ -446,7 +450,10 @@ describe('Context Pre-fetch', () => {
         '1:1',
         connector,
       );
-      expect(connector.executeCodeViaUI).not.toHaveBeenCalled();
+      // Raw tree call for component analysis happens (1 call), but evidence is NOT fetched
+      const calls = (connector.executeCodeViaUI as any).mock.calls;
+      const evidenceCalls = calls.filter(([code]: [string]) => code.includes('figma.getNodeById'));
+      expect(evidenceCalls.length).toBe(0);
     });
 
     it('applies the 15s withPrefetchTimeout wrapper — never-resolving payload → null', async () => {
@@ -454,10 +461,14 @@ describe('Context Pre-fetch', () => {
       const tools = makeMockTools();
       const connector = makeMockConnector(() => new Promise(() => {}));
       const promise = prefetchForMicroJudges(tools as any, evidenceNeeds, undefined, 'test-file', '1:1', connector);
-      await vi.advanceTimersByTimeAsync(16_000);
+      // Advance in steps to drain microtask queue between timer fires.
+      // Raw tree timeout (15s) + evidence timeout (20s) both need to fire.
+      for (let i = 0; i < 25; i++) {
+        await vi.advanceTimersByTimeAsync(1_000);
+      }
       const result = await promise;
       expect(result.judgeEvidence).toBeNull();
       vi.useRealTimers();
-    });
+    }, 30_000);
   });
 });

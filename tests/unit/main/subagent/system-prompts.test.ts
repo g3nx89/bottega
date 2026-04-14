@@ -133,10 +133,10 @@ describe('System Prompts', () => {
       expect(prompt).not.toContain('absent states');
     });
 
-    it('componentization criterion dismisses LOW-confidence findings', () => {
+    it('componentization criterion flags 2+ repeated structures', () => {
       const prompt = getMicroJudgeCriterionPrompt('componentization' as MicroJudgeId);
-      expect(prompt).toContain('Dismiss LOW-confidence');
-      expect(prompt).toContain('HIGH-confidence');
+      expect(prompt).toContain('2+ structurally identical subtrees');
+      expect(prompt).toContain('LOW confidence');
     });
   });
 });

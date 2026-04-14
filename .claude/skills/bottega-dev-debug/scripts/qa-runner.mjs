@@ -523,21 +523,28 @@ async function runScript(scriptNum, outputDir) {
   } catch {}
 
   // Canvas cleanup — create a fresh Figma page to avoid cross-run pollution.
-  // Use __testFigmaExecute to bypass the agent entirely — no agent turn, no judge trigger.
-  // Target the SLOT's file, not the WS active file, to avoid multi-tab mismatch.
+  // Uses the always-available `clearPage` IPC (no BOTTEGA_AGENT_TEST needed).
+  // Falls back to __testFigmaExecute for backward compatibility.
   if (parsed.requiresFigma) {
     try {
-      const cleanupName = `QA-${scriptNum}-${Date.now()}`;
-      console.log(`  Canvas cleanup: creating fresh page ${cleanupName}`);
-      const cleanupCode = `
-        const p = figma.createPage();
-        p.name = "${cleanupName.replace(/"/g, '\\"')}";
-        await figma.setCurrentPageAsync(p);
-        return JSON.stringify({ pageId: p.id, pageName: p.name });
-      `;
-      await page.evaluate(([c, fk]) => window.api.__testFigmaExecute(c, undefined, fk || undefined),
-        [cleanupCode, slotFileKey]);
+      console.log(`  Canvas cleanup: creating fresh page`);
+      const hasClearPage = await page.evaluate(() => typeof window.api?.clearPage === 'function');
+      if (hasClearPage) {
+        await page.evaluate((fk) => window.api.clearPage(fk || undefined), slotFileKey);
+      } else {
+        // Legacy fallback (requires BOTTEGA_AGENT_TEST=1 build)
+        const cleanupName = `QA-${scriptNum}-${Date.now()}`;
+        const cleanupCode = `
+          const p = figma.createPage();
+          p.name = "${cleanupName.replace(/"/g, '\\"')}";
+          await figma.setCurrentPageAsync(p);
+          return JSON.stringify({ pageId: p.id, pageName: p.name });
+        `;
+        await page.evaluate(([c, fk]) => window.api.__testFigmaExecute(c, undefined, fk || undefined),
+          [cleanupCode, slotFileKey]);
+      }
       await page.waitForTimeout(1000);
+      console.log(`  Canvas cleanup: done`);
     } catch (err) {
       console.log(`  Canvas cleanup skipped: ${err.message}`);
     }
@@ -576,13 +583,21 @@ async function runScript(scriptNum, outputDir) {
   // can accumulate _roundScores across multi-round scripts (IE-01, IE-02).
   // Per-step fields (toolsCalled, responseText, etc.) are overwritten each iteration.
   const persistentStepData = {
-    // figmaExecute: wraps __testFigmaExecute exposed by preload (requires BOTTEGA_AGENT_TEST=1).
+    // figmaExecute: uses window.api.figmaExecute (always available) or falls back to
+    // __testFigmaExecute (legacy, requires BOTTEGA_AGENT_TEST=1).
     // The WS bridge wraps results in { success, result: "...json..." }. We unwrap to
     // return the raw plugin return value (JSON string) that evaluators expect.
     // Target the slot's fileKey to avoid multi-tab mismatch (agent on Test_A, WS active on Test_B).
     figmaExecute: async (code) => {
-      const response = await page.evaluate(([c, fk]) => window.api.__testFigmaExecute(c, undefined, fk || undefined),
-        [code, slotFileKey]);
+      const response = await page.evaluate(([c, fk]) => {
+        if (typeof window.api?.figmaExecute === 'function') {
+          return window.api.figmaExecute(c, undefined, fk || undefined);
+        }
+        if (typeof window.api?.__testFigmaExecute === 'function') {
+          return window.api.__testFigmaExecute(c, undefined, fk || undefined);
+        }
+        return { error: 'No figma execute API available' };
+      }, [code, slotFileKey]);
       // Unwrap bridge envelope: { success: true, result: "..." } → "..."
       if (response && typeof response === 'object' && 'result' in response) {
         const inner = response.result;
