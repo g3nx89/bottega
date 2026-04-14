@@ -75,6 +75,7 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
         'figma_render_jsx: create complex UI from JSX with Tailwind-like shorthand (bg, p, flex, rounded, etc.)',
       promptGuidelines: [
         'Use figma_render_jsx for creating complex multi-element layouts. It creates the entire tree in one roundtrip.',
+        'IMPORTANT: Do NOT inline repeated elements (cards, list items) in a single figma_render_jsx call. Instead: render ONE template card via figma_render_jsx, then figma_create_component to convert it, then figma_instantiate for each copy.',
         'Always wrap layouts in a <Frame> with flex="col" or flex="row" for auto layout.',
         'Use <Icon name="mdi:home" /> for icons (Iconify format: prefix:name).',
       ],

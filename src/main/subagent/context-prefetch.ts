@@ -266,35 +266,73 @@ export async function prefetchForMicroJudges(
     }
   }
 
-  // Post-process: run component analysis if we have the data
-  if (result.fileData && result.libraryComponents) {
+  // Post-process: run component analysis.
+  // Within-screen duplicate detection only needs the raw document tree (structural
+  // fingerprinting). Library component names enable library-miss detection but are
+  // optional — without a Figma REST API token, libraryComponents will be null.
+  //
+  // IMPORTANT: result.fileData may be YAML (outputFormat='yaml' in balanced/creative
+  // profiles). The semantic extraction pipeline transforms the raw Figma tree into a
+  // compact format that parseFileData cannot reconstruct. To get reliable structural
+  // data, we fetch the raw JSON tree directly from the connector when available.
+  // Falls back to result.fileData (works when outputFormat='json').
+  if ((result.fileData || connector) && (neededData.has('fileData') || neededData.has('libraryComponents'))) {
     try {
-      // Extract component names from library output — handles multiple formats:
-      // - { components: [...], componentSets: [...] } (figma_get_library_components)
-      // - [...] (plain array)
-      // - newline-separated text
       let componentNames: string[] = [];
-      try {
-        const parsed = JSON.parse(result.libraryComponents);
-        if (Array.isArray(parsed)) {
-          componentNames = parsed.map((c: any) => (typeof c === 'string' ? c : (c.name ?? ''))).filter(Boolean);
-        } else if (parsed && typeof parsed === 'object') {
-          const extractNames = (arr: any[]) =>
-            arr.map((c: any) => (typeof c === 'string' ? c : (c.name ?? ''))).filter(Boolean);
-          if (Array.isArray(parsed.components)) {
-            componentNames.push(...extractNames(parsed.components));
+      if (result.libraryComponents) {
+        try {
+          const parsed = JSON.parse(result.libraryComponents);
+          if (Array.isArray(parsed)) {
+            componentNames = parsed.map((c: any) => (typeof c === 'string' ? c : (c.name ?? ''))).filter(Boolean);
+          } else if (parsed && typeof parsed === 'object') {
+            const extractNames = (arr: any[]) =>
+              arr.map((c: any) => (typeof c === 'string' ? c : (c.name ?? ''))).filter(Boolean);
+            if (Array.isArray(parsed.components)) {
+              componentNames.push(...extractNames(parsed.components));
+            }
+            if (Array.isArray(parsed.componentSets)) {
+              componentNames.push(...extractNames(parsed.componentSets));
+            }
           }
-          if (Array.isArray(parsed.componentSets)) {
-            componentNames.push(...extractNames(parsed.componentSets));
-          }
+        } catch {
+          componentNames = result.libraryComponents
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean);
         }
-      } catch {
-        componentNames = result.libraryComponents
-          .split('\n')
-          .map((l) => l.trim())
-          .filter(Boolean);
       }
-      result.componentAnalysis = analyzeComponents(result.fileData, componentNames);
+
+      // Try raw JSON from connector first (bypasses semantic extraction + YAML formatting).
+      // Falls back to tool result (fileData) which works when outputFormat='json'.
+      let fileDataForAnalysis = result.fileData;
+      if (connector) {
+        try {
+          const rawTreeCode = `return (async () => {
+            const root = figma.currentPage;
+            function walk(node, d) {
+              if (d > 50) return null;
+              const n = { id: node.id, type: node.type, name: node.name };
+              // Don't recurse into INSTANCE children — they're the component's
+              // internal structure and shouldn't be analyzed for duplication.
+              if (node.type !== 'INSTANCE' && node.children) {
+                n.children = node.children.map(c => walk(c, d + 1)).filter(Boolean);
+              }
+              return n;
+            }
+            return JSON.stringify(walk(root, 0));
+          })()`;
+          const rawTree = await withPrefetchTimeout(connector.executeCodeViaUI(rawTreeCode, 15000), 'rawTree');
+          if (rawTree && typeof rawTree === 'string') {
+            fileDataForAnalysis = rawTree;
+          }
+        } catch {
+          // Fall back to tool-provided fileData
+        }
+      }
+
+      if (fileDataForAnalysis) {
+        result.componentAnalysis = analyzeComponents(fileDataForAnalysis, componentNames, targetNodeId ?? undefined);
+      }
     } catch (err) {
       log.warn({ err }, 'Component analysis failed — skipping');
     }

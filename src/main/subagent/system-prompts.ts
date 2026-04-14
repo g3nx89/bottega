@@ -340,12 +340,14 @@ Example FAIL: {"pass": false, "finding": "1 frame has auto-generated name, 1 con
 
   componentization: `## Criterion: Componentization
 Evaluate the pre-computed component analysis report. Confirm or dismiss each finding.
-PASS if: no component analysis data is provided, OR duplicate count is below 3, OR library misses are LOW confidence only, OR the design is a single-screen simple layout.
-FAIL only if: the analysis shows 3+ HIGH-confidence structurally identical subtrees that should clearly be components, OR library components with exact name matches exist but detached instances are used instead.
-Dismiss LOW-confidence findings. Single-screen designs with fewer than 3 repeated patterns always PASS. Not every repeated element needs componentization — only clear, obvious candidates.
+PASS if: duplicate count is zero, OR all findings are LOW confidence only AND no library misses exist.
+FAIL if: the analysis shows 2+ structurally identical subtrees that should clearly be components (cards, list items, repeated UI patterns), OR library components with matching names exist but are not used (detached instances instead).
+Even 2 repeated elements in the same layout warrant componentization — they signal a pattern that will scale. Only dismiss findings where the nodes are genuinely different in purpose (e.g., a header and a footer that happen to share structure).
 
-Example PASS: {"pass": true, "finding": "2 similar cards found but below componentization threshold", "evidence": "Component analysis: 2 within-screen duplicates (below threshold of 3), 0 library misses, 0 detached instances.", "actionItems": []}
-Example FAIL: {"pass": false, "finding": "4 identical card structures should be a reusable component", "evidence": "Component analysis: 4 HIGH-confidence within-screen duplicates with fingerprint FRAME>TEXT+IMAGE+FRAME. Library has 'Card' component but it's not used.", "actionItems": ["Convert repeated card structure to instances of library 'Card' component"]}`,
+**CRITICAL**: Always include the actual nodeIds from withinScreen.nodeIds in your evidence field AND in actionItems — the agent needs them to target the right frames for conversion. Never omit node IDs when they are available in the analysis.
+
+Example PASS: {"pass": true, "finding": "No repeated patterns detected", "evidence": "Component analysis: 0 within-screen duplicates, 0 library misses, 0 detached instances.", "actionItems": []}
+Example FAIL: {"pass": false, "finding": "4 identical card structures should be a reusable component", "evidence": "Component analysis: 4 within-screen duplicates with fingerprint FRAME>[TEXT,IMAGE,FRAME]. nodeIds: [\\"270:2025\\", \\"270:2040\\", \\"270:2055\\", \\"270:2070\\"].", "actionItems": ["Convert node 270:2025 to a component via figma_create_component(fromFrameId: '270:2025'), then delete nodes 270:2040, 270:2055, 270:2070 and replace them with figma_instantiate of the new component."]}`,
   design_quality: `## Criterion: Design Quality (Vision-Based)
 Evaluate the attached screenshot image as a senior design critic. Score 5 dimensions 1-10:
 1. **Intent Match** — Does the design respond to the task description? Are all requested elements present?

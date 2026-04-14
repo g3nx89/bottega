@@ -336,6 +336,25 @@ export async function runMicroJudgeBatch(
     // if it finds nothing, an LLM cannot find more.
     if (judgeId === 'componentization' && prefetchedData.componentAnalysis) {
       const ca = prefetchedData.componentAnalysis;
+      log.info(
+        {
+          subagentId,
+          judgeId,
+          withinScreen: ca.withinScreen.length,
+          withinScreenDetail: ca.withinScreen.slice(0, 5).map((d) => ({
+            screen: d.screenName,
+            fp: d.fingerprint.slice(0, 60),
+            names: d.nodeNames.slice(0, 6),
+            ids: d.nodeIds.slice(0, 6),
+            count: d.count,
+          })),
+          crossScreen: ca.crossScreen.length,
+          libraryMisses: ca.libraryMisses.length,
+          detachedInstances: ca.detachedInstances.length,
+          stats: ca.stats,
+        },
+        'Componentization analysis summary',
+      );
       if (ca.withinScreen.length === 0 && ca.libraryMisses.length === 0 && ca.detachedInstances.length === 0) {
         const verdict: MicroVerdict = {
           judgeId,

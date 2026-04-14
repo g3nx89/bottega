@@ -115,7 +115,7 @@ const JUDGE_REGISTRY = new Map<MicroJudgeId, MicroJudgeDefinition>([
       defaultThinking: 'low',
       tiers: new Set<ActivationTier>(['full', 'standard']),
       dataNeeds: ['fileData', 'libraryComponents'],
-      blocking: false,
+      blocking: true,
     },
   ],
   [

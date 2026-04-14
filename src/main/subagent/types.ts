@@ -150,6 +150,8 @@ export interface WithinScreenDuplicates {
   screenName: string;
   fingerprint: string;
   nodeNames: string[];
+  /** Figma node IDs for each duplicate (same order as nodeNames). Enables precise retry hints. */
+  nodeIds: string[];
   count: number;
 }
 

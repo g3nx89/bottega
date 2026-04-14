@@ -396,11 +396,33 @@ export async function runJudgeHarness(
         const failedJudgeIds = allVerdicts.filter((v) => v.status === 'evaluated' && !v.pass).map((v) => v.judgeId);
         currentJudgeIds = failedJudgeIds.length > 0 ? failedJudgeIds : currentJudgeIds;
 
-        // Build enriched retry prompt with node IDs, tool hints, evidence values, and progressive context
+        // Build enriched retry prompt with node IDs, tool hints, evidence values, and progressive context.
+        // Pass componentAnalysis so retry prompt can extract nodeIds directly from withinScreen
+        // rather than depending on LLM evidence text (which is unreliable).
         const retryPrompt = buildRetryPrompt(
           allVerdicts,
           { attempt: attempt + 1, maxAttempts, previousSummary: lastVerdict?.summary },
           prefetchedData.judgeEvidence,
+          prefetchedData.componentAnalysis,
+        );
+
+        // Observability: log that a retry prompt is being injected, plus the node IDs
+        // extracted from ComponentAnalysis (if any). This bypasses the normal usage:prompt
+        // event logger (which only fires for user-initiated prompts).
+        const retryNodeIds =
+          prefetchedData.componentAnalysis?.withinScreen.flatMap((g) => g.nodeIds).filter(Boolean) ?? [];
+        log.info(
+          {
+            slotId: slot.id,
+            attempt: attempt + 1,
+            maxAttempts,
+            failedCriteria: allVerdicts.filter((v) => v.status === 'evaluated' && !v.pass).map((v) => v.judgeId),
+            nodeIds: retryNodeIds.slice(0, 10),
+            promptLength: retryPrompt.length,
+            hasChecklist: retryPrompt.includes('DIRECT ACTION CHECKLIST'),
+            promptPreview: retryPrompt.slice(0, 1200),
+          },
+          'Judge retry prompt injected',
         );
 
         try {
@@ -433,15 +455,30 @@ const CRITERION_TOOL_HINTS: Record<string, string> = {
     'Use figma_execute to set paddingTop/Bottom/Left/Right and itemSpacing to uniform values across sibling nodes. Use figma_set_corner_radius for uniform radii. Check the evidence values to determine the correct target value.',
   naming:
     'Use figma_batch_rename(entries: [{nodeId, newName}]) to rename all default-named nodes in one call. Also use figma_auto_layout on frames with 2+ children that lack layoutMode.',
-  componentization: 'Use figma_create_component to convert frames to reusable components.',
+  componentization:
+    'CRITICAL: Do NOT re-render or recreate these frames — they already exist with correct visuals. ' +
+    'EXTRACT a component from the FIRST existing frame, then REPLACE the others with instances. ' +
+    'Exact workflow: ' +
+    '1) figma_create_component({fromFrameId: "FIRST_NODE_ID"}) — converts the first existing frame IN PLACE to a reusable component. ' +
+    '2) For each other node ID: record its (x, y, parentId) via figma_get_file_data, then figma_delete(nodeId), ' +
+    'then figma_instantiate(componentKey, {parentId, x, y}) at the same position. ' +
+    '3) figma_set_instance_properties on each instance to override text to match the original content. ' +
+    'DO NOT call figma_render_jsx or figma_generate_image during this retry — all visual content already exists. ' +
+    'Preserve existing image fills by using the instance/property swap, not re-rendering.',
   design_quality:
     'Use figma_flatten_layers to reduce nesting, figma_set_text_style for typography, figma_set_fills with bindTo for token-bound colors.',
 };
 
-/** Extract node IDs from judge evidence text (format: "nodeId:128:445" or "id: 128:445") */
+/**
+ * Extract node IDs from judge evidence text. Supports multiple formats:
+ * - nodeId: 128:445 / id: 128:445
+ * - (128:445)
+ * - JSON arrays: "nodeIds": ["128:445", ...]
+ * - Quoted bare IDs: "128:445"
+ */
 export function extractNodeIds(evidence: string): string[] {
   const ids: string[] = [];
-  const patterns = [/nodeId[:\s]+(\d+:\d+)/gi, /\bid[:\s]+(\d+:\d+)/gi, /\((\d+:\d+)\)/g];
+  const patterns = [/nodeId[:\s]+(\d+:\d+)/gi, /\bid[:\s]+(\d+:\d+)/gi, /\((\d+:\d+)\)/g, /"(\d+:\d+)"/g];
   for (const pat of patterns) {
     let m: RegExpExecArray | null = pat.exec(evidence);
     while (m !== null) {
@@ -463,11 +500,15 @@ export interface RetryContext {
  * Build enriched retry prompt with node IDs, tool suggestions, and numeric evidence.
  * @param evidence Optional pre-computed evidence — when provided, numeric facts are
  *   appended for evidence-backed criteria so the agent knows the exact values to target.
+ * @param componentAnalysis Optional ComponentAnalysis — when provided, nodeIds for
+ *   componentization findings are extracted directly from withinScreen, bypassing
+ *   the unreliable LLM evidence text.
  */
 export function buildRetryPrompt(
   allVerdicts: MicroVerdict[],
   retry?: RetryContext,
   evidence?: JudgeEvidence | null,
+  componentAnalysis?: { withinScreen: Array<{ nodeNames: string[]; nodeIds: string[]; count: number }> } | null,
 ): string {
   // Separate structural from styling issues for priority ordering
   const STRUCTURAL_CRITERIA = new Set(['completeness', 'alignment', 'visual_hierarchy']);
@@ -476,10 +517,17 @@ export function buildRetryPrompt(
   const criterionOrder: MicroJudgeId[] = [];
   const itemsByCriterion = new Map<MicroJudgeId, string[]>();
 
+  // For componentization, extract nodeIds directly from ComponentAnalysis (most reliable).
+  // Falls back to extractNodeIds() on evidence text for other criteria.
+  const componentizationNodeIds = componentAnalysis?.withinScreen.flatMap((g) => g.nodeIds).filter(Boolean) ?? [];
+
   for (const mv of allVerdicts) {
     if (mv.status !== 'evaluated' || mv.pass) continue;
 
-    const nodeIds = extractNodeIds(mv.evidence);
+    const nodeIds =
+      mv.judgeId === 'componentization' && componentizationNodeIds.length > 0
+        ? componentizationNodeIds
+        : extractNodeIds(mv.evidence);
     const nodeHint = nodeIds.length > 0 ? ` Affected nodes: ${nodeIds.join(', ')}.` : '';
     const toolHint = CRITERION_TOOL_HINTS[mv.judgeId] || '';
 
@@ -538,7 +586,35 @@ export function buildRetryPrompt(
 
   const itemsText = focusedItems.map((item, i) => `${i + 1}. ${item}`).join('\n\n');
   const toolWord = focusedItems.length === 1 ? 'the suggested tool' : 'the suggested tools';
-  return `${JUDGE_RETRY_MARKER}${attemptInfo}${previousInfo}\nFirst take a screenshot to see the current state, then fix ${focusedItems.length === 1 ? 'this issue' : 'these issues'} using ${toolWord}:\n\n${itemsText}${evidenceNote}${remainingNote}\n\nAfter all fixes, take ONE final screenshot to verify.`;
+
+  // Componentization: inject an explicit per-nodeId imperative checklist at the top.
+  // Agent research (v7) showed the agent was creating component definitions but not
+  // instantiating them. A concrete, numbered tool-call sequence with actual node IDs
+  // is more effective than abstract workflow descriptions.
+  let componentizationChecklist = '';
+  if (focusCriterion === 'componentization' && componentAnalysis && componentAnalysis.withinScreen.length > 0) {
+    const biggestGroup = [...componentAnalysis.withinScreen].sort((a, b) => b.count - a.count)[0]!;
+    const ids = biggestGroup.nodeIds.filter(Boolean);
+    if (ids.length >= 2) {
+      const [firstId, ...restIds] = ids;
+      const instantiateSteps = restIds
+        .slice(0, 6) // cap to avoid overwhelming the prompt
+        .map(
+          (id, idx) =>
+            `  ${idx + 2}. figma_delete('${id}') then figma_instantiate(componentKey, { /* same x,y,parentId as ${id} was */ })`,
+        )
+        .join('\n');
+      componentizationChecklist = `\n\n**DIRECT ACTION CHECKLIST** (${restIds.length + 2} steps — execute ALL in order, DO NOT skip any):\n\n  STEP 1: figma_create_component({ fromFrameId: '${firstId}' })\n         This CONVERTS frame '${firstId}' into a reusable COMPONENT. Save the returned componentKey.\n\n${instantiateSteps}\n\n  STEP ${restIds.length + 2}: After all ${restIds.length} instances exist, use figma_set_instance_properties on each one to restore the original text content (look at current node names for hints).\n\n**WHY ALL STEPS MATTER**: A component with zero instances does NOT satisfy componentization. The judge needs to see [1 COMPONENT + ${restIds.length} INSTANCE nodes] — not [${restIds.length + 1} FRAME nodes]. Skipping the figma_instantiate calls WILL fail the retry.\n\n**DO NOTs**: Do NOT call figma_render_jsx. Do NOT call figma_generate_image. The nodes [${ids.join(', ')}] already exist with correct visuals. Just convert + replace.`;
+    }
+  }
+
+  // Structure: MARKER, checklist (if any) FIRST to maximize visibility,
+  // then itemsText for context, then evidence. Agent reads top-down — the
+  // specific tool-call sequence must appear before any abstract wording.
+  const header = componentizationChecklist
+    ? `${JUDGE_RETRY_MARKER}${attemptInfo}${previousInfo}${componentizationChecklist}\n\nAdditional context for this retry:\n\n${itemsText}`
+    : `${JUDGE_RETRY_MARKER}${attemptInfo}${previousInfo}\nFirst take a screenshot to see the current state, then fix ${focusedItems.length === 1 ? 'this issue' : 'these issues'} using ${toolWord}:\n\n${itemsText}`;
+  return `${header}${evidenceNote}${remainingNote}\n\nAfter all fixes, take ONE final screenshot to verify.`;
 }
 
 /**
