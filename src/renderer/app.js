@@ -91,7 +91,12 @@ window.api.onUpdateProgress((percent) => {
 window.api.onUpdateDownloaded((version) => {
   updateDownloadBtn.textContent = 'Restart & Update';
   updateDownloadBtn.disabled = false;
-  updateDownloadBtn.onclick = () => window.api.installUpdate();
+  updateDownloadBtn.onclick = () => {
+    updateDownloadBtn.textContent = 'Installing…';
+    updateDownloadBtn.disabled = true;
+    updateStatus.textContent = 'Installing update — do not close the app';
+    window.api.installUpdate();
+  };
   updateStatus.textContent = `v${version} ready — restart to install`;
 });
 

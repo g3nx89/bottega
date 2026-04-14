@@ -867,11 +867,57 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     }
   });
 
+  // ── Canvas management (safe operations, always available) ─────────
+  // These handlers are always exposed (not gated behind BOTTEGA_AGENT_TEST).
+  // They enable QA infrastructure to manage test canvas state between runs.
+  ipcMain.handle('figma:clear-page', async (_event: any, fileKey?: string) => {
+    try {
+      const code = `return (async () => {
+        const p = figma.createPage();
+        p.name = "Page " + (figma.root.children.length);
+        await figma.setCurrentPageAsync(p);
+        return JSON.stringify({ pageId: p.id, pageName: p.name });
+      })()`;
+      const targetKey = fileKey || infra.wsServer.getConnectedFileInfo()?.fileKey;
+      return infra.wsServer.sendCommand('EXECUTE_CODE', { code, timeout: 10000 }, 12000, targetKey || undefined);
+    } catch (err: any) {
+      log.warn({ err }, 'figma:clear-page failed');
+      return { error: err.message };
+    }
+  });
+
+  // Execute arbitrary plugin code. Unlike `test:figma-execute`, this is always
+  // available — intended for QA infrastructure and introspection. The underlying
+  // plugin already runs in a sandboxed Figma context; the only risk is modifying
+  // the current file, which the user already granted by opening the plugin.
+  ipcMain.handle('figma:execute', async (_event: any, code: string, timeoutMs?: number, fileKey?: string) => {
+    try {
+      const timeout = timeoutMs ?? 15_000;
+      const targetKey = fileKey || infra.wsServer.getConnectedFileInfo()?.fileKey;
+      return await infra.wsServer.sendCommand(
+        'EXECUTE_CODE',
+        { code, timeout },
+        timeout + 2_000,
+        targetKey || undefined,
+      );
+    } catch (err: any) {
+      log.warn({ err }, 'figma:execute failed');
+      return { error: err.message };
+    }
+  });
+
   // ── Auto-update (global) ────────────────────────
   ipcMain.handle('update:get-version', () => getAppVersion());
   ipcMain.handle('update:download', () => downloadUpdate());
   ipcMain.handle('update:check', () => checkForUpdates());
-  ipcMain.handle('update:install', () => quitAndInstall());
+  ipcMain.handle('update:install', async () => {
+    try {
+      await quitAndInstall();
+    } catch (err: any) {
+      log.error({ err }, 'update:install failed');
+      safeSend(mainWindow.webContents, 'update:error', err?.message ?? 'Install failed');
+    }
+  });
 
   // ── Return controller ──
 

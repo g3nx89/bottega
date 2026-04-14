@@ -259,6 +259,11 @@ contextBridge.exposeInMainWorld('api', {
       figmaRunning?: boolean;
     }>,
 
+  // ── Canvas management (safe, always available) ──
+  clearPage: (fileKey?: string) => ipcRenderer.invoke('figma:clear-page', fileKey) as Promise<any>,
+  figmaExecute: (code: string, timeoutMs?: number, fileKey?: string) =>
+    ipcRenderer.invoke('figma:execute', code, timeoutMs, fileKey) as Promise<any>,
+
   // ── Auto-update (global) ──────────────────
   getAppVersion: () => ipcRenderer.invoke('update:get-version') as Promise<string>,
   downloadUpdate: () => ipcRenderer.invoke('update:download'),

@@ -93,6 +93,10 @@
     "dmg": {
       "sign": false
     },
+    "asarUnpack": [
+      "node_modules/esbuild/**",
+      "node_modules/@esbuild/**"
+    ],
     "files": [
       "dist/**/*"
     ],

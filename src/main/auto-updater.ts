@@ -48,7 +48,11 @@ export async function initAutoUpdater(mainWindow: BrowserWindow): Promise<void> 
     safeSend(mainWindow.webContents, 'update:progress', Math.round(progress.percent));
   });
 
+  let downloadedVersion: string | null = null;
   autoUpdater.on('update-downloaded', (info: any) => {
+    // Guard: electron-updater can fire this event twice (observed in logs).
+    if (downloadedVersion === info.version) return;
+    downloadedVersion = info.version;
     log.info({ version: info.version }, 'Update downloaded — will install on quit');
     safeSend(mainWindow.webContents, 'update:downloaded', info.version);
   });
@@ -88,9 +92,14 @@ export async function checkForUpdates(): Promise<void> {
 
 /** Quit and install the downloaded update immediately. */
 export async function quitAndInstall(): Promise<void> {
-  const mod = await import('electron-updater');
-  const autoUpdater = mod.autoUpdater ?? mod.default?.autoUpdater;
-  autoUpdater.quitAndInstall();
+  try {
+    const mod = await import('electron-updater');
+    const autoUpdater = mod.autoUpdater ?? mod.default?.autoUpdater;
+    autoUpdater.quitAndInstall();
+  } catch (err) {
+    log.error({ err }, 'quitAndInstall failed');
+    throw err;
+  }
 }
 
 /** Returns the current app version. */
