@@ -879,7 +879,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
         return JSON.stringify({ pageId: p.id, pageName: p.name });
       })()`;
       const targetKey = fileKey || infra.wsServer.getConnectedFileInfo()?.fileKey;
-      return infra.wsServer.sendCommand('EXECUTE_CODE', { code, timeout: 10000 }, 12000, targetKey || undefined);
+      return await infra.wsServer.sendCommand('EXECUTE_CODE', { code, timeout: 10000 }, 12000, targetKey || undefined);
     } catch (err: any) {
       log.warn({ err }, 'figma:clear-page failed');
       return { error: err.message };
