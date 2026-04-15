@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readJsonOrQuarantine } from '../fs-utils.js';
 import { ALL_MICRO_JUDGE_IDS, getJudgeDefinition } from './judge-registry.js';
 import type { MicroJudgeId, SubagentRole } from './types.js';
 
@@ -125,11 +126,11 @@ let cachedSettings: SubagentSettings | null = null;
 export function loadSubagentSettings(): SubagentSettings {
   if (cachedSettings) return cachedSettings;
   let needsMigration = false;
-  try {
-    const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  const raw = readJsonOrQuarantine<any>(CONFIG_PATH, (v): v is any => !!v && typeof v === 'object');
+  if (raw) {
     needsMigration = raw.judgeMode === 'ask' || !raw.microJudges;
     cachedSettings = validateConfig(raw);
-  } catch {
+  } else {
     cachedSettings = { ...DEFAULT_SUBAGENT_SETTINGS };
   }
   // Persist migrated config so old formats don't re-migrate on every load

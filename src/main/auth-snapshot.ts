@@ -7,12 +7,10 @@
  * the invalidated event to avoid false positives from user-initiated logouts.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createChildLogger } from '../figma/logger.js';
-
-const log = createChildLogger({ component: 'auth-snapshot' });
+import { checkSchemaVersion, readJsonOrQuarantine } from './fs-utils.js';
 
 export const SNAPSHOT_VERSION = 1;
 export type AuthType = 'none' | 'api_key' | 'oauth';
@@ -44,33 +42,22 @@ export function readSnapshot(
   filePath: string = DEFAULT_PATH,
   onDrop?: (reason: 'corrupt' | 'version_higher' | 'version_lower') => void,
 ): AuthSnapshot | null {
-  if (!existsSync(filePath)) return null;
-  try {
-    const raw = readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<AuthSnapshot>;
-    if (typeof parsed.providers !== 'object' || typeof parsed.version !== 'number') {
-      log.warn({ filePath }, 'Auth snapshot malformed, ignoring');
-      onDrop?.('corrupt');
-      return null;
-    }
-    if (parsed.version > SNAPSHOT_VERSION) {
-      // Future version — preserve the file (don't rewrite) and alert telemetry.
-      log.warn({ filePath, version: parsed.version }, 'Auth snapshot newer than supported');
-      onDrop?.('version_higher');
-      return null;
-    }
-    if (parsed.version < SNAPSHOT_VERSION) {
-      // Future-proof: add explicit migrators here when bumping SNAPSHOT_VERSION.
-      log.warn({ filePath, version: parsed.version }, 'Auth snapshot older — migration not implemented');
-      onDrop?.('version_lower');
-      return null;
-    }
-    return parsed as AuthSnapshot;
-  } catch (err) {
-    log.warn({ err, filePath }, 'Failed to read auth snapshot, treating as missing');
-    onDrop?.('corrupt');
+  const parsed = readJsonOrQuarantine<Partial<AuthSnapshot>>(
+    filePath,
+    (v): v is Partial<AuthSnapshot> =>
+      !!v &&
+      typeof v === 'object' &&
+      typeof (v as any).version === 'number' &&
+      typeof (v as any).providers === 'object',
+  );
+  if (!parsed) {
+    if (existsSync(filePath)) onDrop?.('corrupt');
     return null;
   }
+  if (!checkSchemaVersion(filePath, parsed.version!, SNAPSHOT_VERSION, onDrop, 'auth snapshot')) {
+    return null;
+  }
+  return parsed as AuthSnapshot;
 }
 
 export function writeSnapshot(snapshot: AuthSnapshot, filePath: string = DEFAULT_PATH): void {

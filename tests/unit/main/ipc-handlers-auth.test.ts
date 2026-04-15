@@ -39,20 +39,20 @@ vi.mock('../../../src/main/auth-refresh.js', () => ({
 vi.mock('../../../src/main/agent.js', () => ({
   AVAILABLE_MODELS: {
     anthropic: [{ id: 'claude-sonnet-4-6', label: 'Sonnet', sdkProvider: 'anthropic' }],
-    openai: [{ id: 'gpt-5.4', label: 'GPT 5.4', sdkProvider: 'openai' }],
-    'openai-codex': [{ id: 'gpt-5.3-codex', label: 'Codex', sdkProvider: 'openai-codex' }],
+    openai: [
+      { id: 'gpt-5.4', label: 'GPT 5.4', sdkProvider: 'openai-codex' },
+      { id: 'gpt-5.3-codex', label: 'Codex', sdkProvider: 'openai-codex' },
+    ],
   },
   CONTEXT_SIZES: {},
   OAUTH_PROVIDER_MAP: {
     anthropic: 'anthropic',
     openai: 'openai-codex',
-    'openai-codex': 'openai-codex',
     google: 'google-gemini-cli',
   },
   OAUTH_PROVIDER_INFO: {
     anthropic: { label: 'Anthropic', description: 'Claude' },
-    openai: { label: 'OpenAI', description: 'API key' },
-    'openai-codex': { label: 'ChatGPT Codex', description: 'OAuth' },
+    openai: { label: 'OpenAI', description: 'ChatGPT subscription' },
     google: { label: 'Google', description: 'Gemini' },
   },
   safeReloadAuth: vi.fn(),
@@ -248,9 +248,9 @@ describe('setupAuthHandlers', () => {
     });
 
     it('auth:logout removes meta entry for both displayGroup AND oauthId, records logout timestamp', async () => {
-      await invoke('auth:logout', 'openai-codex');
+      await invoke('auth:logout', 'openai');
       expect(authStorage.logout).toHaveBeenCalledWith('openai-codex');
-      expect(_recordLogout).toHaveBeenCalledWith('openai-codex');
+      expect(_recordLogout).toHaveBeenCalledWith('openai');
       expect(_removeMeta).toHaveBeenCalled();
     });
   });
@@ -320,7 +320,7 @@ describe('setupAuthHandlers', () => {
         cacheHit: false,
       });
       const result = await invoke('auth:test-connection', 'openai');
-      expect(infra.modelProbe.probe).toHaveBeenCalledWith('openai', 'gpt-5.4');
+      expect(infra.modelProbe.probe).toHaveBeenCalledWith('openai-codex', 'gpt-5.4');
       expect(result.success).toBe(true);
       expect(result.data.modelId).toBe('gpt-5.4');
     });
@@ -373,45 +373,30 @@ describe('setupAuthHandlers', () => {
     });
   });
 
-  // ── F20: split OpenAI / Codex in get-auth-status ─────────────
+  // ── OpenAI is OAuth-only; anthropic/google still dual-mode ──────
 
-  describe('F20: auth:get-auth-status splits OpenAI API-key from Codex OAuth', () => {
-    it('openai card shows api_key when only API key is present (oauth ignored)', async () => {
+  describe('auth:get-auth-status OpenAI OAuth-only semantics', () => {
+    it('openai card reports oauth when ChatGPT subscription is present', async () => {
       authStorage = makeAuthStorage({
-        openai: { type: 'api_key', key: 'sk-live' },
-        // NOTE: OpenAI Codex OAuth is stored under 'openai-codex' — openai card must ignore it.
         'openai-codex': { type: 'oauth', access: 'tok' },
       });
       infra = makeInfra(authStorage);
-      // Re-register handlers with new storage.
       (ipcMain.handle as any).mockClear();
       setupAuthHandlers({ infra: infra as any, mainWindow });
       const status = await invoke('auth:get-auth-status');
-      expect(status.openai.type).toBe('api_key');
-      expect(status['openai-codex'].type).toBe('oauth');
+      expect(status.openai.type).toBe('oauth');
     });
 
-    it('openai card shows none when only Codex OAuth exists (no API key)', async () => {
+    it('openai card reports none when no OAuth — stray api_key under openai is ignored', async () => {
       authStorage = makeAuthStorage({
-        'openai-codex': { type: 'oauth', access: 'tok' },
+        openai: { type: 'api_key', key: 'sk-live' },
       });
       infra = makeInfra(authStorage);
       (ipcMain.handle as any).mockClear();
       setupAuthHandlers({ infra: infra as any, mainWindow });
       const status = await invoke('auth:get-auth-status');
       expect(status.openai.type).toBe('none');
-      expect(status['openai-codex'].type).toBe('oauth');
-    });
-
-    it('openai-codex card ignores api_key entries', async () => {
-      authStorage = makeAuthStorage({
-        'openai-codex': { type: 'api_key', key: 'should-not-appear' },
-      });
-      infra = makeInfra(authStorage);
-      (ipcMain.handle as any).mockClear();
-      setupAuthHandlers({ infra: infra as any, mainWindow });
-      const status = await invoke('auth:get-auth-status');
-      expect(status['openai-codex'].type).toBe('none');
+      expect(status).not.toHaveProperty('openai-codex');
     });
 
     it('anthropic still accepts both oauth and api_key', async () => {

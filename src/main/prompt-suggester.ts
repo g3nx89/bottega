@@ -8,7 +8,7 @@
 import { completeSimple, getModel } from '@mariozechner/pi-ai';
 import type { AuthStorage } from '@mariozechner/pi-coding-agent';
 import { createChildLogger } from '../figma/logger.js';
-import { type ModelConfig, safeReloadAuth } from './agent.js';
+import { type ModelConfig, resolveSdkModelId, safeReloadAuth } from './agent.js';
 
 const log = createChildLogger({ component: 'suggester' });
 
@@ -99,7 +99,7 @@ export class PromptSuggester {
 
     this.generating = true;
     try {
-      const model = getModel(modelConfig.provider as any, modelConfig.modelId as any);
+      const model = getModel(modelConfig.provider as any, resolveSdkModelId(modelConfig.modelId) as any);
       // B-020: Reload auth storage to pick up refreshed OAuth tokens
       safeReloadAuth(this.authStorage);
       const apiKey = await this.authStorage.getApiKey(modelConfig.provider);

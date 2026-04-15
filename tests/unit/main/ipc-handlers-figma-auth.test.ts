@@ -212,6 +212,53 @@ describe('setupFigmaAuthHandlers', () => {
       await expect(invoke('figma-auth:open-pat-docs')).resolves.toBeUndefined();
     });
   });
+
+  // ── test-token (added this session) ────────────────
+  describe('test-token', () => {
+    it('registers the channel', () => {
+      expect(handlers.has('figma-auth:test-token')).toBe(true);
+    });
+
+    it('returns an error when no token is configured', async () => {
+      figmaAuthStore.getStatus.mockReturnValue({ connected: false, encrypted: false });
+      const result = await invoke('figma-auth:test-token');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/no token/i);
+      expect(validateTokenMock).not.toHaveBeenCalled();
+    });
+
+    it('returns success + userHandle when the stored token validates', async () => {
+      figmaAuthStore.getStatus.mockReturnValue({ connected: true, encrypted: true, userHandle: 'alex' });
+      figmaAuthStore.getToken.mockReturnValue('figd_goodtoken');
+      validateTokenMock.mockResolvedValueOnce({ ok: true, handle: 'alex' });
+
+      const result = await invoke('figma-auth:test-token');
+
+      expect(validateTokenMock).toHaveBeenCalledWith('figd_goodtoken');
+      expect(result).toEqual({ success: true, userHandle: 'alex' });
+    });
+
+    it('returns failure with status when Figma rejects the token', async () => {
+      figmaAuthStore.getStatus.mockReturnValue({ connected: true, encrypted: true });
+      figmaAuthStore.getToken.mockReturnValue('figd_expired');
+      validateTokenMock.mockResolvedValueOnce({ ok: false, error: 'Unauthorized', status: 403 });
+
+      const result = await invoke('figma-auth:test-token');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Unauthorized');
+      expect(result.status).toBe(403);
+    });
+
+    it('returns failure when decryption yielded a null token despite connected status', async () => {
+      figmaAuthStore.getStatus.mockReturnValue({ connected: true, encrypted: true });
+      figmaAuthStore.getToken.mockReturnValue(null);
+
+      const result = await invoke('figma-auth:test-token');
+      expect(result.success).toBe(false);
+      expect(validateTokenMock).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('revalidateFigmaAuthOnStartup', () => {

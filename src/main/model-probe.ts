@@ -26,8 +26,17 @@ export interface ProbeResult {
 const DEFAULT_TTL_MS = 60 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 10_000;
 
+import type { AuthType } from './auth-snapshot.js';
+
 export interface AuthStorageGetKey {
   getApiKey(provider: string): Promise<string | null | undefined>;
+  /**
+   * Optional credential-type hook. When the credential is an OAuth token,
+   * the probe skips the HTTP call (Pi SDK already validated it at login,
+   * and the Anthropic /v1/models endpoint rejects OAuth bearer tokens
+   * sent as x-api-key with a misleading 401).
+   */
+  getCredentialType?(provider: string): AuthType;
 }
 
 /**
@@ -157,6 +166,10 @@ export class ModelProbe {
   async getStatusSnapshot(provider: string, modelId: string): Promise<ProbeStatus | 'unknown'> {
     const apiKey = await this.authStorage.getApiKey(provider);
     if (!apiKey) return 'unauthorized';
+    // OAuth credentials are validated by Pi SDK at login. The probe HTTP
+    // call would 401 (wrong endpoint for bearer tokens), so skip the cache
+    // lookup entirely and report ok — matches runProbe's OAuth shortcut.
+    if (this.authStorage.getCredentialType?.(provider) === 'oauth') return 'ok';
     const hit = this.getCached(provider, modelId, hashApiKey(apiKey));
     return hit?.status ?? 'unknown';
   }
@@ -219,6 +232,12 @@ export class ModelProbe {
   ): Promise<ProbeResult> {
     const fetcher = this.fetchers[provider];
     const probedAt = this.now();
+    // OAuth credentials cannot be validated against /v1/models endpoints
+    // that expect an API key. Pi SDK already validated the token at login
+    // — treat presence as 'ok' rather than producing a misleading 401.
+    if (this.authStorage.getCredentialType?.(provider) === 'oauth') {
+      return { status: 'ok', probedAt, ttlMs: this.ttlMs, cacheHit: false };
+    }
     if (!fetcher) {
       // Auth-presence only (we already have apiKey)
       return { status: 'ok', probedAt, ttlMs: this.ttlMs, cacheHit: false };

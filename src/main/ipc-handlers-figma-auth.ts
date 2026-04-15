@@ -82,6 +82,18 @@ export function setupFigmaAuthHandlers(deps: SetupFigmaAuthDeps): void {
     return { success: true };
   });
 
+  ipcMain.handle('figma-auth:test-token', async () => {
+    // Validate the currently-stored token by hitting GET /v1/me. Reuses the
+    // same shape as figma-auth:set-token's pre-save check.
+    const status = figmaAuthStore.getStatus();
+    if (!status.connected) return { success: false, error: 'No token configured' };
+    const token = figmaAuthStore.getToken();
+    if (!token) return { success: false, error: 'No token configured' };
+    const validation = await FigmaAPI.validateToken(token);
+    if (validation.ok) return { success: true, userHandle: validation.handle };
+    return { success: false, error: validation.error, status: validation.status };
+  });
+
   ipcMain.handle('figma-auth:open-pat-docs', async () => {
     // `shell.openExternal` resolves to void and rejects on failure. Previously
     // we returned an unconditional `true` which made `Promise<boolean>` a lie.

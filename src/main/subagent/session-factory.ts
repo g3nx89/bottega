@@ -15,7 +15,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
 } from '@mariozechner/pi-coding-agent';
-import type { AgentInfra } from '../agent.js';
+import { type AgentInfra, resolveSdkModelId } from '../agent.js';
 import type { SubagentModelConfig } from './config.js';
 
 /**
@@ -29,7 +29,7 @@ export async function createSubagentSession(
   systemPrompt: string,
   thinkingLevel: 'low' | 'medium' | 'high' = 'medium',
 ): Promise<CreateAgentSessionResult> {
-  const model = getModel(modelConfig.provider as any, modelConfig.modelId as any);
+  const model = getModel(modelConfig.provider as any, resolveSdkModelId(modelConfig.modelId) as any);
 
   const resourceLoader = new DefaultResourceLoader({
     cwd: os.tmpdir(),

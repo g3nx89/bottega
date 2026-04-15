@@ -10,12 +10,10 @@
  */
 
 import crypto from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createChildLogger } from '../figma/logger.js';
-
-const log = createChildLogger({ component: 'auth-meta' });
+import { checkSchemaVersion, readJsonOrQuarantine } from './fs-utils.js';
 
 export const META_VERSION = 1;
 
@@ -55,30 +53,23 @@ export function readMeta(
   filePath: string = DEFAULT_PATH,
   onDrop?: (reason: 'corrupt' | 'version_higher' | 'version_lower') => void,
 ): AuthMeta | null {
-  if (!existsSync(filePath)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as Partial<AuthMeta>;
-    if (typeof parsed.version !== 'number' || typeof parsed.providers !== 'object') {
-      log.warn({ filePath }, 'auth-meta.json malformed, ignoring');
-      onDrop?.('corrupt');
-      return null;
-    }
-    if (parsed.version > META_VERSION) {
-      log.warn({ filePath, version: parsed.version }, 'auth-meta.json newer than supported');
-      onDrop?.('version_higher');
-      return null;
-    }
-    if (parsed.version < META_VERSION) {
-      log.warn({ filePath, version: parsed.version }, 'auth-meta.json older — migration not implemented');
-      onDrop?.('version_lower');
-      return null;
-    }
-    return parsed as AuthMeta;
-  } catch (err) {
-    log.warn({ err, filePath }, 'Failed to read auth-meta.json, treating as missing');
-    onDrop?.('corrupt');
+  const parsed = readJsonOrQuarantine<Partial<AuthMeta>>(
+    filePath,
+    (v): v is Partial<AuthMeta> =>
+      !!v &&
+      typeof v === 'object' &&
+      typeof (v as any).version === 'number' &&
+      typeof (v as any).providers === 'object',
+  );
+  if (!parsed) {
+    if (existsSync(filePath)) onDrop?.('corrupt');
+    // File missing or quarantined — callers treat as absent.
     return null;
   }
+  if (!checkSchemaVersion(filePath, parsed.version!, META_VERSION, onDrop, 'auth-meta.json')) {
+    return null;
+  }
+  return parsed as AuthMeta;
 }
 
 export function writeMeta(meta: AuthMeta, filePath: string = DEFAULT_PATH): void {

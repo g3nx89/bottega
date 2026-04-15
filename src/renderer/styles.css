@@ -470,6 +470,35 @@ body {
   background: var(--surface-hover, var(--border));
 }
 
+.reset-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.reset-row .setting-hint {
+  margin: 0;
+}
+
+.reset-btn-warn {
+  border-color: #cc8a00;
+  color: #ffb84d;
+}
+
+.reset-btn-warn:hover {
+  background: rgba(204, 138, 0, 0.15);
+}
+
+.reset-btn-danger {
+  border-color: #d23c3c;
+  color: #ff7070;
+}
+
+.reset-btn-danger:hover {
+  background: rgba(210, 60, 60, 0.2);
+}
+
 .setting-input {
   flex: 1;
   padding: 6px 10px;
@@ -532,6 +561,10 @@ body {
 
 .key-status.error {
   color: #ff3b30;
+}
+
+.key-status.warn {
+  color: #ffb84d;
 }
 
 /* ── Account cards ─────────────────────── */

@@ -6,12 +6,11 @@
  * when the currently-selected model's probe returns non-ok.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createChildLogger } from '../figma/logger.js';
+import { checkSchemaVersion, readJsonOrQuarantine } from './fs-utils.js';
 
-const log = createChildLogger({ component: 'last-known-good' });
 const DEFAULT_PATH = path.join(os.homedir(), '.bottega', 'last-good-model.json');
 
 export interface LastGoodRecord {
@@ -29,29 +28,22 @@ export function readLastGood(
   filePath: string = DEFAULT_PATH,
   onDrop?: (reason: 'corrupt' | 'version_higher' | 'version_lower') => void,
 ): LastGoodRecord | null {
-  if (!existsSync(filePath)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as Partial<LastGoodRecord>;
-    if (typeof parsed.version !== 'number' || typeof parsed.providers !== 'object') {
-      onDrop?.('corrupt');
-      return null;
-    }
-    if (parsed.version > LAST_GOOD_VERSION) {
-      log.warn({ filePath, version: parsed.version }, 'last-good-model.json newer than supported');
-      onDrop?.('version_higher');
-      return null;
-    }
-    if (parsed.version < LAST_GOOD_VERSION) {
-      log.warn({ filePath, version: parsed.version }, 'last-good-model.json older — migration not implemented');
-      onDrop?.('version_lower');
-      return null;
-    }
-    return parsed as LastGoodRecord;
-  } catch (err) {
-    log.warn({ err, filePath }, 'Failed to read last-good-model.json');
-    onDrop?.('corrupt');
+  const parsed = readJsonOrQuarantine<Partial<LastGoodRecord>>(
+    filePath,
+    (v): v is Partial<LastGoodRecord> =>
+      !!v &&
+      typeof v === 'object' &&
+      typeof (v as any).version === 'number' &&
+      typeof (v as any).providers === 'object',
+  );
+  if (!parsed) {
+    if (existsSync(filePath)) onDrop?.('corrupt');
     return null;
   }
+  if (!checkSchemaVersion(filePath, parsed.version!, LAST_GOOD_VERSION, onDrop, 'last-good-model.json')) {
+    return null;
+  }
+  return parsed as LastGoodRecord;
 }
 
 export function writeLastGood(record: LastGoodRecord, filePath: string = DEFAULT_PATH): void {

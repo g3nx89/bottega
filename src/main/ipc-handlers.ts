@@ -29,6 +29,7 @@ import {
   MSG_REQUEST_FAILED_FALLBACK,
   messageForStreamError,
 } from './messages.js';
+import { classifyProbe } from './model-probe.js';
 import {
   deriveSupportCode,
   loadDiagnosticsConfig,
@@ -280,6 +281,10 @@ export interface SetupIpcDeps {
 }
 
 export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
+  // Tracks in-flight force-rerun judge controllers so tab:close can abort
+  // them. Declared early so handlers registered below can reference it.
+  const activeBatchControllers = new Map<string, AbortController>();
+
   const { slotManager, mainWindow, infra, imageGenState, sessionStore, usageTracker, figmaAuthStore } = deps;
   const modelChangeListeners: Array<(config: ModelConfig) => void> = [];
 
@@ -479,6 +484,11 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
       subscribeToSlot(updatedSlot);
       usageTracker?.trackModelSwitch(previousModel, { provider: config.provider, modelId: config.modelId }, 'user');
       modelChangeListeners.forEach((cb) => cb(config));
+      // Push the new modelConfig to the renderer so its tab cache stays in
+      // sync with main — the toolbar picker reads tab.modelConfig and gets
+      // a stale checkmark if we skip this.
+      const slotInfo = slotManager.getSlotInfo?.(slotId);
+      if (slotInfo) safeSend(mainWindow.webContents, 'tab:updated', slotInfo);
       log.info({ slotId, provider: config.provider, model: config.modelId }, 'Model switched');
       return { success: true };
     } catch (err: any) {
@@ -614,9 +624,11 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   // ── Image Generation settings (global) ────────────
 
   ipcMain.handle('imagegen:get-config', () => {
+    const hasApiKey = !!imageGenState?.settings.apiKey;
     return {
-      hasApiKey: !!effectiveApiKey(imageGenState?.settings ?? {}),
-      hasCustomKey: !!imageGenState?.settings.apiKey,
+      hasApiKey,
+      // Kept for backwards compat with older renderer builds; identical to hasApiKey.
+      hasCustomKey: hasApiKey,
       model: imageGenState?.settings.model || DEFAULT_IMAGE_MODEL,
       models: IMAGE_GEN_MODELS,
     };
@@ -642,6 +654,38 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     );
 
     return { success: true, hasCustomKey: !!imageGenState.settings.apiKey };
+  });
+
+  ipcMain.handle('imagegen:test-key', async (_event, candidate?: string) => {
+    // If a candidate key is passed (pre-save validation), use it; otherwise
+    // fall back to the currently-stored key (post-save sanity check).
+    const key = (typeof candidate === 'string' && candidate.trim()) || imageGenState?.settings.apiKey;
+    if (!key) return { success: false, error: 'No API key configured' };
+    // Cheapest valid Gemini API call: GET /v1beta/models. The key goes in
+    // the x-goog-api-key header rather than a `?key=` query param to keep
+    // secrets out of HTTP access logs, corporate TLS proxy traces, and
+    // OS-level net-logs.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
+        method: 'GET',
+        headers: { 'x-goog-api-key': key },
+        signal: ctrl.signal,
+      });
+      if (res.ok) return { success: true };
+      const body = await res.text().catch(() => '');
+      const status = classifyProbe(res.status, body);
+      if (status === 'unauthorized' || status === 'forbidden') {
+        return { success: false, error: 'Invalid or unauthorized API key', code: status.toUpperCase() };
+      }
+      return { success: false, error: `HTTP ${res.status}: ${body.slice(0, 120)}`, code: `HTTP_${res.status}` };
+    } catch (err: any) {
+      const msg = err?.name === 'AbortError' ? 'Timeout' : String(err?.message ?? err).slice(0, 120);
+      return { success: false, error: msg, code: 'NETWORK' };
+    } finally {
+      clearTimeout(timer);
+    }
   });
 
   // ── Compression profile & cache management (global) ──────
@@ -686,48 +730,10 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     return { success: true };
   });
 
-  // Active subagent batch controllers — keyed by slotId for external abort
-  const activeBatchControllers = new Map<string, AbortController>();
-
-  ipcMain.handle('subagent:run', async (_event: any, slotId: string, requests: any[]) => {
-    const slot = requireSlot(slotId);
-    if (!slot.fileKey) return { success: false, error: 'Slot has no Figma file connected' };
-    if (activeBatchControllers.has(slotId)) return { success: false, error: 'Batch already running' };
-
-    const connector = new ScopedConnector(infra.wsServer, slot.fileKey);
-    const settings = loadSubagentSettings();
-    const controller = new AbortController();
-    activeBatchControllers.set(slotId, controller);
-
-    try {
-      const { randomUUID } = await import('node:crypto');
-      const batchId = randomUUID();
-      const wc = mainWindow.webContents;
-      safeSend(wc, 'subagent:batch-start', slotId, { batchId, roles: requests.map((r: any) => r.role) });
-      const { runSubagentBatch } = await import('./subagent/orchestrator.js');
-      const result = await runSubagentBatch(infra, connector, requests, settings, batchId, controller.signal, (event) =>
-        safeSend(wc, 'subagent:status', slotId, event),
-      );
-      safeSend(wc, 'subagent:batch-end', slotId, result);
-      // Diagnostic logs already written by orchestrator — no duplicate here
-      return { success: true, result };
-    } catch (err: any) {
-      log.error({ err, slotId }, 'Subagent batch failed');
-      return { success: false, error: err.message };
-    } finally {
-      activeBatchControllers.delete(slotId);
-    }
-  });
-
-  ipcMain.handle('subagent:abort', (_event: any, slotId: string) => {
-    const ctrl = activeBatchControllers.get(slotId);
-    if (ctrl) {
-      ctrl.abort();
-      activeBatchControllers.delete(slotId);
-      return { success: true };
-    }
-    return { success: false, error: 'No active batch' };
-  });
+  // Subagent batch IPC (scout/analyst/auditor) was removed — orphan code.
+  // The Judge harness uses its own pipeline (runMicroJudgeBatch +
+  // forceRerunJudge). activeBatchControllers (declared earlier) still tracks
+  // force-rerun judge controllers so tab:close can abort a running judge turn.
 
   // ── Judge control ──────────────────────────────────
 

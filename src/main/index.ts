@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, crashReporter, dialog, ipcMain, safeStorage } from 'electron';
 import { createChildLogger, logFilePath, logger, sessionUid } from '../figma/logger.js';
 import { DEFAULT_WS_PORT } from '../figma/port-discovery.js';
-import { type AgentInfra, createAgentInfra, OAUTH_PROVIDER_MAP } from './agent.js';
+import { type AgentInfra, buildAuthAdapter, createAgentInfra, OAUTH_PROVIDER_MAP } from './agent.js';
 import { AppStatePersistence } from './app-state-persistence.js';
 import { readMeta, writeMeta } from './auth-meta.js';
 import { readSnapshot, writeSnapshot } from './auth-snapshot.js';
@@ -16,6 +16,7 @@ import { effectiveApiKey, loadImageGenSettings } from './image-gen/config.js';
 import { ImageGenerator } from './image-gen/image-generator.js';
 import { setupIpcHandlers, syncFigmaPlugin } from './ipc-handlers.js';
 import { revalidateFigmaAuthOnStartup } from './ipc-handlers-figma-auth.js';
+import { setupResetHandlers } from './ipc-handlers-reset.js';
 import { getLastGood } from './last-known-good.js';
 import {
   MSG_PLUGIN_UPDATED,
@@ -266,7 +267,7 @@ if (!gotTheLock) {
           figmaAPI: figmaCore.figmaAPI,
           queueManager: new OperationQueueManager(),
           metricsRegistry: new MetricsRegistry(),
-          modelProbe: new ModelProbe(authStorage),
+          modelProbe: new ModelProbe(buildAuthAdapter(authStorage)),
           getImageGenerator: () => imageGenState.generator,
         };
       } else {
@@ -410,6 +411,8 @@ if (!gotTheLock) {
         usageTracker,
         figmaAuthStore,
       });
+
+      setupResetHandlers({ infra });
 
       // Subscribe restored slots to IPC events
       for (const slotInfo of slotManager.listSlots()) {
@@ -691,12 +694,30 @@ if (!gotTheLock) {
           safeSend(wc6, 'tab:updated', slotManager.getSlotInfo(slot.id));
         }
       });
+      const wsServerRef = figmaCore.wsServer;
       figmaCore.wsServer.on('disconnected', () => {
-        log.info('Figma disconnected');
+        // wsServer emits 'disconnected' on every individual client drop, not
+        // only when the last one leaves. Treat it as global only when no
+        // file is still connected — otherwise we'd flip the titlebar dot to
+        // red while another tab is still happily attached.
+        const stillConnected = slotManager.listSlots().some((s) => s.fileKey && wsServerRef.isFileConnected(s.fileKey));
+        const wc4 = safeWc(mainWindow);
+        if (!wc4) return;
+        if (stillConnected) {
+          log.debug('A Figma client disconnected but others remain — keeping titlebar dot green');
+          // Resync per-tab dots for any slot that lost its specific client.
+          for (const slotInfo of slotManager.listSlots()) {
+            safeSend(wc4, 'tab:updated', slotManager.getSlotInfo(slotInfo.id));
+          }
+          return;
+        }
+        log.info('Figma disconnected (no remaining clients)');
         usageTracker.setFigmaConnected(false);
         usageTracker.trackFigmaDisconnected();
-        const wc4 = safeWc(mainWindow);
-        if (wc4) safeSend(wc4, 'figma:disconnected');
+        safeSend(wc4, 'figma:disconnected');
+        for (const slotInfo of slotManager.listSlots()) {
+          safeSend(wc4, 'tab:updated', slotManager.getSlotInfo(slotInfo.id));
+        }
       });
 
       // 10. Log operation progress events for observability

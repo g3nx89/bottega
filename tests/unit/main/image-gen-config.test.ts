@@ -2,20 +2,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_IMAGEGEN_API_KEY, effectiveApiKey } from '../../../src/main/image-gen/config.js';
+import { effectiveApiKey } from '../../../src/main/image-gen/config.js';
 
 describe('image-gen config', () => {
   describe('effectiveApiKey', () => {
-    it('should return custom key when set', () => {
+    it('returns the user-provided key when set', () => {
       expect(effectiveApiKey({ apiKey: 'custom-key-123' })).toBe('custom-key-123');
     });
 
-    it('should return DEFAULT_IMAGEGEN_API_KEY when no custom key', () => {
-      expect(effectiveApiKey({})).toBe(DEFAULT_IMAGEGEN_API_KEY);
+    it('returns empty string when no key is set (image gen disabled)', () => {
+      expect(effectiveApiKey({})).toBe('');
     });
 
-    it('should return DEFAULT_IMAGEGEN_API_KEY when apiKey is empty string', () => {
-      expect(effectiveApiKey({ apiKey: '' })).toBe(DEFAULT_IMAGEGEN_API_KEY);
+    it('returns empty string when apiKey is the empty string', () => {
+      expect(effectiveApiKey({ apiKey: '' })).toBe('');
     });
   });
 

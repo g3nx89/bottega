@@ -13,13 +13,12 @@ const modelSelect = document.getElementById('model-select');
 const transparencySlider = document.getElementById('transparency-slider');
 const transparencyValue = document.getElementById('transparency-value');
 
-// F20: OpenAI is split into two account cards —
-//   'openai' (API key only) and 'openai-codex' (OAuth only, aka ChatGPT Codex).
+// OpenAI is OAuth-only (ChatGPT Plus/Pro subscription). Anthropic + Google
+// still accept either OAuth or API key via the "Use API key instead" path.
 const PROVIDER_META = {
   anthropic: { label: 'Anthropic', sublabel: 'Claude Pro / Max', keyPlaceholder: 'sk-ant-...' },
-  openai: { label: 'OpenAI', sublabel: 'API key (platform.openai.com)', keyPlaceholder: 'sk-...' },
-  'openai-codex': { label: 'ChatGPT (Codex)', sublabel: 'ChatGPT Plus / Pro subscription', keyPlaceholder: '' },
-  google: { label: 'Google', sublabel: 'Gemini (free)', keyPlaceholder: 'AIza...' },
+  openai: { label: 'OpenAI', sublabel: 'ChatGPT Plus / Pro subscription', keyPlaceholder: '' },
+  google: { label: 'Google', sublabel: 'Gemini', keyPlaceholder: 'AIza...' },
 };
 
 // ── Account cards ────────────────────────
@@ -191,6 +190,9 @@ async function startLogin(displayGroup) {
   loginInProgress = null;
   loginArea.classList.add('hidden');
   await renderAccountCards();
+  // Repopulate the model-picker dot cache so newly authorized providers
+  // turn green immediately instead of waiting for the next Test click.
+  refreshModelStatus();
 
   if (result.success) {
     await handleLoginSuccess(displayGroup);
@@ -318,14 +320,9 @@ saveKeyBtn.addEventListener('click', async () => {
 
 // ── Model selector ───────────────────────
 
-// F9: Map probe status → dot prefix for the option label.
-// Named `modelStatusDot` to avoid collision with app.js' `const statusDot`
-// (the Figma connection status DOM element — both scripts share global scope).
-function modelStatusDot(status) {
-  if (status === 'ok') return '🟢';
-  if (status === 'unauthorized' || status === 'forbidden' || status === 'not_found') return '🔴';
-  return '🟡';
-}
+// modelStatusDotEmoji() is defined once in app.js and consumed here via
+// shared global scope. Keeping the canonical mapping in a single place
+// avoids drift when probe statuses are added or reclassified.
 
 let _modelStatusCache = {};
 
@@ -340,7 +337,7 @@ function populateModelSelect() {
       // Value encodes sdkProvider:modelId (sdkProvider is the Pi SDK provider)
       opt.value = m.sdkProvider + ':' + m.id;
       const status = _modelStatusCache[m.id] ?? 'unknown';
-      opt.textContent = `${modelStatusDot(status)} ${m.label}`;
+      opt.textContent = `${modelStatusDotEmoji(status)} ${m.label}`;
       // F10: disable reds so picker enforces auth invariant.
       if (status === 'unauthorized' || status === 'forbidden' || status === 'not_found') {
         opt.disabled = true;
@@ -357,12 +354,20 @@ function populateModelSelect() {
   modelSelect.value = savedProvider + ':' + savedModel;
 }
 
-/** F9: refresh dots from main. Call after auth changes or on settings open. */
+/** Refresh dots from main. Call after auth changes or on settings open. */
 async function refreshModelStatus() {
   if (typeof window.api.getModelStatus !== 'function') return;
   try {
     _modelStatusCache = await window.api.getModelStatus();
     populateModelSelect();
+    // Reuse the just-fetched snapshot to repaint the micro-judge selects and
+    // the toolbar cache — avoids two extra IPC roundtrips for the same data.
+    if (typeof populateRoleModelSelects === 'function') {
+      void populateRoleModelSelects(_modelStatusCache);
+    }
+    if (typeof setToolbarModelStatusCache === 'function') {
+      setToolbarModelStatusCache(_modelStatusCache);
+    }
   } catch {
     // Silent fail — dots will remain neutral. Log visible via devtools.
   }
@@ -428,19 +433,20 @@ initAuthUI();
 
 const imagegenKeyInput = document.getElementById('imagegen-key-input');
 const imagegenSaveKeyBtn = document.getElementById('imagegen-save-key-btn');
+const imagegenTestKeyBtn = document.getElementById('imagegen-test-key-btn');
 const imagegenResetKeyBtn = document.getElementById('imagegen-reset-key-btn');
 const imagegenKeyStatus = document.getElementById('imagegen-key-status');
 const imagegenModelSelect = document.getElementById('imagegen-model-select');
 
-function updateImageGenKeyUI(hasCustomKey) {
-  if (hasCustomKey) {
-    imagegenKeyStatus.textContent = 'Custom API key active';
+function updateImageGenKeyUI(hasApiKey) {
+  if (hasApiKey) {
+    imagegenKeyStatus.textContent = 'API key active';
     imagegenKeyStatus.className = 'key-status success';
     imagegenKeyInput.placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
     imagegenResetKeyBtn.classList.remove('hidden');
   } else {
-    imagegenKeyStatus.textContent = 'Using default key';
-    imagegenKeyStatus.className = 'key-status success';
+    imagegenKeyStatus.textContent = 'Not connected';
+    imagegenKeyStatus.className = 'key-status error';
     imagegenKeyInput.placeholder = 'AIza...';
     imagegenResetKeyBtn.classList.add('hidden');
   }
@@ -459,7 +465,7 @@ async function initImageGenUI() {
   });
   imagegenModelSelect.value = config.model;
 
-  updateImageGenKeyUI(config.hasCustomKey);
+  updateImageGenKeyUI(config.hasApiKey);
 }
 
 imagegenSaveKeyBtn.addEventListener('click', async () => {
@@ -467,11 +473,26 @@ imagegenSaveKeyBtn.addEventListener('click', async () => {
   if (!key) return;
 
   imagegenSaveKeyBtn.disabled = true;
-  const result = await window.api.setImageGenConfig({ apiKey: key });
+  const original = imagegenSaveKeyBtn.textContent;
+  imagegenSaveKeyBtn.textContent = 'Validating\u2026';
+  // Validate against Gemini before persisting — protects against typos and
+  // expired/invalid keys silently saved to disk.
+  const test = await window.api.testImageGenKey(key).catch((err) => ({ success: false, error: String(err) }));
+  if (!test?.success) {
+    imagegenKeyStatus.textContent = `\u2717 ${test?.error ?? 'Invalid API key'}`;
+    imagegenKeyStatus.className = 'key-status error';
+    imagegenSaveKeyBtn.textContent = original;
+    imagegenSaveKeyBtn.disabled = false;
+    return;
+  }
+  await window.api.setImageGenConfig({ apiKey: key });
+  imagegenSaveKeyBtn.textContent = original;
   imagegenSaveKeyBtn.disabled = false;
   imagegenKeyInput.value = '';
 
-  updateImageGenKeyUI(result.hasCustomKey);
+  // Re-fetch full config so hasDefaultKey stays accurate.
+  const refreshed = await window.api.getImageGenConfig();
+  updateImageGenKeyUI(refreshed.hasApiKey);
 });
 
 imagegenResetKeyBtn.addEventListener('click', async () => {
@@ -479,12 +500,37 @@ imagegenResetKeyBtn.addEventListener('click', async () => {
   await window.api.setImageGenConfig({ apiKey: '' });
   imagegenResetKeyBtn.disabled = false;
   imagegenKeyInput.value = '';
-  updateImageGenKeyUI(false);
+  const refreshed = await window.api.getImageGenConfig();
+  updateImageGenKeyUI(refreshed.hasApiKey);
 });
 
 imagegenModelSelect.addEventListener('change', async () => {
   await window.api.setImageGenConfig({ model: imagegenModelSelect.value });
 });
+
+if (imagegenTestKeyBtn) {
+  imagegenTestKeyBtn.addEventListener('click', async () => {
+    imagegenTestKeyBtn.disabled = true;
+    const original = imagegenTestKeyBtn.textContent;
+    imagegenTestKeyBtn.textContent = 'Testing\u2026';
+    try {
+      const res = await window.api.testImageGenKey();
+      if (res?.success) {
+        imagegenKeyStatus.textContent = '\u2713 API key valid';
+        imagegenKeyStatus.className = 'key-status success';
+      } else {
+        imagegenKeyStatus.textContent = `\u2717 ${res?.error ?? 'Test failed'}`;
+        imagegenKeyStatus.className = 'key-status error';
+      }
+    } catch (err) {
+      imagegenKeyStatus.textContent = `\u2717 ${String(err)}`;
+      imagegenKeyStatus.className = 'key-status error';
+    } finally {
+      imagegenTestKeyBtn.textContent = original;
+      imagegenTestKeyBtn.disabled = false;
+    }
+  });
+}
 
 initImageGenUI();
 
@@ -492,6 +538,7 @@ initImageGenUI();
 
 const figmaPatInput = document.getElementById('figma-pat-input');
 const figmaPatSaveBtn = document.getElementById('figma-pat-save-btn');
+const figmaPatTestBtn = document.getElementById('figma-pat-test-btn');
 const figmaPatClearBtn = document.getElementById('figma-pat-clear-btn');
 const figmaPatStatus = document.getElementById('figma-pat-status');
 const figmaPatDocsLink = document.getElementById('figma-pat-docs-link');
@@ -530,7 +577,7 @@ function applyFigmaConnectedUI(userHandle) {
 }
 
 function applyFigmaDisconnectedUI(message) {
-  setFigmaPatStatus(message ?? 'Not connected', '');
+  setFigmaPatStatus(message ?? 'Not connected', 'error');
   figmaPatClearBtn.classList.add('hidden');
   figmaPatInput.placeholder = FIGMA_PAT_EMPTY_PLACEHOLDER;
 }
@@ -585,6 +632,28 @@ figmaPatDocsLink.addEventListener('click', (e) => {
   e.preventDefault();
   window.api.openFigmaPatDocs();
 });
+
+if (figmaPatTestBtn) {
+  figmaPatTestBtn.addEventListener('click', async () => {
+    figmaPatTestBtn.disabled = true;
+    const original = figmaPatTestBtn.textContent;
+    figmaPatTestBtn.textContent = 'Testing\u2026';
+    try {
+      const res = await window.api.testFigmaToken();
+      if (res?.success) {
+        const who = res.userHandle ? `Connected as ${res.userHandle}` : '\u2713 Token valid';
+        setFigmaPatStatus(who, 'success');
+      } else {
+        setFigmaPatStatus(`\u2717 ${res?.error ?? 'Test failed'}`, 'error');
+      }
+    } catch (err) {
+      setFigmaPatStatus(`\u2717 ${String(err)}`, 'error');
+    } finally {
+      figmaPatTestBtn.textContent = original;
+      figmaPatTestBtn.disabled = false;
+    }
+  });
+}
 
 if (window.api.onFigmaAuthStatusChanged) {
   window.api.onFigmaAuthStatusChanged(() => refreshFigmaAuthStatus());
@@ -713,12 +782,9 @@ async function loadSubagentSettings() {
     if (maxRetriesInput) maxRetriesInput.value = config.maxRetries || 2;
     updateMaxRetriesVisibility();
     // Set per-role model selects
-    if (config.models) {
-      for (const [role, mc] of Object.entries(config.models)) {
-        const select = roleModelSelects[role];
-        if (select && mc) select.value = `${mc.provider}:${mc.modelId}`;
-      }
-    }
+    // Per-role model config (scout/analyst/auditor/judge) was removed along
+    // with the dead-code orchestrator path. config.models persists on disk
+    // for back-compat but is no longer bound to any UI.
     // Populate micro-judge rows
     if (config.microJudges && microJudgeContainer) {
       for (const row of microJudgeContainer.querySelectorAll('.micro-judge-row')) {
@@ -741,14 +807,10 @@ async function saveSubagentSettings() {
   try {
     // Merge with current config to preserve models and other fields
     const current = await window.api.getSubagentConfig();
-    // Collect per-role model configs from dropdowns
+    // Preserve any previously-saved per-role model config (scout/analyst/
+    // auditor/judge) — the UI no longer edits these, so we pass them through
+    // untouched so old entries aren't silently lost.
     const models = { ...(current.models || {}) };
-    for (const [role, select] of Object.entries(roleModelSelects)) {
-      if (select?.value) {
-        const [provider, modelId] = select.value.split(':');
-        if (provider && modelId) models[role] = { provider, modelId };
-      }
-    }
     // Collect micro-judge configs
     const microJudges = { ...(current.microJudges || {}) };
     if (microJudgeContainer) {
@@ -782,47 +844,32 @@ async function saveSubagentSettings() {
   }
 }
 
-// Per-role model selects
-const roleModelSelects = {
-  scout: document.getElementById('model-scout'),
-  analyst: document.getElementById('model-analyst'),
-  auditor: document.getElementById('model-auditor'),
-  judge: document.getElementById('model-judge'),
-};
-
-async function populateRoleModelSelects() {
+async function populateRoleModelSelects(presetStatusMap) {
+  // Legacy Scout/Analyst/Auditor/Judge selects were removed — this function
+  // now only paints the micro-judge model dropdowns. presetStatusMap lets
+  // callers reuse a snapshot they already fetched (e.g. refreshModelStatus).
   try {
-    const modelsData = await window.api.getModels();
-    // Populate role model selects
-    for (const select of Object.values(roleModelSelects)) {
-      if (!select) continue;
+    const fetchStatus = () =>
+      typeof window.api.getModelStatus === 'function' ? window.api.getModelStatus() : Promise.resolve({});
+    const [modelsData, statusMap] = await Promise.all([window.api.getModels(), presetStatusMap ?? fetchStatus()]);
+    if (!microJudgeContainer) return;
+    for (const select of microJudgeContainer.querySelectorAll('.judge-model')) {
+      const previousValue = select.value;
       clearChildren(select);
       for (const models of Object.values(modelsData)) {
         for (const m of models) {
           const opt = document.createElement('option');
           opt.value = `${m.sdkProvider}:${m.id}`;
-          opt.textContent = m.label;
+          const status = statusMap[m.id] ?? 'unknown';
+          opt.textContent = `${modelStatusDotEmoji(status)} ${m.label}`;
           select.appendChild(opt);
         }
       }
-    }
-    // Populate micro-judge model selects
-    if (microJudgeContainer) {
-      for (const select of microJudgeContainer.querySelectorAll('.judge-model')) {
-        clearChildren(select);
-        for (const models of Object.values(modelsData)) {
-          for (const m of models) {
-            const opt = document.createElement('option');
-            opt.value = `${m.sdkProvider}:${m.id}`;
-            opt.textContent = m.label;
-            select.appendChild(opt);
-          }
-        }
-      }
+      if (previousValue) select.value = previousValue;
     }
   } catch (err) {
     // biome-ignore lint/suspicious/noConsole: renderer has no structured logger
-    console.warn('Failed to populate role model selects:', err);
+    console.warn('Failed to populate judge model selects:', err);
   }
 }
 
@@ -836,9 +883,6 @@ if (autoRetryToggle) {
 }
 if (maxRetriesInput) {
   maxRetriesInput.addEventListener('change', saveSubagentSettings);
-}
-for (const select of Object.values(roleModelSelects)) {
-  if (select) select.addEventListener('change', saveSubagentSettings);
 }
 // Micro-judge change listeners
 if (microJudgeContainer) {
@@ -1073,5 +1117,68 @@ if (sendDiagnosticsToggle) {
     } catch {
       sendDiagnosticsToggle.checked = prev;
     }
+  });
+}
+
+// ── Reset actions ────────────────────────
+
+const resetAuthBtn = document.getElementById('reset-auth-btn');
+const clearHistoryBtn = document.getElementById('clear-history-btn');
+const factoryResetBtn = document.getElementById('factory-reset-btn');
+
+async function handleResetClick(button, op, onSuccess) {
+  if (!button) return;
+  button.disabled = true;
+  const original = button.textContent;
+  button.textContent = 'Working…';
+  try {
+    const result = await op();
+    if (result?.cancelled) {
+      button.textContent = original;
+    } else if (result?.ok) {
+      button.textContent = 'Done';
+      onSuccess?.();
+      setTimeout(() => {
+        button.textContent = original;
+      }, 2000);
+    } else {
+      button.textContent = 'Failed';
+      setTimeout(() => {
+        button.textContent = original;
+      }, 2000);
+    }
+  } catch {
+    button.textContent = 'Error';
+    setTimeout(() => {
+      button.textContent = original;
+    }, 2000);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+if (resetAuthBtn) {
+  resetAuthBtn.addEventListener('click', () => {
+    handleResetClick(
+      resetAuthBtn,
+      () => window.api.resetAuth(),
+      () => {
+        // Refresh account cards to reflect cleared auth.
+        if (typeof renderAccountCards === 'function') renderAccountCards();
+      },
+    );
+  });
+}
+
+if (clearHistoryBtn) {
+  clearHistoryBtn.addEventListener('click', () => {
+    handleResetClick(clearHistoryBtn, () => window.api.clearHistory());
+  });
+}
+
+if (factoryResetBtn) {
+  factoryResetBtn.addEventListener('click', () => {
+    // Main process quits + relaunches; no client-side work needed after confirm.
+    handleResetClick(factoryResetBtn, () => window.api.factoryReset());
   });
 }

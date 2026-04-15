@@ -311,11 +311,52 @@ function switchToTab(slotId) {
   }
 }
 
+// Cached per-model status from auth:get-model-status. Refilled by
+// refreshModelStatusCache() so the toolbar label can prefix a colored dot
+// matching the picker without a fresh IPC roundtrip on every render.
+let _toolbarModelStatusCache = {};
+
+// Canonical mapping from ProbeStatus to dot emoji. Mirrors
+// src/shared/model-status-ui.ts:statusDot() — that module is unreachable
+// from the vanilla-script renderer, so we inline the same logic and share
+// it across settings.js via global scope (see index.html script order).
+// eslint-disable-next-line no-unused-vars -- consumed from settings.js via global scope
+function modelStatusDotEmoji(status) {
+  if (status === 'ok') return '🟢';
+  if (status === 'unauthorized' || status === 'forbidden' || status === 'not_found') return '🔴';
+  return '🟡';
+}
+
+// Allow settings.js to feed us a cache snapshot it just fetched, avoiding a
+// second IPC roundtrip when the user opens Settings.
+// biome-ignore lint/correctness/noUnusedVariables: consumed from settings.js via global scope
+function setToolbarModelStatusCache(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return;
+  _toolbarModelStatusCache = snapshot;
+  const tab = activeTabId ? tabs.get(activeTabId) : null;
+  if (tab?.modelConfig) syncModelToTab(tab.modelConfig);
+}
+
+async function refreshModelStatusCache() {
+  if (typeof window.api.getModelStatus !== 'function') return;
+  try {
+    _toolbarModelStatusCache = await window.api.getModelStatus();
+    // Repaint current label so a status change is visible without picker open.
+    const tab = activeTabId ? tabs.get(activeTabId) : null;
+    if (tab?.modelConfig) syncModelToTab(tab.modelConfig);
+  } catch {
+    // Silent: missing dot just falls back to neutral label.
+  }
+}
+
 function syncModelToTab(modelConfig) {
   if (!modelConfig || typeof availableModels !== 'object') return;
   const allModels = Object.values(availableModels).flat();
   const match = allModels.find((m) => m.sdkProvider === modelConfig.provider && m.id === modelConfig.modelId);
-  if (match && barModelLabel) barModelLabel.textContent = match.label.replace(/ \(.*\)/, '');
+  if (match && barModelLabel) {
+    const dot = modelStatusDotEmoji(_toolbarModelStatusCache[modelConfig.modelId] ?? 'unknown');
+    barModelLabel.textContent = `${dot} ${match.label.replace(/ \(.*\)/, '')}`;
+  }
   syncModelDropdown(modelConfig);
 }
 
@@ -1481,10 +1522,10 @@ function createJudgeVerdictCard(tab, verdict, attempt, maxAttempts) {
   tab._lastJudgeCard = card;
 }
 
-// Subagent IPC events
-window.api.onSubagentBatchStart((slotId, data) => withTab(slotId, (tab) => createBatchCard(tab, data)));
+// Subagent IPC events — only subagent:status remains (emitted by judge
+// harness). batch-start/batch-end were for the orphan Scout/Analyst/Auditor
+// orchestrator pipeline and have been removed from the preload surface.
 window.api.onSubagentStatus((slotId, data) => withTab(slotId, (tab) => updateBatchRow(tab, data)));
-window.api.onSubagentBatchEnd((slotId, data) => withTab(slotId, (tab) => finalizeBatchCard(tab, data)));
 window.api.onJudgeRunning((slotId) =>
   withTab(slotId, (tab) => {
     // Guard: clear any existing indicator before creating a new one (prevents stacking)
@@ -1674,7 +1715,12 @@ window.api.onTabUpdated((slotInfo) => {
   if (tab) {
     tab.isConnected = slotInfo.isConnected;
     tab.fileName = slotInfo.fileName;
+    // Keep the renderer's modelConfig in sync with the main process. Without
+    // this, the toolbar picker reads stale values and the dropdown checkmark
+    // can disagree with the bar label after a switchModel call.
+    if (slotInfo.modelConfig) tab.modelConfig = slotInfo.modelConfig;
     renderTabBar();
+    if (slotInfo.id === activeTabId) syncModelToTab(tab.modelConfig);
   }
 });
 
@@ -1701,6 +1747,9 @@ tabAddBtn.addEventListener('click', () => {
 
 // Load existing tabs on startup and restore chat history
 (async () => {
+  // Prefetch model status so the toolbar label shows a dot from the first
+  // paint instead of waiting for the user to open Settings.
+  void refreshModelStatusCache();
   const existingTabs = await window.api.listTabs();
   for (const info of existingTabs) {
     const tab = createTabState(info);
@@ -1818,7 +1867,8 @@ function createDropdown(anchorBtn, items, onSelect) {
     const btn = document.createElement('button');
     btn.className = 'dropdown-item' + (item.active ? ' active' : '');
     const label = document.createElement('span');
-    label.textContent = item.label;
+    // Optional dot prefix (model status: 🟢 ok, 🟡 unknown, 🔴 unauthorized).
+    label.textContent = item.dot ? `${item.dot} ${item.label}` : item.label;
     const check = document.createElement('span');
     check.className = 'check';
     check.textContent = '\u2713';
@@ -1856,8 +1906,15 @@ function closeAllDropdowns() {
 barModelBtn.addEventListener('click', async (e) => {
   e.stopPropagation();
   const models = availableModels;
-  const currentProvider = localStorage.getItem('bottega:provider') || 'anthropic';
-  const currentModel = localStorage.getItem('bottega:model') || 'claude-sonnet-4-6';
+  // Prefer the active tab's modelConfig (live state) over localStorage (last
+  // global default). Otherwise the button label and the menu's checkmark can
+  // disagree when the active tab is using a different model than the default.
+  const activeTab = activeTabId ? tabs.get(activeTabId) : null;
+  const currentProvider = activeTab?.modelConfig?.provider ?? localStorage.getItem('bottega:provider') ?? 'anthropic';
+  const currentModel = activeTab?.modelConfig?.modelId ?? localStorage.getItem('bottega:model') ?? 'claude-sonnet-4-6';
+  // Use the cache populated at startup + refreshed on auth changes, avoiding
+  // an IPC roundtrip on every dropdown open.
+  const statusMap = _toolbarModelStatusCache;
   const allModels = [];
   for (const [_group, list] of Object.entries(models)) {
     list.forEach((m) =>
@@ -1865,6 +1922,7 @@ barModelBtn.addEventListener('click', async (e) => {
         id: m.id,
         label: m.label,
         sdkProvider: m.sdkProvider,
+        dot: modelStatusDotEmoji(statusMap[m.id] ?? 'unknown'),
         active: m.sdkProvider === currentProvider && m.id === currentModel,
       }),
     );
@@ -1876,6 +1934,11 @@ barModelBtn.addEventListener('click', async (e) => {
     // Sync settings panel model selector
     if (modelSelect) modelSelect.value = item.sdkProvider + ':' + item.id;
     if (!activeTabId) return;
+    // Eagerly update the renderer's tab.modelConfig so a re-open of the
+    // picker before the IPC roundtrip completes still shows the right
+    // checkmark. The follow-up tab:updated event reconfirms.
+    const eagerTab = tabs.get(activeTabId);
+    if (eagerTab) eagerTab.modelConfig = { provider: item.sdkProvider, modelId: item.id };
     await window.api.switchModel(activeTabId, { provider: item.sdkProvider, modelId: item.id });
     updateContextBar(0);
   });

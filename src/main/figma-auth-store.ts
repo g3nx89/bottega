@@ -14,12 +14,12 @@
  * - `clear()` throws if the underlying unlink fails — callers must not assume
  *   success silently. The IPC handler propagates this to the renderer.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { safeStorage } from 'electron';
 import { createChildLogger } from '../figma/logger.js';
-import { atomicWriteJsonSync } from './fs-utils.js';
+import { atomicWriteJsonSync, readJsonOrQuarantine } from './fs-utils.js';
 
 const log = createChildLogger({ component: 'figma-auth-store' });
 
@@ -159,25 +159,15 @@ export class FigmaAuthStore {
   // ── private ──────────────────────────────────
 
   private loadState(): FigmaAuthState | null {
-    try {
-      if (!existsSync(this.filePath)) return null;
-      const raw = readFileSync(this.filePath, 'utf-8');
-      const parsed = JSON.parse(raw) as Partial<FigmaAuthState>;
-      if (
-        typeof parsed !== 'object' ||
-        parsed === null ||
-        typeof parsed.encrypted !== 'boolean' ||
-        typeof parsed.token !== 'string' ||
-        parsed.token.length === 0
-      ) {
-        log.warn({ path: this.filePath }, 'Invalid figma-auth.json — ignoring');
-        return null;
-      }
-      return parsed as FigmaAuthState;
-    } catch (err) {
-      log.warn({ err, path: this.filePath }, 'Failed to read figma-auth.json');
-      return null;
-    }
+    return readJsonOrQuarantine<FigmaAuthState>(
+      this.filePath,
+      (v): v is FigmaAuthState =>
+        !!v &&
+        typeof v === 'object' &&
+        typeof (v as any).encrypted === 'boolean' &&
+        typeof (v as any).token === 'string' &&
+        (v as any).token.length > 0,
+    );
   }
 
   private writeState(state: FigmaAuthState): void {

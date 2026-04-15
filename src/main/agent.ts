@@ -12,6 +12,8 @@ import {
 } from '@mariozechner/pi-coding-agent';
 import type { FigmaAPI } from '../figma/figma-api.js';
 import type { FigmaWebSocketServer } from '../figma/websocket-server.js';
+import type { AuthType } from './auth-snapshot.js';
+import type { StoredCredential } from './auth-types.js';
 import type { CompressionConfigManager } from './compression/compression-config.js';
 import type { CompactDesignSystem, DesignSystemCache } from './compression/design-system-cache.js';
 import { createCompressionExtensionFactory } from './compression/extension-factory.js';
@@ -34,7 +36,7 @@ import { resolveIntent } from './workflows/intent-router.js';
 import type { DesignWorkflowContext } from './workflows/types.js';
 
 export interface ModelConfig {
-  provider: string; // Pi SDK provider ID: 'anthropic' | 'openai' | 'openai-codex' | 'google' | 'google-gemini-cli'
+  provider: string; // Pi SDK provider ID: 'anthropic' | 'openai-codex' | 'google' | 'google-gemini-cli'
   modelId: string; // e.g. 'claude-sonnet-4-6', 'gpt-5.4', 'gemini-3.1-pro'
 }
 
@@ -61,25 +63,26 @@ export function isThinkingLevel(s: string): s is ThinkingLevel {
  */
 export const OAUTH_PROVIDER_MAP: Record<string, string> = {
   anthropic: 'anthropic',
-  // F20: 'openai' now means API key only. ChatGPT Codex OAuth moved to its own
-  // display group 'openai-codex' to disambiguate the two login surfaces.
+  // OpenAI is OAuth-only (ChatGPT Plus/Pro subscription). The legacy API key
+  // path against platform.openai.com was removed — all gpt-* models route
+  // through the openai-codex SDK provider regardless of their ID.
   openai: 'openai-codex',
-  'openai-codex': 'openai-codex',
   google: 'google-gemini-cli',
 };
 
 /** Human-readable info for display groups (used in both main & renderer) */
 export const OAUTH_PROVIDER_INFO: Record<string, { label: string; description: string }> = {
   anthropic: { label: 'Anthropic', description: 'Claude Pro / Max' },
-  openai: { label: 'OpenAI', description: 'API key (platform.openai.com)' },
-  'openai-codex': { label: 'ChatGPT (Codex)', description: 'ChatGPT Plus / Pro subscription' },
-  google: { label: 'Google', description: 'Gemini (free)' },
+  openai: { label: 'OpenAI', description: 'ChatGPT Plus / Pro subscription' },
+  google: { label: 'Google', description: 'Gemini' },
 };
 
 /** Context window sizes in tokens per model ID */
 export const CONTEXT_SIZES: Record<string, number> = {
-  'claude-opus-4-6': 1_000_000,
+  'claude-opus-4-6': 200_000,
+  'claude-opus-4-6-1m': 1_000_000,
   'claude-sonnet-4-6': 1_000_000,
+  'claude-haiku-4-5': 200_000,
   'gpt-5.4': 1_000_000,
   'gpt-5.4-mini': 1_000_000,
   'gpt-5.4-nano': 1_000_000,
@@ -97,21 +100,90 @@ export const CONTEXT_SIZES: Record<string, number> = {
  */
 export const AVAILABLE_MODELS: Record<string, { id: string; label: string; sdkProvider: string }[]> = {
   anthropic: [
-    { id: 'claude-opus-4-6', label: 'Claude Opus 4.6 (1M)', sdkProvider: 'anthropic' },
+    { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', sdkProvider: 'anthropic' },
+    { id: 'claude-opus-4-6-1m', label: 'Claude Opus 4.6 (1M)', sdkProvider: 'anthropic' },
     { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', sdkProvider: 'anthropic' },
+    { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', sdkProvider: 'anthropic' },
   ],
   openai: [
-    { id: 'gpt-5.4', label: 'GPT-5.4', sdkProvider: 'openai' },
-    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', sdkProvider: 'openai' },
-    { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', sdkProvider: 'openai' },
+    { id: 'gpt-5.4', label: 'GPT-5.4', sdkProvider: 'openai-codex' },
+    { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', sdkProvider: 'openai-codex' },
+    { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', sdkProvider: 'openai-codex' },
     { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', sdkProvider: 'openai-codex' },
   ],
   google: [
-    { id: 'gemini-3-flash', label: 'Gemini 3 Flash', sdkProvider: 'google' },
-    { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', sdkProvider: 'google' },
-    { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', sdkProvider: 'google' },
+    { id: 'gemini-3-flash', label: 'Gemini 3 Flash', sdkProvider: 'google-gemini-cli' },
+    { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', sdkProvider: 'google-gemini-cli' },
+    { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', sdkProvider: 'google-gemini-cli' },
   ],
 };
+
+/**
+ * Map Bottega's synthetic model IDs (e.g. claude-opus-4-6-1m) onto the real
+ * Pi SDK model id. Synthetic IDs let us expose multiple Bottega-side variants
+ * (different context windows, different beta headers) of the same upstream
+ * model without polluting Pi SDK's model registry.
+ */
+export function resolveSdkModelId(modelId: string): string {
+  if (modelId === 'claude-opus-4-6-1m') return 'claude-opus-4-6';
+  return modelId;
+}
+
+/**
+ * Build the candidate provider list to probe credentials for. Some Bottega
+ * model entries (Google) declare sdkProvider='google' (API-key path) but
+ * Pi SDK stores the OAuth credential under 'google-gemini-cli'. We probe
+ * both so the model picker correctly reports the user's auth state regardless
+ * of which side they logged in from.
+ */
+export function authCandidatesFor(provider: string): string[] {
+  const candidates = new Set<string>([provider]);
+  for (const [displayGroup, oauthId] of Object.entries(OAUTH_PROVIDER_MAP)) {
+    if (displayGroup === provider) candidates.add(oauthId);
+    if (oauthId === provider) candidates.add(displayGroup);
+  }
+  return [...candidates];
+}
+
+/**
+ * Wrap Pi SDK's authStorage so ModelProbe sees credentials from any
+ * equivalent display/OAuth slot.
+ *
+ * Important: we explicitly ignore Pi SDK's env-var fallback (e.g.
+ * `OPENAI_API_KEY` in the parent shell). Bottega only honors credentials
+ * the user has stored through the Settings UI — env vars would otherwise
+ * silently authenticate accounts the user never logged into, producing
+ * misleading 'unknown' picker dots and hiding the true auth state.
+ */
+export function buildAuthAdapter(authStorage: AuthStorage) {
+  // Pi SDK's public AuthStorage type doesn't surface the synchronous `get()`
+  // accessor, but the file-based concrete impl has it. Narrow once here so
+  // the rest of the adapter avoids `as any` casts.
+  const storageWithGet = authStorage as AuthStorage & {
+    get?: (provider: string) => StoredCredential | undefined;
+  };
+  const credFor = (provider: string) => storageWithGet.get?.(provider);
+  return {
+    async getApiKey(provider: string): Promise<string | null | undefined> {
+      for (const candidate of authCandidatesFor(provider)) {
+        if (!credFor(candidate)) continue; // skip candidates with no stored credential
+        const key = await authStorage.getApiKey(candidate);
+        if (key) return key;
+      }
+      return null;
+    },
+    getCredentialType(provider: string): AuthType {
+      let foundApiKey = false;
+      for (const candidate of authCandidatesFor(provider)) {
+        const cred = credFor(candidate);
+        if (!cred) continue;
+        if (cred.type === 'oauth') return 'oauth';
+        if (cred.type === 'api_key') foundApiKey = true;
+      }
+      return foundApiKey ? 'api_key' : 'none';
+    },
+  };
+}
 
 /** Strip markdown headers, XML tags, and newlines to prevent prompt injection. */
 function sanitizeDsValue(s: string): string {
@@ -424,7 +496,7 @@ export async function createAgentInfra(
     metricsRegistry: new MetricsRegistry(),
     // F11: telemetry wired later via setModelProbeTelemetry() to avoid a
     // circular dep on UsageTracker.
-    modelProbe: new ModelProbe(authStorage),
+    modelProbe: new ModelProbe(buildAuthAdapter(authStorage)),
     getImageGenerator: opts.getImageGenerator,
   };
 }
@@ -436,7 +508,18 @@ async function buildAgentSession(
   modelConfig: ModelConfig,
   fileKey?: string,
 ): Promise<CreateAgentSessionResult> {
-  const model = getModel(modelConfig.provider as any, modelConfig.modelId as any);
+  // Synthetic IDs (e.g. claude-opus-4-6-1m) map to a real Pi SDK model id;
+  // the suffix only carries Bottega-side behavior (context window + beta header).
+  const sdkModelId = resolveSdkModelId(modelConfig.modelId);
+  const sharedModel = getModel(modelConfig.provider as any, sdkModelId as any);
+  // Clone the SDK model rather than mutating the shared registry object —
+  // getModel() returns the same reference on every call, so mutating headers
+  // in place would leak the 1M beta header into every other session using
+  // Claude Opus 4.6 (prompt-suggester, subagent sessions, etc.).
+  const model: typeof sharedModel = { ...sharedModel };
+  if (modelConfig.modelId === 'claude-opus-4-6-1m') {
+    (model as any).headers = { ...((sharedModel as any).headers ?? {}), 'anthropic-beta': 'context-1m-2025-08-07' };
+  }
 
   const allModels = Object.values(AVAILABLE_MODELS).flat();
   const entry = allModels.find((m) => m.sdkProvider === modelConfig.provider && m.id === modelConfig.modelId);

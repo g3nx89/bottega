@@ -16,7 +16,7 @@ import {
 } from './agent.js';
 import { removeMetaEntry, touchMetaEntry } from './auth-meta.js';
 import { AuthRefresher } from './auth-refresh.js';
-import { recordLogout } from './auth-snapshot.js';
+import { type AuthType, recordLogout } from './auth-snapshot.js';
 import {
   MSG_GOOGLE_PROJECT_REQUIRED,
   MSG_LOGIN_CANCELLED,
@@ -75,16 +75,13 @@ export function setupAuthHandlers(deps: { infra: AgentInfra; mainWindow: Browser
   ipcMain.handle('auth:get-auth-status', () => {
     // B-020: Reload to show current auth state (tokens may have been refreshed externally)
     safeReloadAuth(infra.authStorage);
-    const status: Record<string, { type: 'oauth' | 'api_key' | 'none'; label: string }> = {};
+    const status: Record<string, { type: AuthType; label: string }> = {};
     for (const [displayGroup, oauthId] of Object.entries(OAUTH_PROVIDER_MAP)) {
-      // F20: 'openai' is API-key-only; 'openai-codex' is OAuth-only. Other groups
-      // still accept either. Without this split, the OpenAI card would report
-      // 'oauth' whenever a Codex login existed, hiding the missing API key.
-      const apiKeyOnly = displayGroup === 'openai';
-      const oauthOnly = displayGroup === 'openai-codex';
-      const oauthCred = oauthOnly || !apiKeyOnly ? infra.authStorage.get(oauthId) : undefined;
+      // OpenAI is OAuth-only; anthropic/google accept either OAuth or API key.
+      const oauthOnly = displayGroup === 'openai';
+      const oauthCred = infra.authStorage.get(oauthId);
       const apiKeyCred = oauthOnly ? undefined : infra.authStorage.get(displayGroup);
-      if (!apiKeyOnly && oauthCred?.type === 'oauth') {
+      if (oauthCred?.type === 'oauth') {
         status[displayGroup] = { type: 'oauth', label: OAUTH_PROVIDER_INFO[displayGroup]?.description || 'Logged in' };
       } else if (!oauthOnly && (apiKeyCred?.type === 'api_key' || oauthCred?.type === 'api_key')) {
         status[displayGroup] = { type: 'api_key', label: 'API key' };

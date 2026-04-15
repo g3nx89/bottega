@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createChildLogger } from '../figma/logger.js';
-import { atomicWriteJsonSync } from './fs-utils.js';
+import { atomicWriteJsonSync, readJsonOrQuarantine } from './fs-utils.js';
 
 const log = createChildLogger({ component: 'app-state' });
 
@@ -35,21 +34,13 @@ export class AppStatePersistence {
     this.statePath = statePath || DEFAULT_STATE_PATH;
   }
 
-  /** Read state from disk. Returns null if file doesn't exist or is corrupt. */
+  /** Read state from disk. Corrupt files are quarantined; returns null to start fresh. */
   load(): AppState | null {
-    try {
-      const raw = readFileSync(this.statePath, 'utf-8');
-      const parsed = JSON.parse(raw) as AppState;
-      // Basic validation
-      if (!parsed || typeof parsed.version !== 'number' || !Array.isArray(parsed.slots)) {
-        log.warn({ path: this.statePath }, 'Invalid app state file — ignoring');
-        return null;
-      }
-      return parsed;
-    } catch (err) {
-      log.warn({ err, path: this.statePath }, 'Failed to read app state — starting fresh');
-      return null;
-    }
+    return readJsonOrQuarantine<AppState>(
+      this.statePath,
+      (v): v is AppState =>
+        !!v && typeof v === 'object' && typeof (v as any).version === 'number' && Array.isArray((v as any).slots),
+    );
   }
 
   /** Save state to disk (debounced 500ms). Multiple calls within the window → single write. */

@@ -40,15 +40,16 @@ describe('F10: isDisabledStatus', () => {
 });
 
 describe('Parity with renderer inlined copy', () => {
-  const settingsJs = readFileSync(path.join(__dirname, '../../../src/renderer/settings.js'), 'utf8');
+  // Canonical emoji mapping is inlined in app.js (renderer is plain
+  // <script> with no bundler) and consumed from settings.js via shared
+  // global scope — so we parity-check app.js, not settings.js.
+  const appJs = readFileSync(path.join(__dirname, '../../../src/renderer/app.js'), 'utf8');
 
-  it('renderer defines `function modelStatusDot(status)`', () => {
-    expect(settingsJs).toMatch(/function\s+modelStatusDot\s*\(status\)/);
+  it('renderer defines `function modelStatusDotEmoji(status)`', () => {
+    expect(appJs).toMatch(/function\s+modelStatusDotEmoji\s*\(status\)/);
   });
 
   // Verify each status → emoji mapping literally appears in the renderer body.
-  // Avoids code eval (PluginHook blocks `new Function`) while still catching
-  // divergence from the shared canonical module.
   const expectedMappings: Array<[string, string]> = [
     ['ok', statusDot('ok')],
     ['unauthorized', statusDot('unauthorized')],
@@ -61,17 +62,14 @@ describe('Parity with renderer inlined copy', () => {
 
   for (const [status, emoji] of expectedMappings) {
     it(`renderer produces ${emoji} for status="${status}"`, () => {
-      // Extract the function body and assert the emoji is present for the
-      // expected branch. Red statuses use a shared condition chain so we
-      // verify the emoji literal appears after the matching check.
-      const body = settingsJs.match(/function\s+modelStatusDot\s*\(status\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+      const body = appJs.match(/function\s+modelStatusDotEmoji\s*\(status\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
       if (status === 'ok') {
         expect(body).toContain(`if (status === 'ok') return '${emoji}'`);
       } else if (status === 'unauthorized' || status === 'forbidden' || status === 'not_found') {
         expect(body).toContain(`'${emoji}'`);
         expect(body).toContain(`status === '${status}'`);
       } else {
-        // yellow fallthrough — ensure the default return emoji matches
+        // yellow fallthrough — default return emoji.
         expect(body).toContain(`return '${emoji}'`);
       }
     });

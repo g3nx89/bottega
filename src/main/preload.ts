@@ -171,22 +171,24 @@ contextBridge.exposeInMainWorld('api', {
   // ── Image generation settings (global) ────
   getImageGenConfig: () => ipcRenderer.invoke('imagegen:get-config'),
   setImageGenConfig: (config: { apiKey?: string; model?: string }) => ipcRenderer.invoke('imagegen:set-config', config),
+  testImageGenKey: (candidate?: string) =>
+    ipcRenderer.invoke('imagegen:test-key', candidate) as Promise<{ success: boolean; error?: string; code?: string }>,
 
-  // ── Subagent config & control (global) ────
+  // ── Reset actions (global) ────────────────
+  resetAuth: () => ipcRenderer.invoke('app:reset-auth') as Promise<{ ok: boolean; cancelled?: boolean }>,
+  clearHistory: () => ipcRenderer.invoke('app:clear-history') as Promise<{ ok: boolean; cancelled?: boolean }>,
+  factoryReset: () => ipcRenderer.invoke('app:factory-reset') as Promise<{ ok: boolean; cancelled?: boolean }>,
+
+  // ── Subagent config (global) ──────────────
+  // subagent:run + subagent:abort IPC were removed along with the orphan
+  // Scout/Analyst/Auditor orchestrator pipeline; only config + judge events
+  // remain. subagent:status is still emitted by the judge harness.
   getSubagentConfig: () => ipcRenderer.invoke('subagent:get-config'),
   setSubagentConfig: (config: any) => ipcRenderer.invoke('subagent:set-config', config),
-  runSubagentBatch: (slotId: string, requests: any[]) => ipcRenderer.invoke('subagent:run', slotId, requests),
-  abortSubagentBatch: (slotId: string) => ipcRenderer.invoke('subagent:abort', slotId),
 
   // ── Subagent events (per-slot) ───────────
-  onSubagentBatchStart: (cb: (slotId: string, data: any) => void) => {
-    ipcRenderer.on('subagent:batch-start', (_event, slotId, data) => cb(slotId, data));
-  },
   onSubagentStatus: (cb: (slotId: string, data: any) => void) => {
     ipcRenderer.on('subagent:status', (_event, slotId, data) => cb(slotId, data));
-  },
-  onSubagentBatchEnd: (cb: (slotId: string, data: any) => void) => {
-    ipcRenderer.on('subagent:batch-end', (_event, slotId, data) => cb(slotId, data));
   },
   onJudgeRunning: (cb: (slotId: string) => void) => {
     ipcRenderer.on('judge:running', (_event, slotId) => cb(slotId));
@@ -225,6 +227,13 @@ contextBridge.exposeInMainWorld('api', {
   getFigmaAuthStatus: () => ipcRenderer.invoke('figma-auth:get-status') as Promise<FigmaAuthStatusDTO>,
   setFigmaToken: (token: string) => ipcRenderer.invoke('figma-auth:set-token', token) as Promise<FigmaAuthSetResultDTO>,
   clearFigmaToken: () => ipcRenderer.invoke('figma-auth:clear') as Promise<{ success: boolean; error?: string }>,
+  testFigmaToken: () =>
+    ipcRenderer.invoke('figma-auth:test-token') as Promise<{
+      success: boolean;
+      error?: string;
+      status?: number;
+      userHandle?: string;
+    }>,
   openFigmaPatDocs: () => ipcRenderer.invoke('figma-auth:open-pat-docs') as Promise<void>,
   onFigmaAuthStatusChanged: (cb: (status: FigmaAuthStatusDTO) => void) => {
     ipcRenderer.on('figma-auth:status-changed', (_event, data: FigmaAuthStatusDTO) => cb(data));

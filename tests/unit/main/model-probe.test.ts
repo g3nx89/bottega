@@ -128,4 +128,48 @@ describe('ModelProbe cache', () => {
     const probe = new ModelProbe(makeStorage('k'));
     expect(await probe.getStatusSnapshot('anthropic', 'm')).toBe('unknown');
   });
+
+  // ── OAuth shortcircuit (added this session) ─────────────────────
+  describe('OAuth shortcircuit', () => {
+    it('getStatusSnapshot returns ok when credential is oauth (skips probe)', async () => {
+      const storage = {
+        getApiKey: vi.fn().mockResolvedValue('oauth-bearer-token'),
+        getCredentialType: vi.fn().mockReturnValue('oauth' as const),
+      };
+      const probe = new ModelProbe(storage as any);
+      // No probe ever run, cache empty — OAuth shortcircuit must still return ok.
+      expect(await probe.getStatusSnapshot('anthropic', 'claude-opus-4-6')).toBe('ok');
+    });
+
+    it('runProbe returns status=ok for oauth credentials without calling the fetcher', async () => {
+      const fetcher = vi.fn();
+      const storage = {
+        getApiKey: vi.fn().mockResolvedValue('oauth-bearer-token'),
+        getCredentialType: vi.fn().mockReturnValue('oauth' as const),
+      };
+      const probe = new ModelProbe(storage as any, { fetchers: { anthropic: fetcher } });
+      const result = await probe.probe('anthropic', 'claude-opus-4-6');
+      expect(result.status).toBe('ok');
+      expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it('still probes over HTTP when credential is api_key', async () => {
+      const fetcher = vi.fn().mockResolvedValue({ httpStatus: 200, body: '' });
+      const storage = {
+        getApiKey: vi.fn().mockResolvedValue('sk-ant-api'),
+        getCredentialType: vi.fn().mockReturnValue('api_key' as const),
+      };
+      const probe = new ModelProbe(storage as any, { fetchers: { anthropic: fetcher } });
+      const result = await probe.probe('anthropic', 'm');
+      expect(result.status).toBe('ok');
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
+    it('still probes over HTTP when getCredentialType is not provided (back-compat)', async () => {
+      const fetcher = vi.fn().mockResolvedValue({ httpStatus: 200, body: '' });
+      const probe = new ModelProbe(makeStorage('k') as any, { fetchers: { anthropic: fetcher } });
+      await probe.probe('anthropic', 'm');
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+  });
 });

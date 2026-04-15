@@ -139,7 +139,6 @@
             <div id="apikey-section" class="apikey-section hidden">
               <select id="apikey-provider-select" class="setting-select">
                 <option value="anthropic">Anthropic</option>
-                <option value="openai">OpenAI</option>
                 <option value="google">Google</option>
               </select>
               <div class="key-input-row">
@@ -157,10 +156,11 @@
           <div class="setting-divider"></div>
           <div class="setting-group">
             <label class="setting-label">Image Generation</label>
-            <span class="setting-hint">Powered by Google Nano Banana. A default key is included — or use your own <a href="https://aistudio.google.com/apikey" class="setting-link-inline" target="_blank">Gemini API key</a>.</span>
+            <span class="setting-hint">Powered by Google Nano Banana. Provide your own <a href="https://aistudio.google.com/apikey" class="setting-link-inline" target="_blank">Gemini API key</a> to enable image generation.</span>
             <div class="key-input-row">
               <input type="password" id="imagegen-key-input" class="setting-input" placeholder="AIza..." autocomplete="off">
               <button id="imagegen-save-key-btn" class="setting-btn-sm">Save</button>
+              <button id="imagegen-test-key-btn" class="setting-btn-sm">Test</button>
               <button id="imagegen-reset-key-btn" class="setting-btn-sm hidden">Reset</button>
             </div>
             <span id="imagegen-key-status" class="key-status"></span>
@@ -174,6 +174,7 @@
             <div class="key-input-row">
               <input type="password" id="figma-pat-input" class="setting-input" placeholder="figd_..." autocomplete="off">
               <button id="figma-pat-save-btn" class="setting-btn-sm">Save</button>
+              <button id="figma-pat-test-btn" class="setting-btn-sm">Test</button>
               <button id="figma-pat-clear-btn" class="setting-btn-sm hidden">Disconnect</button>
             </div>
             <span id="figma-pat-status" class="key-status"></span>
@@ -255,24 +256,6 @@
                 <select class="judge-model setting-select setting-select-sm" aria-label="Model for design quality judge"></select>
               </div>
             </div>
-            <div class="setting-divider" style="margin:8px 0"></div>
-            <label class="setting-sublabel">Subagent Models</label>
-            <div class="setting-row">
-              <label class="setting-sublabel" for="model-scout">Scout</label>
-              <select id="model-scout" class="setting-select setting-select-sm" data-role="scout"></select>
-            </div>
-            <div class="setting-row">
-              <label class="setting-sublabel" for="model-analyst">Analyst</label>
-              <select id="model-analyst" class="setting-select setting-select-sm" data-role="analyst"></select>
-            </div>
-            <div class="setting-row">
-              <label class="setting-sublabel" for="model-auditor">Auditor</label>
-              <select id="model-auditor" class="setting-select setting-select-sm" data-role="auditor"></select>
-            </div>
-            <div class="setting-row">
-              <label class="setting-sublabel" for="model-judge">Judge (legacy)</label>
-              <select id="model-judge" class="setting-select setting-select-sm" data-role="judge"></select>
-            </div>
           </div>
           <div class="setting-divider"></div>
           <div class="setting-group">
@@ -333,6 +316,23 @@
             <div class="update-row">
               <span id="update-status" class="setting-hint">Checking…</span>
               <button id="check-updates-btn" class="setting-btn-small">Check for updates</button>
+            </div>
+          </div>
+          <div class="setting-divider"></div>
+          <div class="setting-group">
+            <label class="setting-label">Reset</label>
+            <span class="setting-hint">Clean up corrupt state. Irreversible — each action asks for confirmation first.</span>
+            <div class="reset-row">
+              <button id="reset-auth-btn" class="setting-btn-small reset-btn-warn">Reset authentication</button>
+              <span class="setting-hint">Sign out of every provider, keep chats.</span>
+            </div>
+            <div class="reset-row">
+              <button id="clear-history-btn" class="setting-btn-small reset-btn-warn">Clear chat history</button>
+              <span class="setting-hint">Delete all sessions, keep auth.</span>
+            </div>
+            <div class="reset-row">
+              <button id="factory-reset-btn" class="setting-btn-small reset-btn-danger">Factory reset</button>
+              <span class="setting-hint">Erase everything and restart. Nuclear option.</span>
             </div>
           </div>
         </div>

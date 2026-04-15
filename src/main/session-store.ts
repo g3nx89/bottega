@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createChildLogger } from '../figma/logger.js';
-import { atomicWriteJsonSync } from './fs-utils.js';
+import { atomicWriteJsonSync, readJsonOrQuarantine } from './fs-utils.js';
 
 const log = createChildLogger({ component: 'session-store' });
 
@@ -36,17 +35,11 @@ export class SessionStore {
   /** Read the mapping from disk (cached after first read). Returns the live cache reference. */
   private load(): FileSessionMap {
     if (this.cache) return this.cache;
-    try {
-      const raw = readFileSync(this.storePath, 'utf-8');
-      this.cache = JSON.parse(raw) as FileSessionMap;
-      return this.cache;
-    } catch (err: any) {
-      // ENOENT = file doesn't exist yet (normal on first run); anything else is unexpected
-      if (err.code !== 'ENOENT') {
-        log.warn({ err, path: this.storePath }, 'Failed to read session store — starting fresh');
-      }
-    }
-    this.cache = {};
+    const parsed = readJsonOrQuarantine<FileSessionMap>(
+      this.storePath,
+      (v): v is FileSessionMap => !!v && typeof v === 'object' && !Array.isArray(v),
+    );
+    this.cache = parsed ?? {};
     return this.cache;
   }
 
