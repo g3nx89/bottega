@@ -64,7 +64,7 @@ import {
 import type { MicroJudgeId, PrefetchedContext, SubagentResult } from '../../../../src/main/subagent/types.js';
 
 const mockInfra = {
-  authStorage: {},
+  authStorage: { getApiKey: vi.fn().mockResolvedValue('test-key') },
   modelRegistry: {},
   sessionManager: {},
   configManager: {},
@@ -209,7 +209,7 @@ describe('Orchestrator', () => {
     const mockCreateSubagentSession = vi.mocked(createSubagentSession);
 
     const microBatchInfra = {
-      authStorage: {},
+      authStorage: { getApiKey: vi.fn().mockResolvedValue('test-key') },
       modelRegistry: {},
       sessionManager: {},
       configManager: {},
@@ -607,6 +607,41 @@ describe('Orchestrator', () => {
       expect(verdict.pass).toBe(true); // Errors are skips, not failures
       expect(verdict.status).toBe('error');
       expect(verdict.finding).toBe('API rate limit exceeded');
+    });
+
+    // Issue 1 fix: pre-check credentials before spawning session. Previously
+    // missing API key surfaced as silent vacuous PASS via the generic catch.
+    it('returns no_credentials verdict when authStorage has no API key for provider', async () => {
+      const judgeIds: MicroJudgeId[] = ['alignment'];
+      const onProgress = vi.fn();
+      const noCredsInfra = {
+        ...microBatchInfra,
+        authStorage: { getApiKey: vi.fn().mockResolvedValue(null) },
+      };
+
+      const results = await runMicroJudgeBatch(
+        noCredsInfra,
+        judgeIds,
+        emptyPrefetched,
+        microBatchSettings,
+        'Create a button',
+        'batch-no-creds',
+        new AbortController().signal,
+        onProgress,
+      );
+
+      expect(mockCreateSubagentSession).not.toHaveBeenCalled();
+      expect(results).toHaveLength(1);
+      const verdict = results[0];
+      expect(verdict.judgeId).toBe('alignment');
+      expect(verdict.status).toBe('no_credentials');
+      expect(verdict.pass).toBe(true); // kept true to not block retries on missing creds
+      expect(verdict.finding).toMatch(/No credentials for provider/i);
+
+      // Observable via progress event so UI/logs surface the gap
+      const errorEvent = onProgress.mock.calls.find(([ev]: any[]) => ev.type === 'error');
+      expect(errorEvent).toBeDefined();
+      expect(errorEvent?.[0].summary).toMatch(/No credentials/i);
     });
 
     it('fires progress events for spawned and completed judges', async () => {

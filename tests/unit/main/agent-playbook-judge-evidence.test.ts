@@ -111,6 +111,7 @@ function makeInfra() {
     figmaAPI: {},
     designSystemCache: {},
     configManager: {},
+    authStorage: { getApiKey: vi.fn().mockResolvedValue('test-key') },
   } as any;
 }
 

@@ -294,10 +294,13 @@ function parseJudgeVerdict(output: string): import('./types.js').JudgeVerdict {
  */
 const PER_JUDGE_TIMEOUT_MS = 30_000;
 
-/** Create a skip/error verdict for a micro-judge that didn't evaluate. */
+/** Create a skip/error verdict for a micro-judge that didn't evaluate.
+ * NOTE: pass=true keeps aggregator neutral (non-evaluated ≠ FAIL to avoid blocking retries on
+ * transient provider errors). Aggregator/harness gate quality checks on `status === 'evaluated'`.
+ */
 function makeSkipVerdict(
   judgeId: MicroJudgeId,
-  status: 'timeout' | 'error',
+  status: 'timeout' | 'error' | 'no_credentials',
   finding: string,
   start: number,
 ): MicroVerdict {
@@ -383,6 +386,19 @@ export async function runMicroJudgeBatch(
         provider: 'anthropic',
         modelId: def.defaultModel,
       };
+
+      // Pre-check credentials before spawning session. Without this, Pi SDK
+      // throws "No API key found for <provider>" which previously became a
+      // silent vacuous PASS via the generic catch below — masking judge
+      // inactivity whenever the user's main agent runs on a non-Anthropic
+      // provider (micro-judges default to Anthropic).
+      const apiKeyCheck = await (infra.authStorage as any).getApiKey?.(modelConfig.provider);
+      if (!apiKeyCheck) {
+        const msg = `No credentials for provider "${modelConfig.provider}" — judge skipped`;
+        log.warn({ subagentId, judgeId, provider: modelConfig.provider }, msg);
+        onProgress({ batchId, subagentId, role: 'judge', type: 'error', summary: msg });
+        return makeSkipVerdict(judgeId, 'no_credentials', msg, start);
+      }
 
       // Create zero-tool session with per-judge thinking level from registry
       const sessionResult = await createSubagentSession(

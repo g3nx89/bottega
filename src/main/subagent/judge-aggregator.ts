@@ -67,6 +67,16 @@ export function aggregateVerdicts(
       continue;
     }
 
+    if (mv.status === 'no_credentials') {
+      criteria.push({
+        name: id,
+        pass: true,
+        finding: `Evaluation skipped (${mv.finding})`,
+        evidence: '',
+      });
+      continue;
+    }
+
     // status === 'evaluated'
     evaluatedCount++;
     criteria.push({

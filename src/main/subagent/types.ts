@@ -127,7 +127,7 @@ export interface MicroVerdict {
   finding: string;
   evidence: string;
   actionItems: string[];
-  status: 'evaluated' | 'timeout' | 'error';
+  status: 'evaluated' | 'timeout' | 'error' | 'no_credentials';
   durationMs: number;
 }
 
