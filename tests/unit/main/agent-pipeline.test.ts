@@ -20,6 +20,7 @@ vi.mock('../../../src/main/agent.js', () => ({
   OAUTH_PROVIDER_INFO: { Anthropic: { description: 'Claude' } },
   createFigmaAgent: vi.fn(),
   safeReloadAuth: vi.fn(),
+  wrapPromptWithErrorCapture: vi.fn(async (session: any, text: string) => session.prompt(text)),
 }));
 
 // Mock image-gen

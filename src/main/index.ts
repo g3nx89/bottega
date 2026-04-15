@@ -1,10 +1,13 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, crashReporter, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, safeStorage } from 'electron';
 import { createChildLogger, logFilePath, logger, sessionUid } from '../figma/logger.js';
 import { DEFAULT_WS_PORT } from '../figma/port-discovery.js';
 import { type AgentInfra, createAgentInfra, OAUTH_PROVIDER_MAP } from './agent.js';
 import { AppStatePersistence } from './app-state-persistence.js';
+import { readMeta, writeMeta } from './auth-meta.js';
+import { readSnapshot, writeSnapshot } from './auth-snapshot.js';
+import { decideAutoFallback } from './auto-fallback.js';
 import { initAutoUpdater } from './auto-updater.js';
 import { cleanOldLogs, collectSystemInfo } from './diagnostics.js';
 import { FigmaAuthStore } from './figma-auth-store.js';
@@ -13,6 +16,7 @@ import { effectiveApiKey, loadImageGenSettings } from './image-gen/config.js';
 import { ImageGenerator } from './image-gen/image-generator.js';
 import { setupIpcHandlers, syncFigmaPlugin } from './ipc-handlers.js';
 import { revalidateFigmaAuthOnStartup } from './ipc-handlers-figma-auth.js';
+import { getLastGood } from './last-known-good.js';
 import {
   MSG_PLUGIN_UPDATED,
   MSG_PORT_IN_USE_BODY,
@@ -21,10 +25,12 @@ import {
   MSG_STARTUP_ERROR_TITLE,
 } from './messages.js';
 import { MetricsRegistry } from './metrics-registry.js';
+import { ModelProbe } from './model-probe.js';
 import { loadDiagnosticsConfig, UsageTracker } from './remote-logger.js';
 import { safeSend, safeWc } from './safe-send.js';
 import { SessionStore } from './session-store.js';
 import { SlotManager } from './slot-manager.js';
+import { runStartupAuth } from './startup-auth.js';
 import { handleSecondInstance, isPortConflict } from './startup-guards.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -260,6 +266,7 @@ if (!gotTheLock) {
           figmaAPI: figmaCore.figmaAPI,
           queueManager: new OperationQueueManager(),
           metricsRegistry: new MetricsRegistry(),
+          modelProbe: new ModelProbe(authStorage),
           getImageGenerator: () => imageGenState.generator,
         };
       } else {
@@ -318,6 +325,7 @@ if (!gotTheLock) {
               removeQueue: () => {},
             } as unknown as AgentInfra['queueManager'],
             metricsRegistry: new MetricsRegistry(),
+            modelProbe: new ModelProbe({ getApiKey: async () => undefined }),
             getImageGenerator: () => imageGenState.generator,
           };
         }
@@ -371,6 +379,9 @@ if (!gotTheLock) {
       });
       usageTracker.startHeartbeat();
       appState.usageTracker = usageTracker;
+      // F11: now that the tracker exists, wire the ModelProbe telemetry sink
+      // so every probe call emits usage:model_probe.
+      infra.modelProbe.setTelemetry(usageTracker);
 
       // 6. Setup SlotManager + IPC between agent and renderer
       const sessionStore = new SessionStore();
@@ -405,6 +416,60 @@ if (!gotTheLock) {
         const slot = slotManager.getSlot(slotInfo.id);
         if (slot) ipcController.subscribeSlot(slot);
       }
+
+      // F12: pre-warm ModelProbe cache for each active slot's current model.
+      // Without this, the pre-send probe gate was dead code — getCached always
+      // missed because nothing populated it on startup. Fire-and-forget so slow
+      // probes don't block launch.
+      for (const slotInfo of slotManager.listSlots()) {
+        const slot = slotManager.getSlot(slotInfo.id);
+        if (!slot) continue;
+        void infra.modelProbe
+          .probe(slot.modelConfig.provider, slot.modelConfig.modelId)
+          .catch((err) => log.warn({ err, slotId: slot.id }, 'F12 cache warm-up failed'));
+      }
+
+      // F17: auto-fallback to last-known-good model per slot. Run async so a
+      // slow probe doesn't block startup; banner fires when a switch happens.
+      // Probes the target model too — never auto-switches to an equally broken one.
+      void (async () => {
+        for (const slotInfo of slotManager.listSlots()) {
+          const slot = slotManager.getSlot(slotInfo.id);
+          if (!slot) continue;
+          const { provider, modelId } = slot.modelConfig;
+          try {
+            const probe = await infra.modelProbe.probe(provider, modelId);
+            const decision = decideAutoFallback(modelId, probe.status, getLastGood(provider));
+            if (decision.type === 'no_action') continue;
+            // Probe the fallback target before committing — if it's also non-ok,
+            // skip the switch to avoid false "switched to last-known-good" banner.
+            const targetProbe = await infra.modelProbe.probe(provider, decision.to);
+            if (targetProbe.status !== 'ok') {
+              log.warn(
+                { slotId: slot.id, from: decision.from, to: decision.to, targetStatus: targetProbe.status },
+                'F17 auto-fallback skipped: target also non-ok',
+              );
+              continue;
+            }
+            log.warn(
+              { slotId: slot.id, from: decision.from, to: decision.to, status: decision.probeStatus },
+              'F17 auto-fallback triggered',
+            );
+            const previous = { provider, modelId: decision.from };
+            await slotManager.recreateSession(slot.id, { provider, modelId: decision.to });
+            const updated = slotManager.getSlot(slot.id);
+            if (updated) ipcController.subscribeSlot(updated);
+            usageTracker.trackModelSwitch(previous, { provider, modelId: decision.to }, 'auto_fallback');
+            safeSend(mainWindow.webContents, 'agent:auto-fallback', slot.id, {
+              from: decision.from,
+              to: decision.to,
+              reason: decision.probeStatus,
+            });
+          } catch (err) {
+            log.warn({ err, slotId: slot.id }, 'F17 auto-fallback failed');
+          }
+        }
+      })();
 
       // ── Background revalidation of the persisted Figma PAT (HIGH 2) ──
       // If the stored token was revoked between sessions, this clears it
@@ -505,7 +570,49 @@ if (!gotTheLock) {
       // 7. Auto-updater (GitHub Releases)
       void initAutoUpdater(mainWindow);
 
-      // 8. Emit app_launch event with full system info + settings snapshot
+      // 8. F3 + F5 + F6 + F7 + F21: launch-time auth orchestration.
+      // Unit-tested in startup-auth.test.ts; index.ts just wires dependencies.
+      const appVersion = app.getVersion();
+      const window = mainWindow;
+      const emitter = {
+        emitKeychainUnavailable: (payload: any) => safeSend(window.webContents, 'keychain:unavailable', payload),
+        emitPostUpgrade: (payload: any) => safeSend(window.webContents, 'app:post-upgrade', payload),
+      };
+      await runStartupAuth({
+        keychain: {
+          safeStorage,
+          tracker: usageTracker,
+          emitter,
+        },
+        snapshot: {
+          storage: infra.authStorage,
+          providerMap: OAUTH_PROVIDER_MAP,
+          appVersion,
+          readSnapshot: () =>
+            readSnapshot(undefined, (reason) =>
+              usageTracker.trackAuthSchemaIncompat({ file: 'auth-snapshot', reason }),
+            ),
+          writeSnapshot,
+          tracker: usageTracker,
+          emitter,
+        },
+        refresh: {
+          storage: infra.authStorage,
+          oauthIds: Object.values(OAUTH_PROVIDER_MAP),
+          tracker: usageTracker,
+        },
+        meta: {
+          storage: infra.authStorage,
+          providerMap: OAUTH_PROVIDER_MAP,
+          appVersion,
+          readMeta: () =>
+            readMeta(undefined, (reason) => usageTracker.trackAuthSchemaIncompat({ file: 'auth-meta', reason })),
+          writeMeta,
+          tracker: usageTracker,
+        },
+      });
+
+      // 9. Emit app_launch event with full system info + settings snapshot
       const startupMs = Date.now() - appStartTime;
       usageTracker.trackAppLaunch(collectSystemInfo(), startupMs, false);
 

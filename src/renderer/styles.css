@@ -2517,3 +2517,118 @@ body {
   gap: 10px;
   width: 100%;
 }
+
+/* F21: Post-upgrade wizard modal */
+.post-upgrade-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.post-upgrade-card {
+  background: var(--bg-primary, #1e1e1e);
+  color: var(--text-primary, #fff);
+  padding: 24px;
+  border-radius: 12px;
+  max-width: 420px;
+  min-width: 320px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.post-upgrade-card h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+}
+.post-upgrade-card p {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  opacity: 0.9;
+}
+.post-upgrade-card ul {
+  margin: 0 0 16px 16px;
+  padding: 0;
+  font-size: 13px;
+}
+.post-upgrade-card li {
+  margin-bottom: 4px;
+}
+.post-upgrade-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.post-upgrade-actions button {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #3a3a3a);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+}
+.post-upgrade-actions button.primary {
+  background: var(--accent, #a259ff);
+  border-color: transparent;
+  color: #fff;
+}
+
+/* F14: retry button inline after error */
+.retry-btn {
+  margin-top: 8px;
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid var(--accent, #a259ff);
+  background: transparent;
+  color: var(--accent, #a259ff);
+  cursor: pointer;
+}
+.retry-btn:hover {
+  background: var(--accent, #a259ff);
+  color: #fff;
+}
+.retry-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* F15: Recent errors panel */
+.recent-errors-panel {
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 6px;
+  background: var(--bg-secondary, #242424);
+  font-size: 12px;
+}
+.recent-errors-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.recent-errors-header .setting-sublabel {
+  flex: 1;
+}
+.recent-errors-panel ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+.recent-errors-panel li {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border-subtle, #333);
+  word-break: break-word;
+}
+.recent-errors-panel li:last-child {
+  border-bottom: none;
+}
+.recent-errors-empty {
+  opacity: 0.6;
+  font-style: italic;
+}

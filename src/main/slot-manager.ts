@@ -62,6 +62,8 @@ export interface SessionSlot extends TurnTracking {
   sessionToolHistory: Set<string>;
   /** Last known input-token count for this slot (for restoring context bar after restart). B-026. */
   lastContextTokens?: number;
+  /** F2: last promptId where the wrapper emitted a stream error — prevents double-logging empty_response. */
+  lastStreamErrorPromptId?: string | null;
 }
 
 export interface SlotInfo {

@@ -122,6 +122,36 @@ describe('FigmaAuthStore', () => {
     expect(fresh.getToken()).toBeNull();
   });
 
+  it('F8: getTokenWithStatus reports decryptFailed=false on success', async () => {
+    await store.setToken('figd_ok', 'alex');
+    const fresh = new FigmaAuthStore(tmpDir);
+    const result = fresh.getTokenWithStatus();
+    expect(result).toEqual({ token: 'figd_ok', decryptFailed: false });
+  });
+
+  it('F8: getTokenWithStatus reports decryptFailed=true when decrypt throws', async () => {
+    await store.setToken('figd_bad', 'alex');
+    safeStorageMock.decryptString.mockImplementationOnce(() => {
+      throw new Error('keychain locked');
+    });
+    const fresh = new FigmaAuthStore(tmpDir);
+    const result = fresh.getTokenWithStatus();
+    expect(result.token).toBeNull();
+    expect(result.decryptFailed).toBe(true);
+  });
+
+  it('F8: getTokenWithStatus reports decryptFailed=true when safeStorage unavailable', async () => {
+    await store.setToken('figd_foo', 'alex');
+    safeStorageMock.isEncryptionAvailable.mockReturnValue(false);
+    const fresh = new FigmaAuthStore(tmpDir);
+    expect(fresh.getTokenWithStatus()).toEqual({ token: null, decryptFailed: true });
+  });
+
+  it('F8: getTokenWithStatus reports no failure when no file exists', () => {
+    const fresh = new FigmaAuthStore(tmpDir);
+    expect(fresh.getTokenWithStatus()).toEqual({ token: null, decryptFailed: false });
+  });
+
   it('clear() wipes the file from disk', async () => {
     await store.setToken('figd_xyz', 'alex');
     const filePath = path.join(tmpDir, 'figma-auth.json');

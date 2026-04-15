@@ -10,20 +10,66 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
       name: 'figma_instantiate',
       label: 'Instantiate Component',
       description:
-        'Create an instance of a component. Use component key from figma_search_components or figma_get_library_components. For library components, uses importComponentByKeyAsync.',
-      promptSnippet: 'figma_instantiate: create instance of a component (local or library)',
+        'Create an instance of a component. For LOCAL components (just created via figma_create_component), pass nodeId (componentId from the create result). For LIBRARY/published components, pass componentKey (from figma_search_components / figma_get_library_components). At least one of nodeId or componentKey is required.',
+      promptSnippet:
+        'figma_instantiate: create instance — nodeId for local components, componentKey for library components',
       parameters: Type.Object({
-        componentKey: Type.String({ description: 'Component key' }),
+        nodeId: Type.Optional(
+          Type.String({
+            description:
+              'Component node ID (for local/unpublished components — use componentId from figma_create_component result)',
+          }),
+        ),
+        componentKey: Type.Optional(
+          Type.String({
+            description:
+              'Component key (for published library components — from figma_search_components / figma_get_library_components)',
+          }),
+        ),
         x: Type.Optional(Type.Number({ description: 'X position' })),
         y: Type.Optional(Type.Number({ description: 'Y position' })),
         parentId: Type.Optional(Type.String({ description: 'Parent node ID' })),
+        variant: Type.Optional(
+          Type.Record(Type.String(), Type.String(), {
+            description:
+              'Variant property map for COMPONENT_SET (e.g. { State: "Hover", Size: "Large" }). Applied at instantiation — avoids follow-up figma_set_variant call.',
+          }),
+        ),
+        size: Type.Optional(
+          Type.Object(
+            {
+              width: Type.Number(),
+              height: Type.Number(),
+            },
+            { description: 'Resize instance at creation — avoids follow-up figma_resize call.' },
+          ),
+        ),
+        overrides: Type.Optional(
+          Type.Record(Type.String(), Type.Any(), {
+            description:
+              'Component property overrides applied at instantiation (text, boolean, instance swap). Use base property name (e.g. "label"), not the disambiguated key. Avoids follow-up figma_set_instance_properties call.',
+          }),
+        ),
       }),
       async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
-          const result = await connector.instantiateComponent(params.componentKey, {
-            x: params.x,
-            y: params.y,
+          if (!params.componentKey && !params.nodeId) {
+            return textResult({
+              success: false,
+              error: 'figma_instantiate requires either nodeId (local components) or componentKey (library components)',
+            });
+          }
+          const position =
+            typeof params.x === 'number' || typeof params.y === 'number'
+              ? { x: params.x ?? 0, y: params.y ?? 0 }
+              : undefined;
+          const result = await connector.instantiateComponent(params.componentKey ?? '', {
+            nodeId: params.nodeId,
+            position,
             parentId: params.parentId,
+            variant: params.variant,
+            size: params.size,
+            overrides: params.overrides,
           });
           return textResult(result);
         });

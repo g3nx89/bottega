@@ -63,6 +63,7 @@ describe('setupFigmaAuthHandlers', () => {
     clear: ReturnType<typeof vi.fn>;
     getStatus: ReturnType<typeof vi.fn>;
     getToken: ReturnType<typeof vi.fn>;
+    getTokenWithStatus: ReturnType<typeof vi.fn>;
   };
   let figmaAPI: FigmaAPI & { setAccessToken: ReturnType<typeof vi.fn> };
   let mainWindow: BrowserWindow;
@@ -75,6 +76,7 @@ describe('setupFigmaAuthHandlers', () => {
       clear: vi.fn().mockResolvedValue(undefined),
       getStatus: vi.fn().mockReturnValue({ connected: false, encrypted: false }),
       getToken: vi.fn().mockReturnValue(null),
+      getTokenWithStatus: vi.fn().mockReturnValue({ token: null, decryptFailed: false }),
     } as any;
     figmaAPI = { setAccessToken: vi.fn() } as any;
     mainWindow = { webContents: {} } as any;
@@ -217,6 +219,7 @@ describe('revalidateFigmaAuthOnStartup', () => {
     clear: ReturnType<typeof vi.fn>;
     getStatus: ReturnType<typeof vi.fn>;
     getToken: ReturnType<typeof vi.fn>;
+    getTokenWithStatus: ReturnType<typeof vi.fn>;
   };
   let figmaAPI: FigmaAPI & { setAccessToken: ReturnType<typeof vi.fn> };
   let mainWindow: BrowserWindow;
@@ -227,6 +230,7 @@ describe('revalidateFigmaAuthOnStartup', () => {
       clear: vi.fn().mockResolvedValue(undefined),
       getStatus: vi.fn().mockReturnValue({ connected: true, encrypted: true, userHandle: 'alex' }),
       getToken: vi.fn().mockReturnValue('figd_persisted'),
+      getTokenWithStatus: vi.fn().mockReturnValue({ token: 'figd_persisted', decryptFailed: false }),
     } as any;
     figmaAPI = { setAccessToken: vi.fn() } as any;
     mainWindow = { webContents: {} } as any;
@@ -286,10 +290,13 @@ describe('revalidateFigmaAuthOnStartup', () => {
   it('force-emits status-changed when getStatus says connected but decrypt fails', async () => {
     // Covers the edge case where the store file exists but decryption is broken.
     figmaAuthStore.getToken.mockReturnValue(null);
+    figmaAuthStore.getTokenWithStatus.mockReturnValue({ token: null, decryptFailed: true });
 
     await revalidateFigmaAuthOnStartup({ figmaAuthStore, figmaAPI, mainWindow } as any);
 
     expect(validateTokenMock).not.toHaveBeenCalled();
+    // F8: also emits the figma:token_lost banner signal
+    expect(safeSend).toHaveBeenCalledWith(expect.anything(), 'figma:token_lost', expect.any(Object));
     expect(safeSend).toHaveBeenCalledWith(expect.anything(), 'figma-auth:status-changed', expect.any(Object));
   });
 });

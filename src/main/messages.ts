@@ -30,6 +30,35 @@ export const MSG_REQUEST_FAILED_FALLBACK = 'Request failed. Check your credentia
 export const MSG_EMPTY_TURN_WARNING =
   "I wasn't able to generate a response. This usually means your API key or login session has expired. Please check your credentials in Settings.";
 
+// F13: actionable messages routed by llm_stream_error httpStatus.
+export const MSG_ERR_UNAUTHORIZED = (provider: string) => `Session expired. Open Settings and re-login to ${provider}.`;
+export const MSG_ERR_FORBIDDEN = (modelId: string, provider: string) =>
+  `Model ${modelId} is not available on your ${provider} plan.`;
+export const MSG_ERR_NOT_FOUND = (modelId: string, provider: string) =>
+  `Model ${modelId} not recognized by ${provider}. Try another model.`;
+export const MSG_ERR_RATE_LIMIT = (retryAfterSeconds?: number) =>
+  retryAfterSeconds
+    ? `Rate limit hit. Wait ${retryAfterSeconds}s and retry.`
+    : 'Rate limit hit. Wait a moment and retry.';
+export const MSG_ERR_PROVIDER_UNAVAILABLE = (provider: string) =>
+  `${provider} is currently unavailable. Retry in a moment.`;
+export const MSG_ERR_STREAM_EMPTY = 'The model returned an empty response. Try another model or check credentials.';
+
+/** F13: Route an HTTP status + context to a user-facing message. */
+export function messageForStreamError(
+  httpStatus: number | null,
+  provider: string,
+  modelId: string,
+  retryAfterSeconds?: number,
+): string {
+  if (httpStatus === 401) return MSG_ERR_UNAUTHORIZED(provider);
+  if (httpStatus === 403) return MSG_ERR_FORBIDDEN(modelId, provider);
+  if (httpStatus === 404) return MSG_ERR_NOT_FOUND(modelId, provider);
+  if (httpStatus === 429) return MSG_ERR_RATE_LIMIT(retryAfterSeconds);
+  if (httpStatus !== null && httpStatus >= 500) return MSG_ERR_PROVIDER_UNAVAILABLE(provider);
+  return MSG_ERR_STREAM_EMPTY;
+}
+
 // ── Auth / Login ─────────────────────────────
 
 export const MSG_UNKNOWN_PROVIDER = (provider: string) => `Unknown provider: ${provider}`;

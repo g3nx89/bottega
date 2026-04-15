@@ -53,23 +53,32 @@ export class FigmaAuthStore {
 
   /** Load + decrypt. Returns null if no token stored or decryption fails. */
   getToken(): string | null {
+    return this.getTokenWithStatus().token;
+  }
+
+  /**
+   * F8: Like getToken() but also reports whether a stored token failed to decrypt.
+   * Callers surface `decryptFailed=true` as a banner so the user knows the token
+   * exists on disk but is unusable (typical after a macOS Keychain reset).
+   */
+  getTokenWithStatus(): { token: string | null; decryptFailed: boolean } {
     const state = this.loadState();
-    if (!state) return null;
+    if (!state) return { token: null, decryptFailed: false };
 
     if (state.encrypted) {
       if (!safeStorage.isEncryptionAvailable()) {
         log.warn('Stored token is encrypted but safeStorage is unavailable — cannot decrypt');
-        return null;
+        return { token: null, decryptFailed: true };
       }
       try {
-        return safeStorage.decryptString(Buffer.from(state.token, 'base64'));
+        return { token: safeStorage.decryptString(Buffer.from(state.token, 'base64')), decryptFailed: false };
       } catch (err) {
         log.warn({ err }, 'Failed to decrypt Figma token — treating as absent');
-        return null;
+        return { token: null, decryptFailed: true };
       }
     }
 
-    return state.token;
+    return { token: state.token, decryptFailed: false };
   }
 
   /**

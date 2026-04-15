@@ -12,6 +12,7 @@ import {
   isThinkingLevel,
   type ModelConfig,
   safeReloadAuth,
+  wrapPromptWithErrorCapture,
 } from './agent.js';
 import { checkForUpdates, downloadUpdate, getAppVersion, quitAndInstall } from './auto-updater.js';
 import { exportDiagnosticsZip, formatSystemInfoForClipboard } from './diagnostics.js';
@@ -24,9 +25,9 @@ import {
   MSG_EXPORT_DIALOG_TITLE,
   MSG_EXPORT_FILTER_NAME,
   MSG_IMAGEGEN_NOT_INITIALIZED,
-  MSG_NO_CREDENTIALS,
   MSG_PLUGIN_NOT_FOUND,
   MSG_REQUEST_FAILED_FALLBACK,
+  messageForStreamError,
 } from './messages.js';
 import {
   deriveSupportCode,
@@ -38,6 +39,7 @@ import {
 import { extractRenderableMessages, type RenderableTurn } from './renderable-messages.js';
 import { safeSend } from './safe-send.js';
 import { ScopedConnector } from './scoped-connector.js';
+import { checkSendPreconditions } from './send-gates.js';
 import { beginTurn, createEventRouter } from './session-events.js';
 import type { SessionStore } from './session-store.js';
 import type { SessionSlot, SlotManager } from './slot-manager.js';
@@ -328,9 +330,13 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
 
     // B-020: Reload auth storage before each prompt to pick up refreshed OAuth tokens.
     safeReloadAuth(infra.authStorage);
-    const apiKey = await infra.authStorage.getApiKey(slot.modelConfig.provider);
-    if (!apiKey) {
-      safeSend(mainWindow.webContents, 'agent:text-delta', slot.id, MSG_NO_CREDENTIALS);
+    // F4 + F12: delegate gate checks to send-gates module (unit-tested in isolation).
+    const gate = await checkSendPreconditions(
+      { authStorage: infra.authStorage as any, modelProbe: infra.modelProbe, tracker: usageTracker },
+      slot,
+    );
+    if (gate.type === 'blocked') {
+      safeSend(mainWindow.webContents, 'agent:text-delta', slot.id, gate.message);
       safeSend(mainWindow.webContents, 'agent:end', slot.id);
       return;
     }
@@ -356,18 +362,31 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     slot.suggester.resetAssistantText();
     slot.isStreaming = true;
     try {
-      await slot.session.prompt(text);
+      await wrapPromptWithErrorCapture(slot.session, text, slot.modelConfig, usageTracker, {
+        promptId: slot.currentPromptId ?? undefined,
+        slotId: slot.id,
+        turnIndex: slot.turnIndex,
+      });
     } catch (err: any) {
       log.error({ err, slotId }, 'Prompt failed');
+      if (err?.name !== 'AbortError') slot.lastStreamErrorPromptId = slot.currentPromptId;
       eventRouter.finalizeTurn(slot);
       slot.isStreaming = false;
       const isAuth = err.code === 'EAUTH' || err.status === 401 || err.status === 403;
       const errType = isAuth ? 'auth' : err.status === 429 ? 'rate_limit' : 'unknown';
       usageTracker?.trackAgentError(errType, err.message || 'Prompt failed');
-      // B-020: Surface clear re-login hint for auth/token expiry errors
-      const errMsg = isAuth
-        ? 'Your API key or login session has expired. Please re-login or update your API key in Settings.'
-        : err.message || MSG_REQUEST_FAILED_FALLBACK;
+      // F13: route by HTTP status for actionable text; fall back to raw message.
+      // EAUTH is a Pi-SDK-normalized code — treat as 401 so user sees a re-login hint.
+      const rawStatus = typeof err.status === 'number' ? err.status : null;
+      const httpStatus = rawStatus ?? (err.code === 'EAUTH' ? 401 : null);
+      const routed = messageForStreamError(httpStatus, slot.modelConfig.provider, slot.modelConfig.modelId);
+      const errMsg = httpStatus ? routed : err.message || MSG_REQUEST_FAILED_FALLBACK;
+      // F14: structured signal so renderer can decide retry visibility.
+      safeSend(mainWindow.webContents, 'agent:stream-error', slot.id, {
+        httpStatus,
+        retriable: httpStatus === 429 || (httpStatus !== null && httpStatus >= 500),
+        lastPrompt: text,
+      });
       safeSend(mainWindow.webContents, 'agent:text-delta', slot.id, `\n\nError: ${errMsg}`);
       safeSend(mainWindow.webContents, 'agent:end', slot.id);
     }
@@ -435,6 +454,17 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
       return { success: false, error: `Unknown model: ${config.provider}/${config.modelId}` };
     }
     const slot = requireSlot(slotId);
+    // F4: log mismatch between target model's required auth and what's stored
+    const authForTarget = infra.authStorage.get(config.provider);
+    if (!authForTarget) {
+      usageTracker?.trackModelAuthMismatch({
+        modelId: config.modelId,
+        sdkProvider: config.provider,
+        authType: null,
+        attemptedAction: 'switch',
+        slotId,
+      });
+    }
     const previousModel = { provider: slot.modelConfig.provider, modelId: slot.modelConfig.modelId };
     // Skip session recreation if the model hasn't actually changed
     if (previousModel.provider === config.provider && previousModel.modelId === config.modelId) {
@@ -447,7 +477,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
       // Re-subscribe to the new session
       const updatedSlot = requireSlot(slotId);
       subscribeToSlot(updatedSlot);
-      usageTracker?.trackModelSwitch(previousModel, { provider: config.provider, modelId: config.modelId });
+      usageTracker?.trackModelSwitch(previousModel, { provider: config.provider, modelId: config.modelId }, 'user');
       modelChangeListeners.forEach((cb) => cb(config));
       log.info({ slotId, provider: config.provider, model: config.modelId }, 'Model switched');
       return { success: true };
@@ -798,6 +828,11 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   ipcMain.handle('diagnostics:get-support-code', () => {
     const config = loadDiagnosticsConfig();
     return deriveSupportCode(config.anonymousId);
+  });
+
+  // F15: recent errors ring buffer for the Diagnostics panel.
+  ipcMain.handle('diagnostics:get-recent-errors', () => {
+    return usageTracker?.getRecentErrors() ?? [];
   });
 
   ipcMain.handle('diagnostics:get-config', () => {

@@ -80,20 +80,32 @@ test('auto-retry toggle shows/hides max retries stepper', async () => {
   await ensureSettings(true);
 
   const maxRetriesRow = await window.$('#max-retries-row');
+  const toggle = await window.$('#auto-retry-toggle');
+  const startChecked = await toggle.evaluate((el) => el.checked);
 
-  // Initially hidden (auto-retry off by default)
-  const initialDisplay = await maxRetriesRow.evaluate((el) => el.style.display);
-  expect(initialDisplay).toBe('none');
+  // Normalize to OFF so subsequent assertions are state-independent.
+  // Default flipped to `autoRetry: true` in commit 24d11f1 (2026-04-11).
+  if (startChecked) {
+    await window.click('#auto-retry-toggle');
+  }
 
-  // Enable auto-retry
+  const offDisplay = await maxRetriesRow.evaluate((el) => el.style.display);
+  expect(offDisplay).toBe('none');
+
+  // Enable auto-retry → stepper visible.
   await window.click('#auto-retry-toggle');
   const afterEnableDisplay = await maxRetriesRow.evaluate((el) => el.style.display);
   expect(afterEnableDisplay).not.toBe('none');
 
-  // Disable auto-retry
+  // Disable auto-retry → stepper hidden.
   await window.click('#auto-retry-toggle');
   const afterDisableDisplay = await maxRetriesRow.evaluate((el) => el.style.display);
   expect(afterDisableDisplay).toBe('none');
+
+  // Restore original state so later tests see a consistent config.
+  if (startChecked) {
+    await window.click('#auto-retry-toggle');
+  }
 });
 
 test('per-role model selects are present', async () => {

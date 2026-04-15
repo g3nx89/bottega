@@ -286,9 +286,17 @@ After each mutating turn, a Quality Judge automatically evaluates your work. Whe
 
 ## Component Workflow
 
-1. **Search**: \`figma_search_components("Button")\` → find existing components
-2. **Instantiate**: \`figma_instantiate(key)\` → place instance
-3. **Configure**: \`figma_set_instance_properties(nodeId, { props })\` → overrides
+**Local component (just created):**
+1. **Create**: \`figma_create_component({ fromFrameId })\` → returns \`{ componentId }\`
+2. **Instantiate** (one call with overrides): \`figma_instantiate({ nodeId: componentId, parentId, x, y, overrides: { label: "Submit" }, variant: { Size: "Large" } })\` → place instance with text/variant/size in a single call. Pass \`nodeId\` (NOT \`componentKey\`) for local components.
+3. **Re-configure later** (only if needed): \`figma_set_instance_properties(instanceNodeId, { props })\` → additional overrides
+
+**Library component (published):**
+1. **Search**: \`figma_search_components("Button")\` → returns \`componentKey\`
+2. **Instantiate**: \`figma_instantiate({ componentKey, parentId, x, y })\` → place instance
+3. **Configure**: \`figma_set_instance_properties(instanceNodeId, { props })\` → overrides
+
+CRITICAL: NEVER use \`figma_execute\` with \`component.createInstance()\` for instance creation. ALWAYS call \`figma_instantiate\` — pass \`nodeId\` for local components, \`componentKey\` for library components. Using figma_execute for this bypasses operation queueing and judge instrumentation.
 
 See **component-reuse** reference for: createInstance on COMPONENT vs COMPONENT_SET, addComponentProperty key handling, combineAsVariants patterns, deep traversal, and detachInstance.
 

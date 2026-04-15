@@ -38,6 +38,33 @@
       <button id="plugin-setup-dismiss" class="version-banner-close">&times;</button>
     </div>
 
+    <div id="figma-token-lost-banner" class="version-banner" style="display:none">
+      <span>Figma PAT no longer readable (Keychain changed). <button id="figma-token-reenter" class="banner-link-btn">Re-enter token</button></span>
+      <button id="figma-token-lost-dismiss" class="version-banner-close">&times;</button>
+    </div>
+
+    <div id="keychain-unavailable-banner" class="version-banner" style="display:none">
+      <span>Keychain encryption changed — some credentials may need re-entry. <button id="keychain-open-settings" class="banner-link-btn">Open Settings</button></span>
+      <button id="keychain-unavailable-dismiss" class="version-banner-close">&times;</button>
+    </div>
+
+    <div id="auto-fallback-banner" class="version-banner" style="display:none">
+      <span id="auto-fallback-text"></span>
+      <button id="auto-fallback-dismiss" class="version-banner-close">&times;</button>
+    </div>
+
+    <div id="post-upgrade-modal" class="post-upgrade-modal" style="display:none">
+      <div class="post-upgrade-card">
+        <h3>Update check-in</h3>
+        <p id="post-upgrade-summary"></p>
+        <ul id="post-upgrade-list"></ul>
+        <div class="post-upgrade-actions">
+          <button id="post-upgrade-open-settings" class="primary">Open Settings</button>
+          <button id="post-upgrade-dismiss">Dismiss</button>
+        </div>
+      </div>
+    </div>
+
     <div id="tab-bar" class="tab-bar">
       <div id="tab-list" class="tab-list"></div>
       <button id="tab-add-btn" class="tab-add" title="New tab">+</button>
@@ -281,8 +308,18 @@
             <div class="diagnostics-row">
               <button id="export-logs-btn" class="setting-btn-small">Export Logs</button>
               <button id="copy-sysinfo-btn" class="setting-btn-small">Copy System Info</button>
+              <button id="show-recent-errors-btn" class="setting-btn-small">Recent Errors</button>
             </div>
             <span id="diagnostics-export-status" class="key-status"></span>
+            <div id="recent-errors-panel" class="recent-errors-panel" style="display:none">
+              <div class="recent-errors-header">
+                <span class="setting-sublabel">Last 10 error events</span>
+                <button id="recent-errors-refresh" class="setting-btn-icon" title="Refresh">↻</button>
+                <button id="recent-errors-copy" class="setting-btn-icon" title="Copy all as JSON">&#x2398;</button>
+                <button id="recent-errors-close" class="setting-btn-icon" title="Close">&times;</button>
+              </div>
+              <ul id="recent-errors-list"></ul>
+            </div>
             <div class="setting-divider-inner"></div>
             <label class="setting-sublabel diagnostics-toggle-label">
               <input type="checkbox" id="send-diagnostics-toggle">

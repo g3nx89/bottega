@@ -44,6 +44,19 @@ function spreadTurnContext(ctx?: { promptId?: string; slotId?: string; turnIndex
   };
 }
 
+/** F15: compact record for the Diagnostics "Recent errors" panel. */
+export interface RecentErrorRecord {
+  ts: string;
+  event: 'usage:llm_stream_error' | 'usage:empty_response';
+  provider: string;
+  modelId: string;
+  httpStatus?: number | null;
+  reason?: string;
+  message: string;
+}
+
+const RECENT_ERRORS_MAX = 10;
+
 export class UsageTracker {
   private logger: pino.Logger;
   private config: DiagnosticsConfig;
@@ -52,6 +65,7 @@ export class UsageTracker {
   private eld: ReturnType<typeof monitorEventLoopDelay> | null = null;
   private figmaConnected = false;
   private rendererResponsive = true;
+  private recentErrors: RecentErrorRecord[] = [];
 
   constructor(logger: pino.Logger, config: DiagnosticsConfig, refs: SettingsRefs) {
     this.logger = logger;
@@ -250,6 +264,128 @@ export class UsageTracker {
     this.emit('usage:agent_error', { errorType, message: redactMessage(message) });
   }
 
+  // ── Auth / model observability (Sprint A) ─────
+
+  trackLlmStreamError(data: {
+    provider: string;
+    modelId: string;
+    httpStatus: number | null;
+    errorCode: string | null;
+    errorBody: string;
+    durationMs: number;
+    promptId?: string;
+    slotId?: string;
+    turnIndex?: number;
+  }): void {
+    const { promptId, slotId, turnIndex, errorBody, ...rest } = data;
+    const redacted = redactMessage(errorBody).slice(0, 500);
+    this.emit('usage:llm_stream_error', {
+      ...rest,
+      errorBody: redacted,
+      ...spreadTurnContext({ promptId, slotId, turnIndex }),
+    });
+    this.pushRecentError({
+      ts: new Date().toISOString(),
+      event: 'usage:llm_stream_error',
+      provider: data.provider,
+      modelId: data.modelId,
+      httpStatus: data.httpStatus,
+      message: redacted,
+    });
+  }
+
+  trackEmptyResponse(data: {
+    provider: string;
+    modelId: string;
+    reason: 'suspected_auth' | 'unknown';
+    durationMs: number;
+    promptId?: string;
+    slotId?: string;
+    turnIndex?: number;
+  }): void {
+    const { promptId, slotId, turnIndex, ...rest } = data;
+    this.emit('usage:empty_response', { ...rest, ...spreadTurnContext({ promptId, slotId, turnIndex }) });
+    this.pushRecentError({
+      ts: new Date().toISOString(),
+      event: 'usage:empty_response',
+      provider: data.provider,
+      modelId: data.modelId,
+      reason: data.reason,
+      message: `empty response (${data.reason})`,
+    });
+  }
+
+  // F15: bounded ring buffer of the most recent error events for the Diagnostics panel.
+  private pushRecentError(record: RecentErrorRecord): void {
+    this.recentErrors.push(record);
+    if (this.recentErrors.length > RECENT_ERRORS_MAX) {
+      this.recentErrors.splice(0, this.recentErrors.length - RECENT_ERRORS_MAX);
+    }
+  }
+
+  getRecentErrors(): RecentErrorRecord[] {
+    return [...this.recentErrors];
+  }
+
+  trackPromptCancelled(data: {
+    provider: string;
+    modelId: string;
+    durationMs: number;
+    promptId?: string;
+    slotId?: string;
+    turnIndex?: number;
+  }): void {
+    const { promptId, slotId, turnIndex, ...rest } = data;
+    this.emit('usage:prompt_cancelled', { ...rest, ...spreadTurnContext({ promptId, slotId, turnIndex }) });
+  }
+
+  trackAuthInvalidated(data: {
+    provider: string;
+    previousType: 'none' | 'api_key' | 'oauth';
+    currentType: 'none' | 'api_key' | 'oauth';
+    userInitiated: boolean;
+    reason?: string;
+  }): void {
+    this.emit('usage:auth_invalidated', data);
+  }
+
+  trackKeychainStatus(data: { available: boolean; probeOk: boolean | null; reason?: string }): void {
+    this.emit('usage:keychain_status', data);
+  }
+
+  trackAuthMigration(data: {
+    provider: string;
+    fromVersion: string;
+    toVersion: string;
+    result: 'ok' | 'failed';
+    reason?: string;
+  }): void {
+    this.emit('usage:auth_migration', data);
+  }
+
+  /** Persisted-JSON schema drop events (emitted when readX returns null). */
+  trackAuthSchemaIncompat(data: {
+    file: 'auth-snapshot' | 'auth-meta' | 'last-good-model';
+    reason: 'corrupt' | 'version_higher' | 'version_lower';
+  }): void {
+    this.emit('usage:auth_schema_incompat', data);
+  }
+
+  trackModelAuthMismatch(data: {
+    modelId: string;
+    sdkProvider: string;
+    authType: 'none' | 'api_key' | 'oauth' | null;
+    attemptedAction: 'switch' | 'send';
+    slotId?: string;
+  }): void {
+    const { slotId, authType, ...rest } = data;
+    this.emit('usage:model_auth_mismatch', {
+      ...rest,
+      authType: authType ?? 'none',
+      ...(slotId && { slotId }),
+    });
+  }
+
   trackContextLevel(data: {
     inputTokens: number;
     outputTokens: number;
@@ -269,8 +405,33 @@ export class UsageTracker {
 
   // ── Settings change events ───────────
 
-  trackModelSwitch(before: { provider: string; modelId: string }, after: { provider: string; modelId: string }): void {
-    this.emit('usage:model_switch', { before, after });
+  trackModelSwitch(
+    before: { provider: string; modelId: string },
+    after: { provider: string; modelId: string },
+    reason: 'user' | 'auto_fallback' | 'restore' = 'user',
+  ): void {
+    this.emit('usage:model_switch', { before, after, reason });
+  }
+
+  trackSendBlocked(data: {
+    provider: string;
+    modelId: string;
+    reason: 'auth_red' | 'probe_red' | 'unknown';
+    slotId?: string;
+  }): void {
+    const { slotId, ...rest } = data;
+    this.emit('usage:send_blocked', { ...rest, ...(slotId && { slotId }) });
+  }
+
+  trackModelProbe(data: {
+    provider: string;
+    modelId: string;
+    result: 'ok' | 'unauthorized' | 'forbidden' | 'not_found' | 'rate_limit' | 'error';
+    httpStatus?: number;
+    durationMs: number;
+    cacheHit: boolean;
+  }): void {
+    this.emit('usage:model_probe', data);
   }
 
   trackThinkingChange(before: string, after: string): void {

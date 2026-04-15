@@ -4,9 +4,10 @@
  */
 import { randomUUID } from 'node:crypto';
 import { createChildLogger } from '../figma/logger.js';
-import type { AgentInfra } from './agent.js';
+import { type AgentInfra, wrapPromptWithErrorCapture } from './agent.js';
 import { categorizeToolName } from './compression/metrics.js';
 import type { AgentSessionLike } from './ipc-handlers.js';
+import { recordLastGood } from './last-known-good.js';
 import { MSG_EMPTY_TURN_WARNING, MSG_REQUEST_FAILED_FALLBACK } from './messages.js';
 import type { UsageTracker } from './remote-logger.js';
 import { safeSend } from './safe-send.js';
@@ -320,6 +321,17 @@ export function createEventRouter(deps: EventRouterDeps) {
       hasAction: toolNames.length > 0,
     });
 
+    // F17: record this model as last-known-good for its provider when the turn
+    // produced meaningful output (text or tool calls). Pure empty turns (errors)
+    // don't update the record.
+    if (responseCharLength > 0 || toolNames.length > 0) {
+      try {
+        recordLastGood(slot.modelConfig.provider, slot.modelConfig.modelId);
+      } catch (err) {
+        log.warn({ err }, 'Failed to record last-known-good model');
+      }
+    }
+
     // Preserve last completed turn for feedback correlation
     slot.lastCompletedPromptId = slot.currentPromptId;
     slot.lastCompletedTurnIndex = slot.turnIndex;
@@ -443,6 +455,24 @@ export function createEventRouter(deps: EventRouterDeps) {
     const toolNamesForCheck = turnToolNames.get(slot.id) ?? [];
     if (responseLength === 0 && toolNamesForCheck.length === 0) {
       safeSend(wc, 'agent:text-delta', slot.id, MSG_EMPTY_TURN_WARNING);
+      // F2: emit empty_response only when no llm_stream_error was logged for this promptId
+      const errored = slot.lastStreamErrorPromptId && slot.lastStreamErrorPromptId === slot.currentPromptId;
+      if (!errored && slot.currentPromptId) {
+        const durationMs = slot.promptStartTime ? Date.now() - slot.promptStartTime : 0;
+        usageTracker?.trackEmptyResponse?.({
+          provider: slot.modelConfig.provider,
+          modelId: slot.modelConfig.modelId,
+          reason: durationMs < 2000 ? 'suspected_auth' : 'unknown',
+          durationMs,
+          promptId: slot.currentPromptId,
+          slotId: slot.id,
+          turnIndex: slot.turnIndex,
+        });
+      }
+    }
+    // Clear per-turn error marker regardless of empty/non-empty outcome
+    if (slot.lastStreamErrorPromptId === slot.currentPromptId) {
+      slot.lastStreamErrorPromptId = null;
     }
 
     finalizeTurn(slot);
@@ -464,8 +494,13 @@ export function createEventRouter(deps: EventRouterDeps) {
       // been reset while prompt() was running, otherwise we'd pollute the new
       // chat with the previous turn's failure.
       const guard = captureTurnGuard(slot);
-      slot.session.prompt(next.text).catch((err: any) => {
+      wrapPromptWithErrorCapture(slot.session, next.text, slot.modelConfig, usageTracker, {
+        promptId: slot.currentPromptId ?? undefined,
+        slotId: slot.id,
+        turnIndex: slot.turnIndex,
+      }).catch((err: any) => {
         log.error({ err, slotId: slot.id }, 'Queued prompt failed');
+        if (err?.name !== 'AbortError') slot.lastStreamErrorPromptId = slot.currentPromptId;
         if (guard.isStale()) {
           log.debug({ slotId: slot.id, currentTurn: slot.turnIndex }, 'Suppressing queued-prompt error: turn changed');
           return;

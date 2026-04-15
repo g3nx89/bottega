@@ -111,15 +111,21 @@ export async function revalidateFigmaAuthOnStartup(deps: SetupFigmaAuthDeps): Pr
   const { figmaAuthStore, figmaAPI, mainWindow } = deps;
 
   const status = figmaAuthStore.getStatus();
+  // F8: if the file exists but decrypt failed, surface a banner so the user
+  // can re-enter the token. Without this they just see "Not connected" and
+  // don't know why.
+  const { token, decryptFailed } = figmaAuthStore.getTokenWithStatus();
+  if (decryptFailed) {
+    safeSend(mainWindow.webContents, 'figma:token_lost', {});
+  }
+
   if (!status.connected) {
     return;
   }
-
-  const token = figmaAuthStore.getToken();
   if (!token) {
     // Status said connected but decryption just failed — force the UI to
     // sync up with reality (HIGH 2: getStatus + getToken are now consistent,
-    // but cover the race).
+    // but cover the race). F8 emitted the banner already above.
     safeSend(mainWindow.webContents, 'figma-auth:status-changed', figmaAuthStore.getStatus());
     return;
   }

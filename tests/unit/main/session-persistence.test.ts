@@ -38,6 +38,9 @@ vi.mock('../../../src/main/agent.js', () => ({
   OAUTH_PROVIDER_INFO: {} as Record<string, { description: string }>,
   createFigmaAgent: vi.fn(),
   safeReloadAuth: vi.fn(),
+  wrapPromptWithErrorCapture: vi.fn(async (session: any, text: string) => {
+    return session.prompt(text);
+  }),
 }));
 
 vi.mock('../../../src/main/image-gen/config.js', () => ({

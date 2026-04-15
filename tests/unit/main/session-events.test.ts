@@ -33,6 +33,11 @@ vi.mock('../../../src/main/safe-send.js', () => ({
   safeSend: vi.fn(),
 }));
 
+const _recordLastGood = vi.fn();
+vi.mock('../../../src/main/last-known-good.js', () => ({
+  recordLastGood: (...args: any[]) => _recordLastGood(...args),
+}));
+
 // ── Imports (after mocks) ────────────────────────
 
 import { createEventRouter } from '../../../src/main/session-events.js';
@@ -815,6 +820,96 @@ describe('createEventRouter', () => {
       // Idle: empty Set
       expect(set instanceof Set).toBe(true);
       expect(set.size).toBe(0);
+    });
+  });
+
+  // ── F2 + F17: empty-response detection & last-known-good hook ──
+
+  describe('F2 empty-response + F17 last-known-good on turn_end', () => {
+    function subscribe(deps: any, router: any, slot: any) {
+      slot.session.subscribe = vi.fn();
+      deps.slotManager.getSlot.mockReturnValue(slot);
+      router.subscribeToSlot(slot);
+      const handler = (slot.session.subscribe as any).mock.calls[0][0];
+      return (e: any) => handler(e);
+    }
+
+    it('F2: empty turn (no text, no tools) → trackEmptyResponse with reason=suspected_auth when fast', async () => {
+      _recordLastGood.mockClear();
+      const deps = makeDeps();
+      deps.usageTracker.trackEmptyResponse = vi.fn();
+      const slot = makeSlot({ promptStartTime: Date.now() - 200 }); // fast
+      const router = createEventRouter(deps as any);
+      const handler = subscribe(deps, router, slot);
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect(deps.usageTracker.trackEmptyResponse).toHaveBeenCalled(), { timeout: 500 });
+      const call = deps.usageTracker.trackEmptyResponse.mock.calls[0][0];
+      expect(call.reason).toBe('suspected_auth');
+      expect(call.provider).toBe('anthropic');
+    });
+
+    it('F2: empty turn with long duration → reason=unknown', async () => {
+      const deps = makeDeps();
+      deps.usageTracker.trackEmptyResponse = vi.fn();
+      const slot = makeSlot({ promptStartTime: Date.now() - 5000 });
+      const router = createEventRouter(deps as any);
+      const handler = subscribe(deps, router, slot);
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect(deps.usageTracker.trackEmptyResponse).toHaveBeenCalled(), { timeout: 500 });
+      expect(deps.usageTracker.trackEmptyResponse.mock.calls[0][0].reason).toBe('unknown');
+    });
+
+    it('F2: empty turn after prior llm_stream_error for same promptId is suppressed', async () => {
+      const deps = makeDeps();
+      deps.usageTracker.trackEmptyResponse = vi.fn();
+      const slot = makeSlot({ lastStreamErrorPromptId: 'prompt-abc' });
+      const router = createEventRouter(deps as any);
+      const handler = subscribe(deps, router, slot);
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+      expect(deps.usageTracker.trackEmptyResponse).not.toHaveBeenCalled();
+    });
+
+    it('F17: recordLastGood fires when turn produced text', async () => {
+      _recordLastGood.mockClear();
+      const deps = makeDeps();
+      const slot = makeSlot();
+      const router = createEventRouter(deps as any);
+      const handler = subscribe(deps, router, slot);
+      handler({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hi there' } });
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+      expect(_recordLastGood).toHaveBeenCalledWith('anthropic', 'claude-sonnet-4-6');
+    });
+
+    it('F17: recordLastGood NOT called on empty turn (no text, no tools)', async () => {
+      _recordLastGood.mockClear();
+      const deps = makeDeps();
+      const slot = makeSlot();
+      const router = createEventRouter(deps as any);
+      const handler = subscribe(deps, router, slot);
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+      expect(_recordLastGood).not.toHaveBeenCalled();
+    });
+
+    it('F17: recordLastGood fires when turn used only tools (no text)', async () => {
+      _recordLastGood.mockClear();
+      const deps = makeDeps();
+      const slot = makeSlot();
+      const router = createEventRouter(deps as any);
+      const handler = subscribe(deps, router, slot);
+      handler({ type: 'tool_execution_start', toolName: 'figma_status', toolCallId: 'tc1' });
+      handler({
+        type: 'tool_execution_end',
+        toolName: 'figma_status',
+        toolCallId: 'tc1',
+        isError: false,
+        result: { content: [] },
+      });
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
+      expect(_recordLastGood).toHaveBeenCalled();
     });
   });
 });

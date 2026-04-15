@@ -13,9 +13,12 @@ const modelSelect = document.getElementById('model-select');
 const transparencySlider = document.getElementById('transparency-slider');
 const transparencyValue = document.getElementById('transparency-value');
 
+// F20: OpenAI is split into two account cards —
+//   'openai' (API key only) and 'openai-codex' (OAuth only, aka ChatGPT Codex).
 const PROVIDER_META = {
   anthropic: { label: 'Anthropic', sublabel: 'Claude Pro / Max', keyPlaceholder: 'sk-ant-...' },
-  openai: { label: 'OpenAI', sublabel: 'ChatGPT Plus / Pro', keyPlaceholder: 'sk-...' },
+  openai: { label: 'OpenAI', sublabel: 'API key (platform.openai.com)', keyPlaceholder: 'sk-...' },
+  'openai-codex': { label: 'ChatGPT (Codex)', sublabel: 'ChatGPT Plus / Pro subscription', keyPlaceholder: '' },
   google: { label: 'Google', sublabel: 'Gemini (free)', keyPlaceholder: 'AIza...' },
 };
 
@@ -55,12 +58,43 @@ async function renderAccountCards() {
     right.className = 'account-actions';
 
     if (st.type !== 'none') {
+      // F19: Test connection — probes the first model in this provider group.
+      const testBtn = document.createElement('button');
+      testBtn.className = 'account-btn test';
+      testBtn.textContent = 'Test';
+      testBtn.addEventListener('click', async () => {
+        testBtn.disabled = true;
+        testBtn.textContent = 'Testing…';
+        try {
+          const res = await window.api.testConnection(provider);
+          // New envelope: {success, data?, error?, code?}
+          if (res.success) {
+            testBtn.textContent = '✓ OK';
+            testBtn.title = res.data?.modelId ?? '';
+          } else {
+            testBtn.textContent = `✗ ${res.code ?? 'ERR'}`;
+            testBtn.title = res.error ?? '';
+          }
+        } catch (e) {
+          testBtn.textContent = '✗ err';
+          testBtn.title = String(e);
+        }
+        setTimeout(() => {
+          testBtn.disabled = false;
+          testBtn.textContent = 'Test';
+          testBtn.title = '';
+        }, 3000);
+        refreshModelStatus();
+      });
+      right.appendChild(testBtn);
+
       const logoutBtn = document.createElement('button');
       logoutBtn.className = 'account-btn logout';
       logoutBtn.textContent = 'Logout';
       logoutBtn.addEventListener('click', async () => {
         await window.api.logout(provider);
         renderAccountCards();
+        refreshModelStatus();
       });
       right.appendChild(logoutBtn);
     } else {
@@ -284,6 +318,17 @@ saveKeyBtn.addEventListener('click', async () => {
 
 // ── Model selector ───────────────────────
 
+// F9: Map probe status → dot prefix for the option label.
+// Named `modelStatusDot` to avoid collision with app.js' `const statusDot`
+// (the Figma connection status DOM element — both scripts share global scope).
+function modelStatusDot(status) {
+  if (status === 'ok') return '🟢';
+  if (status === 'unauthorized' || status === 'forbidden' || status === 'not_found') return '🔴';
+  return '🟡';
+}
+
+let _modelStatusCache = {};
+
 function populateModelSelect() {
   clearChildren(modelSelect);
   for (const [displayGroup, models] of Object.entries(availableModels)) {
@@ -294,7 +339,13 @@ function populateModelSelect() {
       const opt = document.createElement('option');
       // Value encodes sdkProvider:modelId (sdkProvider is the Pi SDK provider)
       opt.value = m.sdkProvider + ':' + m.id;
-      opt.textContent = m.label;
+      const status = _modelStatusCache[m.id] ?? 'unknown';
+      opt.textContent = `${modelStatusDot(status)} ${m.label}`;
+      // F10: disable reds so picker enforces auth invariant.
+      if (status === 'unauthorized' || status === 'forbidden' || status === 'not_found') {
+        opt.disabled = true;
+        opt.title = `${m.label} requires ${PROVIDER_META[displayGroup]?.label ?? displayGroup} auth. Sign in first.`;
+      }
       group.appendChild(opt);
     });
     modelSelect.appendChild(group);
@@ -304,6 +355,17 @@ function populateModelSelect() {
   const savedProvider = localStorage.getItem('bottega:provider') || 'anthropic';
   const savedModel = localStorage.getItem('bottega:model') || 'claude-sonnet-4-6';
   modelSelect.value = savedProvider + ':' + savedModel;
+}
+
+/** F9: refresh dots from main. Call after auth changes or on settings open. */
+async function refreshModelStatus() {
+  if (typeof window.api.getModelStatus !== 'function') return;
+  try {
+    _modelStatusCache = await window.api.getModelStatus();
+    populateModelSelect();
+  } catch {
+    // Silent fail — dots will remain neutral. Log visible via devtools.
+  }
 }
 
 modelSelect.addEventListener('change', async () => {
@@ -348,6 +410,10 @@ async function initAuthUI() {
 
   // Sync bar label now that models are loaded
   syncBarModelLabel();
+
+  // F9: fetch status cache + repopulate with dots. Fire-and-forget — dots
+  // render late but don't block initial load.
+  refreshModelStatus();
 
   // B-025: Do NOT force-switch the active tab to the global localStorage model on
   // startup. The slot's persisted modelConfig is the source of truth — overwriting
@@ -882,6 +948,68 @@ if (copySupportCodeBtn) {
 const exportLogsBtn = document.getElementById('export-logs-btn');
 const copySysinfoBtn = document.getElementById('copy-sysinfo-btn');
 const diagnosticsExportStatus = document.getElementById('diagnostics-export-status');
+
+// F15: Recent errors panel wiring.
+const recentErrorsBtn = document.getElementById('show-recent-errors-btn');
+const recentErrorsPanel = document.getElementById('recent-errors-panel');
+const recentErrorsList = document.getElementById('recent-errors-list');
+const recentErrorsRefresh = document.getElementById('recent-errors-refresh');
+const recentErrorsCopy = document.getElementById('recent-errors-copy');
+const recentErrorsClose = document.getElementById('recent-errors-close');
+let _recentErrorsCache = [];
+
+async function loadRecentErrors() {
+  if (typeof window.api.getRecentErrors !== 'function') return;
+  _recentErrorsCache = await window.api.getRecentErrors();
+  renderRecentErrors();
+}
+
+function renderRecentErrors() {
+  if (!recentErrorsList) return;
+  while (recentErrorsList.firstChild) recentErrorsList.removeChild(recentErrorsList.firstChild);
+  if (_recentErrorsCache.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'recent-errors-empty';
+    li.textContent = 'No recent errors recorded.';
+    recentErrorsList.appendChild(li);
+    return;
+  }
+  for (const rec of _recentErrorsCache.slice().reverse()) {
+    const li = document.createElement('li');
+    const ts = new Date(rec.ts).toLocaleTimeString();
+    const status = rec.httpStatus ?? rec.reason ?? '—';
+    li.textContent = `${ts} · ${rec.provider}/${rec.modelId} · ${status} · ${rec.message}`;
+    recentErrorsList.appendChild(li);
+  }
+}
+
+if (recentErrorsBtn) {
+  recentErrorsBtn.addEventListener('click', async () => {
+    if (!recentErrorsPanel) return;
+    const visible = recentErrorsPanel.style.display !== 'none';
+    if (visible) {
+      recentErrorsPanel.style.display = 'none';
+      return;
+    }
+    await loadRecentErrors();
+    recentErrorsPanel.style.display = 'block';
+  });
+}
+recentErrorsRefresh?.addEventListener('click', () => loadRecentErrors());
+recentErrorsCopy?.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(_recentErrorsCache, null, 2));
+    recentErrorsCopy.textContent = '✓';
+    setTimeout(() => {
+      recentErrorsCopy.textContent = '⎘';
+    }, 1500);
+  } catch {
+    // silent
+  }
+});
+recentErrorsClose?.addEventListener('click', () => {
+  if (recentErrorsPanel) recentErrorsPanel.style.display = 'none';
+});
 const sendDiagnosticsToggle = document.getElementById('send-diagnostics-toggle');
 const diagnosticsRestartHint = document.getElementById('diagnostics-restart-hint');
 

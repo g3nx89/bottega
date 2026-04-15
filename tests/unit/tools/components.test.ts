@@ -25,7 +25,7 @@ describe('component tools', () => {
   // ── figma_instantiate ────────────────────────────
 
   describe('figma_instantiate', () => {
-    it('calls connector.instantiateComponent with componentKey and options', async () => {
+    it('calls connector.instantiateComponent with componentKey and position object', async () => {
       deps.connector.instantiateComponent.mockResolvedValue({ id: '10:1', type: 'INSTANCE' });
       const tool = findTool('figma_instantiate');
       await tool.execute(
@@ -36,21 +36,31 @@ describe('component tools', () => {
         undefined,
       );
 
-      expect(deps.connector.instantiateComponent).toHaveBeenCalledWith('abc123', {
-        x: 100,
-        y: 200,
-        parentId: '1:5',
-      });
+      const callArgs = deps.connector.instantiateComponent.mock.calls[0];
+      expect(callArgs[0]).toBe('abc123');
+      expect(callArgs[1]).toMatchObject({ position: { x: 100, y: 200 }, parentId: '1:5' });
     });
 
-    it('passes x, y, parentId from params', async () => {
+    it('maps flat x/y to position object (bridge expects position, not x/y)', async () => {
       deps.connector.instantiateComponent.mockResolvedValue({ id: '10:2' });
       const tool = findTool('figma_instantiate');
       await tool.execute('c1', { componentKey: 'k1', x: 50, y: 75, parentId: '2:3' }, undefined, undefined, undefined);
 
       const callArgs = deps.connector.instantiateComponent.mock.calls[0];
       expect(callArgs[0]).toBe('k1');
-      expect(callArgs[1]).toEqual({ x: 50, y: 75, parentId: '2:3' });
+      expect(callArgs[1]).toMatchObject({ position: { x: 50, y: 75 }, parentId: '2:3' });
+      // Regression: x/y must NOT be passed as flat keys (connector would silently drop them)
+      expect(callArgs[1]).not.toHaveProperty('x');
+      expect(callArgs[1]).not.toHaveProperty('y');
+    });
+
+    it('omits position when neither x nor y provided', async () => {
+      deps.connector.instantiateComponent.mockResolvedValue({ id: '10:2b' });
+      const tool = findTool('figma_instantiate');
+      await tool.execute('c1', { componentKey: 'k1', parentId: '2:3' }, undefined, undefined, undefined);
+
+      const callArgs = deps.connector.instantiateComponent.mock.calls[0];
+      expect(callArgs[1].position).toBeUndefined();
     });
 
     it('uses OperationQueue (serialized execution)', async () => {
@@ -70,6 +80,89 @@ describe('component tools', () => {
 
       const parsed = JSON.parse(result.content[0].text);
       expect(parsed).toEqual(response);
+    });
+
+    // v9.1: local component path via nodeId (figma_create_component returns componentId, not componentKey)
+    it('passes nodeId through options for local components (no componentKey)', async () => {
+      deps.connector.instantiateComponent.mockResolvedValue({ id: '20:1', type: 'INSTANCE' });
+      const tool = findTool('figma_instantiate');
+      await tool.execute('c1', { nodeId: '15:42', x: 100, y: 200, parentId: '1:5' }, undefined, undefined, undefined);
+
+      const callArgs = deps.connector.instantiateComponent.mock.calls[0];
+      expect(callArgs[0]).toBe(''); // empty componentKey
+      expect(callArgs[1]).toMatchObject({ nodeId: '15:42', position: { x: 100, y: 200 }, parentId: '1:5' });
+    });
+
+    // v9.2: variant/size/overrides forwarded to connector (previously hidden despite backend support)
+    it('forwards variant/size/overrides to connector in one call', async () => {
+      deps.connector.instantiateComponent.mockResolvedValue({ id: '20:5' });
+      const tool = findTool('figma_instantiate');
+      await tool.execute(
+        'c1',
+        {
+          nodeId: '30:1',
+          parentId: '1:5',
+          variant: { State: 'Hover', Size: 'Large' },
+          size: { width: 200, height: 80 },
+          overrides: { label: 'Submit', disabled: false },
+        },
+        undefined,
+        undefined,
+        undefined,
+      );
+
+      const callArgs = deps.connector.instantiateComponent.mock.calls[0];
+      expect(callArgs[1]).toMatchObject({
+        nodeId: '30:1',
+        parentId: '1:5',
+        variant: { State: 'Hover', Size: 'Large' },
+        size: { width: 200, height: 80 },
+        overrides: { label: 'Submit', disabled: false },
+      });
+    });
+
+    it('schema exposes variant/size/overrides as optional parameters (v9.2)', () => {
+      const tool = findTool('figma_instantiate');
+      const schema: any = tool.parameters;
+      expect(schema.properties).toHaveProperty('variant');
+      expect(schema.properties).toHaveProperty('size');
+      expect(schema.properties).toHaveProperty('overrides');
+    });
+
+    it('forwards both componentKey and nodeId when provided (bridge fallback path)', async () => {
+      deps.connector.instantiateComponent.mockResolvedValue({ id: '20:2' });
+      const tool = findTool('figma_instantiate');
+      await tool.execute(
+        'c1',
+        { componentKey: 'libKey', nodeId: 'localId', parentId: '1:5' },
+        undefined,
+        undefined,
+        undefined,
+      );
+
+      const callArgs = deps.connector.instantiateComponent.mock.calls[0];
+      expect(callArgs[0]).toBe('libKey');
+      expect(callArgs[1]).toMatchObject({ nodeId: 'localId', parentId: '1:5' });
+    });
+
+    it('returns error when neither componentKey nor nodeId provided', async () => {
+      const tool = findTool('figma_instantiate');
+      const result = await tool.execute('c1', {}, undefined, undefined, undefined);
+
+      expect(deps.connector.instantiateComponent).not.toHaveBeenCalled();
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error).toMatch(/nodeId.*componentKey|componentKey.*nodeId/i);
+    });
+
+    it('schema exposes nodeId as optional parameter', () => {
+      const tool = findTool('figma_instantiate');
+      const schema: any = tool.parameters;
+      expect(schema.properties).toHaveProperty('nodeId');
+      expect(schema.properties).toHaveProperty('componentKey');
+      // Both optional — validated at runtime in execute
+      expect(schema.required ?? []).not.toContain('componentKey');
+      expect(schema.required ?? []).not.toContain('nodeId');
     });
   });
 

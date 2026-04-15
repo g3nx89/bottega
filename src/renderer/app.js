@@ -1206,6 +1206,13 @@ function createTaskRow(t, taskById) {
   return row;
 }
 
+// F14: track last retriable error per tab so we can render a Retry button on agent_end.
+window.api.onStreamError?.((slotId, payload) => {
+  const tab = tabs.get(slotId);
+  if (!tab) return;
+  tab._lastStreamError = payload;
+});
+
 window.api.onAgentEnd((slotId) => {
   const tab = tabs.get(slotId);
   if (!tab) return;
@@ -1236,6 +1243,20 @@ window.api.onAgentEnd((slotId) => {
       content.innerHTML = renderMarkdown(content.textContent);
     }
     createActionBar(tab.currentAssistantBubble, tab);
+    // F14: if a retriable error fired during this turn, append a Retry button
+    // that re-sends the last user prompt.
+    if (tab._lastStreamError?.retriable && tab._lastStreamError.lastPrompt) {
+      const retryBtn = document.createElement('button');
+      retryBtn.className = 'retry-btn';
+      retryBtn.textContent = 'Retry';
+      const prompt = tab._lastStreamError.lastPrompt;
+      retryBtn.addEventListener('click', () => {
+        retryBtn.disabled = true;
+        window.api.sendPrompt(slotId, prompt);
+      });
+      tab.currentAssistantBubble.appendChild(retryBtn);
+    }
+    tab._lastStreamError = null;
   }
   tab.currentAssistantBubble = null;
   tab.isStreaming = false;
@@ -1521,6 +1542,73 @@ document.getElementById('version-banner-dismiss')?.addEventListener('click', () 
   document.getElementById('version-banner').style.display = 'none';
   statusDot.className = 'status-dot disconnected';
   statusDot.title = 'Disconnected';
+});
+
+// ── F8: Figma token-lost banner ─────────
+const figmaTokenBanner = document.getElementById('figma-token-lost-banner');
+window.api.onFigmaTokenLost?.(() => {
+  if (figmaTokenBanner) figmaTokenBanner.style.display = 'flex';
+});
+document.getElementById('figma-token-lost-dismiss')?.addEventListener('click', () => {
+  if (figmaTokenBanner) figmaTokenBanner.style.display = 'none';
+});
+document.getElementById('figma-token-reenter')?.addEventListener('click', () => {
+  if (figmaTokenBanner) figmaTokenBanner.style.display = 'none';
+  document.getElementById('settings-btn')?.click();
+});
+
+// ── F17: Auto-fallback banner ───────────
+const autoFallbackBanner = document.getElementById('auto-fallback-banner');
+window.api.onAutoFallback?.((_slotId, payload) => {
+  if (!autoFallbackBanner) return;
+  const text = document.getElementById('auto-fallback-text');
+  if (text) {
+    text.textContent = `Model ${payload.from} not available (${payload.reason}). Switched to last-known-good ${payload.to}.`;
+  }
+  autoFallbackBanner.style.display = 'flex';
+});
+document.getElementById('auto-fallback-dismiss')?.addEventListener('click', () => {
+  if (autoFallbackBanner) autoFallbackBanner.style.display = 'none';
+});
+
+// ── F21: Post-upgrade wizard ────────────
+const postUpgradeModal = document.getElementById('post-upgrade-modal');
+window.api.onPostUpgrade?.((payload) => {
+  if (!postUpgradeModal) return;
+  const summary = document.getElementById('post-upgrade-summary');
+  const list = document.getElementById('post-upgrade-list');
+  if (summary) {
+    summary.textContent = `Updated from ${payload.previousVersion} to ${payload.currentVersion}. Some credentials need attention:`;
+  }
+  if (list) {
+    while (list.firstChild) list.removeChild(list.firstChild);
+    for (const r of payload.regressions) {
+      const li = document.createElement('li');
+      li.textContent = `${r.provider}: was ${r.previousType}, now disconnected`;
+      list.appendChild(li);
+    }
+  }
+  postUpgradeModal.style.display = 'flex';
+});
+document.getElementById('post-upgrade-dismiss')?.addEventListener('click', () => {
+  if (postUpgradeModal) postUpgradeModal.style.display = 'none';
+});
+document.getElementById('post-upgrade-open-settings')?.addEventListener('click', () => {
+  if (postUpgradeModal) postUpgradeModal.style.display = 'none';
+  document.getElementById('settings-btn')?.click();
+});
+
+// ── F6: Keychain unavailable banner ─────
+const keychainBanner = document.getElementById('keychain-unavailable-banner');
+window.api.onKeychainUnavailable?.(() => {
+  if (keychainBanner) keychainBanner.style.display = 'flex';
+});
+document.getElementById('keychain-unavailable-dismiss')?.addEventListener('click', () => {
+  if (keychainBanner) keychainBanner.style.display = 'none';
+});
+document.getElementById('keychain-open-settings')?.addEventListener('click', () => {
+  if (keychainBanner) keychainBanner.style.display = 'none';
+  document.getElementById('settings-btn')?.click();
 });
 
 // ── Plugin setup banner ─────────────────

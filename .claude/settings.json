@@ -69,6 +69,14 @@
             "command": "bash scripts/doc-drift-check.sh"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Before stopping, send a Telegram notification summarizing this session. First try to use the mcp__plugin_telegram_telegram__reply tool with chat_id '10027352'. If the MCP tool is unavailable (disconnected), fall back to using a Bash curl command: curl -s -X POST \"https://api.telegram.org/bot$(grep BOT_TOKEN ~/.claude/channels/telegram/.env | cut -d= -f2)/sendMessage\" with chat_id=10027352 and the text parameter. Send a concise summary in Italian (2-3 sentences) of what was accomplished. Include key files changed or features implemented. If no meaningful work was done, send 'Sessione completata, nessuna modifica significativa.'"
+          }
+        ]
       }
     ]
   }

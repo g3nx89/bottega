@@ -461,7 +461,7 @@ const CRITERION_TOOL_HINTS: Record<string, string> = {
     'Exact workflow: ' +
     '1) figma_create_component({fromFrameId: "FIRST_NODE_ID"}) — converts the first existing frame IN PLACE to a reusable component. ' +
     '2) For each other node ID: record its (x, y, parentId) via figma_get_file_data, then figma_delete(nodeId), ' +
-    'then figma_instantiate(componentKey, {parentId, x, y}) at the same position. ' +
+    'then figma_instantiate({nodeId: componentId, parentId, x, y}) at the same position — pass nodeId (the componentId from step 1), NOT componentKey, for local components. ' +
     '3) figma_set_instance_properties on each instance to override text to match the original content. ' +
     'DO NOT call figma_render_jsx or figma_generate_image during this retry — all visual content already exists. ' +
     'Preserve existing image fills by using the instance/property swap, not re-rendering.',
@@ -601,10 +601,10 @@ export function buildRetryPrompt(
         .slice(0, 6) // cap to avoid overwhelming the prompt
         .map(
           (id, idx) =>
-            `  ${idx + 2}. figma_delete('${id}') then figma_instantiate(componentKey, { /* same x,y,parentId as ${id} was */ })`,
+            `  ${idx + 2}. figma_delete('${id}') then figma_instantiate({ nodeId: componentId, /* same x,y,parentId as ${id} was */ })`,
         )
         .join('\n');
-      componentizationChecklist = `\n\n**DIRECT ACTION CHECKLIST** (${restIds.length + 2} steps — execute ALL in order, DO NOT skip any):\n\n  STEP 1: figma_create_component({ fromFrameId: '${firstId}' })\n         This CONVERTS frame '${firstId}' into a reusable COMPONENT. Save the returned componentKey.\n\n${instantiateSteps}\n\n  STEP ${restIds.length + 2}: After all ${restIds.length} instances exist, use figma_set_instance_properties on each one to restore the original text content (look at current node names for hints).\n\n**WHY ALL STEPS MATTER**: A component with zero instances does NOT satisfy componentization. The judge needs to see [1 COMPONENT + ${restIds.length} INSTANCE nodes] — not [${restIds.length + 1} FRAME nodes]. Skipping the figma_instantiate calls WILL fail the retry.\n\n**DO NOTs**: Do NOT call figma_render_jsx. Do NOT call figma_generate_image. The nodes [${ids.join(', ')}] already exist with correct visuals. Just convert + replace.`;
+      componentizationChecklist = `\n\n**DIRECT ACTION CHECKLIST** (${restIds.length + 2} steps — execute ALL in order, DO NOT skip any):\n\n  STEP 1: figma_create_component({ fromFrameId: '${firstId}' })\n         This CONVERTS frame '${firstId}' into a reusable COMPONENT. Save the returned componentId (it's a LOCAL component — use nodeId, NOT componentKey).\n\n${instantiateSteps}\n\n  STEP ${restIds.length + 2}: After all ${restIds.length} instances exist, use figma_set_instance_properties on each one to restore the original text content (look at current node names for hints).\n\n**WHY ALL STEPS MATTER**: A component with zero instances does NOT satisfy componentization. The judge needs to see [1 COMPONENT + ${restIds.length} INSTANCE nodes] — not [${restIds.length + 1} FRAME nodes]. Skipping the figma_instantiate calls WILL fail the retry.\n\n**DO NOTs**: Do NOT call figma_render_jsx. Do NOT call figma_generate_image. Do NOT call figma_execute with component.createInstance() — use figma_instantiate({ nodeId }) instead. The nodes [${ids.join(', ')}] already exist with correct visuals. Just convert + replace.`;
     }
   }
 

@@ -19,6 +19,7 @@ import type { CompressionMetricsCollector } from './compression/metrics.js';
 import type { FigmaCore } from './figma-core.js';
 import type { ImageGenerator } from './image-gen/image-generator.js';
 import { MetricsRegistry } from './metrics-registry.js';
+import { ModelProbe } from './model-probe.js';
 import type { OperationQueueManager } from './operation-queue-manager.js';
 import { ScopedConnector } from './scoped-connector.js';
 import { buildSystemPrompt, type DsBlockData } from './system-prompt.js';
@@ -60,14 +61,18 @@ export function isThinkingLevel(s: string): s is ThinkingLevel {
  */
 export const OAUTH_PROVIDER_MAP: Record<string, string> = {
   anthropic: 'anthropic',
+  // F20: 'openai' now means API key only. ChatGPT Codex OAuth moved to its own
+  // display group 'openai-codex' to disambiguate the two login surfaces.
   openai: 'openai-codex',
+  'openai-codex': 'openai-codex',
   google: 'google-gemini-cli',
 };
 
 /** Human-readable info for display groups (used in both main & renderer) */
 export const OAUTH_PROVIDER_INFO: Record<string, { label: string; description: string }> = {
   anthropic: { label: 'Anthropic', description: 'Claude Pro / Max' },
-  openai: { label: 'OpenAI', description: 'ChatGPT Plus / Pro' },
+  openai: { label: 'OpenAI', description: 'API key (platform.openai.com)' },
+  'openai-codex': { label: 'ChatGPT (Codex)', description: 'ChatGPT Plus / Pro subscription' },
   google: { label: 'Google', description: 'Gemini (free)' },
 };
 
@@ -173,7 +178,118 @@ export interface AgentInfra {
   queueManager: OperationQueueManager;
   /** Test-observable runtime counters; snapshot via BOTTEGA_AGENT_TEST IPC. */
   metricsRegistry: MetricsRegistry;
+  /** F11: shared per-session ModelProbe with TTL cache. */
+  modelProbe: ModelProbe;
   getImageGenerator?: () => ImageGenerator | null;
+}
+
+/**
+ * F1: Classify stream errors from Pi SDK into structured shape for telemetry.
+ * Pi SDK surfaces provider errors in varying shapes — extract httpStatus and
+ * errorCode from known fields without leaking tokens.
+ */
+export interface ClassifiedStreamError {
+  httpStatus: number | null;
+  errorCode: string | null;
+  errorBody: string;
+}
+
+export function classifyStreamError(err: any): ClassifiedStreamError {
+  const httpStatus =
+    typeof err?.status === 'number'
+      ? err.status
+      : typeof err?.statusCode === 'number'
+        ? err.statusCode
+        : typeof err?.response?.status === 'number'
+          ? err.response.status
+          : null;
+  const errorCode =
+    typeof err?.code === 'string'
+      ? err.code
+      : typeof err?.errorCode === 'string'
+        ? err.errorCode
+        : typeof err?.name === 'string' && err.name !== 'Error'
+          ? err.name
+          : null;
+  const body =
+    typeof err?.body === 'string'
+      ? err.body
+      : typeof err?.response?.body === 'string'
+        ? err.response.body
+        : typeof err?.response?.data === 'string'
+          ? err.response.data
+          : typeof err?.message === 'string'
+            ? err.message
+            : String(err);
+  return { httpStatus, errorCode, errorBody: body };
+}
+
+/** Tracker shape consumed by the wrapper — matches UsageTracker surface. */
+export interface StreamErrorSink {
+  trackLlmStreamError(data: {
+    provider: string;
+    modelId: string;
+    httpStatus: number | null;
+    errorCode: string | null;
+    errorBody: string;
+    durationMs: number;
+    promptId?: string;
+    slotId?: string;
+    turnIndex?: number;
+  }): void;
+  trackPromptCancelled?(data: {
+    provider: string;
+    modelId: string;
+    durationMs: number;
+    promptId?: string;
+    slotId?: string;
+    turnIndex?: number;
+  }): void;
+}
+
+export interface PromptSessionLike {
+  prompt: (text: string, options?: any) => Promise<unknown>;
+}
+
+/**
+ * Wrap a session.prompt() call with error capture. Emits usage:llm_stream_error
+ * for rejections, usage:prompt_cancelled for AbortError, and rethrows so existing
+ * handlers still fire.
+ */
+export async function wrapPromptWithErrorCapture(
+  session: PromptSessionLike,
+  text: string,
+  modelConfig: ModelConfig,
+  tracker: StreamErrorSink | undefined,
+  context: { promptId?: string; slotId?: string; turnIndex?: number } = {},
+  options?: any,
+): Promise<unknown> {
+  const start = Date.now();
+  try {
+    return await (options === undefined ? session.prompt(text) : session.prompt(text, options));
+  } catch (err: any) {
+    const durationMs = Date.now() - start;
+    if (err?.name === 'AbortError') {
+      tracker?.trackPromptCancelled?.({
+        provider: modelConfig.provider,
+        modelId: modelConfig.modelId,
+        durationMs,
+        ...context,
+      });
+      throw err;
+    }
+    const { httpStatus, errorCode, errorBody } = classifyStreamError(err);
+    tracker?.trackLlmStreamError({
+      provider: modelConfig.provider,
+      modelId: modelConfig.modelId,
+      httpStatus,
+      errorCode,
+      errorBody,
+      durationMs,
+      ...context,
+    });
+    throw err;
+  }
 }
 
 /**
@@ -306,6 +422,9 @@ export async function createAgentInfra(
     figmaAPI: figmaCore.figmaAPI,
     queueManager,
     metricsRegistry: new MetricsRegistry(),
+    // F11: telemetry wired later via setModelProbeTelemetry() to avoid a
+    // circular dep on UsageTracker.
+    modelProbe: new ModelProbe(authStorage),
     getImageGenerator: opts.getImageGenerator,
   };
 }

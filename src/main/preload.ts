@@ -230,6 +230,58 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('figma-auth:status-changed', (_event, data: FigmaAuthStatusDTO) => cb(data));
   },
 
+  // ── F11: model probe / status — all use shared IpcResult envelope. ─
+  probeModel: (provider: string, modelId: string) =>
+    ipcRenderer.invoke('auth:probe-model', provider, modelId) as Promise<
+      | { success: true; data: { status: string; httpStatus?: number; cacheHit: boolean; durationMs: number } }
+      | { success: false; error: string; code?: string }
+    >,
+  testConnection: (displayGroup: string) =>
+    ipcRenderer.invoke('auth:test-connection', displayGroup) as Promise<
+      | { success: true; data: { status: string; httpStatus?: number; modelId: string } }
+      | { success: false; error: string; code?: string }
+    >,
+  getModelStatus: () => ipcRenderer.invoke('auth:get-model-status') as Promise<Record<string, string>>,
+  getRecentErrors: () =>
+    ipcRenderer.invoke('diagnostics:get-recent-errors') as Promise<
+      {
+        ts: string;
+        event: string;
+        provider: string;
+        modelId: string;
+        httpStatus?: number | null;
+        reason?: string;
+        message: string;
+      }[]
+    >,
+  forceRefresh: (displayGroup: string) =>
+    ipcRenderer.invoke('auth:force-refresh', displayGroup) as Promise<
+      { success: true; data: { outcome: string } } | { success: false; error: string; code?: string }
+    >,
+  onStreamError: (
+    cb: (slotId: string, payload: { httpStatus: number | null; retriable: boolean; lastPrompt: string }) => void,
+  ) => {
+    ipcRenderer.on('agent:stream-error', (_event, slotId: string, payload) => cb(slotId, payload));
+  },
+  onAutoFallback: (cb: (slotId: string, payload: { from: string; to: string; reason: string }) => void) => {
+    ipcRenderer.on('agent:auto-fallback', (_event, slotId: string, payload) => cb(slotId, payload));
+  },
+  onFigmaTokenLost: (cb: () => void) => {
+    ipcRenderer.on('figma:token_lost', () => cb());
+  },
+  onKeychainUnavailable: (cb: (payload: { reason?: string }) => void) => {
+    ipcRenderer.on('keychain:unavailable', (_event, data: { reason?: string }) => cb(data));
+  },
+  onPostUpgrade: (
+    cb: (payload: {
+      previousVersion: string;
+      currentVersion: string;
+      regressions: { provider: string; previousType: string }[];
+    }) => void,
+  ) => {
+    ipcRenderer.on('app:post-upgrade', (_event, data) => cb(data));
+  },
+
   // ── Usage tracking ────────────────────────
   trackSuggestionClicked: (index: number) => ipcRenderer.invoke('usage:suggestion-clicked', index),
 
