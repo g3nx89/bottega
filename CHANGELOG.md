@@ -6,6 +6,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-04-16
+
+### Fixed
+- WebSocket bridge version mismatch: plugin sync now uses byte-level comparison (Buffer.equals) instead of size-only — catches same-length edits like version bumps
+- Plugin sync now checks all 3 payload files (manifest.json, code.js, ui.html) — previously missed ui.html changes
+- Judge componentization retry uses stale node IDs after first retry modifies Figma tree — now re-fetches component analysis before each retry
+- JSX parse errors show raw esbuild wrapper line numbers — now remapped to user's JSX source with problematic line shown
+- Axiom column explosion from dynamic Record fields (params, auth, perJudgeDurations) — serialized as JSON strings, migrated to bottega-logs-v2 dataset (257 → 74 columns)
+- Missing `figma_create_component` in compression CATEGORY_MAP — now categorized as mutation for correct tier determination
+- Session restore model drift: Pi SDK switchSession restores stale model — now force-overrides to match requested config
+
 ## [0.15.0] - 2026-04-16
 
 ### Added
@@ -285,7 +296,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 - Settings panel with window transparency slider
 - Graceful shutdown, persistent WS reconnect, pin window, structured logging
 
-[Unreleased]: https://github.com/g3nx89/bottega/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/g3nx89/bottega/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/g3nx89/bottega/compare/v0.15.0...v0.15.1
+[0.15.0]: https://github.com/g3nx89/bottega/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/g3nx89/bottega/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/g3nx89/bottega/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/g3nx89/bottega/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/g3nx89/bottega/compare/v0.10.0...v0.11.0
