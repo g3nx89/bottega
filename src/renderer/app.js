@@ -1714,8 +1714,8 @@ function updateRetryButtonText(result) {
   if (!pluginRetryBtn) return;
   pluginRetryBtn.textContent =
     result.success && result.figmaRunning
-      ? 'Figma still running \u2014 try again'
-      : 'Could not auto-register \u2014 use Settings to install manually';
+      ? 'Figma still running \u2014 close Figma first, then retry'
+      : 'Auto-register failed \u2014 run Bottega Bridge from Plugins \u2192 Development';
 }
 
 pluginRetryBtn?.addEventListener('click', async () => {
