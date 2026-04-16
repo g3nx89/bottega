@@ -9,6 +9,7 @@ import {
   type AgentInfra,
   AVAILABLE_MODELS,
   CONTEXT_SIZES,
+  filterLevelsForModel,
   isThinkingLevel,
   type ModelConfig,
   safeReloadAuth,
@@ -261,8 +262,21 @@ export interface AgentSessionLike {
   newSession(options?: { parentSession?: string }): Promise<boolean>;
   switchSession(sessionPath: string): Promise<boolean>;
   setThinkingLevel?(level: string): void;
+  // Optional so mocks/scripted sessions don't need to implement them.
+  getAvailableThinkingLevels?(): string[];
+  supportsThinking?(): boolean;
+  supportsXhighThinking?(): boolean;
+  readonly thinkingLevel?: string;
   readonly sessionFile: string | undefined;
   readonly messages: any[];
+}
+
+export interface ThinkingCapabilities {
+  family: 'anthropic' | 'openai' | 'google' | 'unknown';
+  availableLevels: string[];
+  supportsThinking: boolean;
+  supportsXhigh: boolean;
+  currentLevel: string;
 }
 
 export interface ImageGenState {
@@ -439,9 +453,42 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     const slot = requireSlot(slotId);
     const before = slot.thinkingLevel;
     slot.session.setThinkingLevel?.(level);
-    slot.thinkingLevel = level;
-    usageTracker?.trackThinkingChange(before, level);
-    log.info({ slotId, level }, 'Thinking level changed');
+    // Pi SDK clamps silently when the model does not support the requested
+    // level — read it back so callers learn the effective level.
+    const effective = (slot.session.thinkingLevel as any) ?? level;
+    slot.thinkingLevel = isThinkingLevel(effective) ? effective : level;
+    usageTracker?.trackThinkingChange(before, slot.thinkingLevel);
+    log.info({ slotId, requested: level, effective: slot.thinkingLevel }, 'Thinking level changed');
+    return { level: slot.thinkingLevel };
+  });
+
+  ipcMain.handle('agent:get-thinking-capabilities', (_event, slotId: string) => {
+    const slot = requireSlot(slotId);
+    const session = slot.session;
+    const provider = slot.modelConfig?.provider ?? '';
+    const family: 'anthropic' | 'openai' | 'google' | 'unknown' = provider.startsWith('anthropic')
+      ? 'anthropic'
+      : provider.startsWith('openai')
+        ? 'openai'
+        : provider.startsWith('google')
+          ? 'google'
+          : 'unknown';
+    const supportsThinking = session.supportsThinking?.() ?? true;
+    const supportsXhigh = session.supportsXhighThinking?.() ?? false;
+    const rawLevels =
+      session.getAvailableThinkingLevels?.() ??
+      (supportsThinking
+        ? supportsXhigh
+          ? ['off', 'minimal', 'low', 'medium', 'high', 'xhigh']
+          : ['off', 'minimal', 'low', 'medium', 'high']
+        : ['off']);
+    // Hard guard: Pi SDK should never include xhigh when supportsXhigh=false,
+    // but double-check here so a future SDK bug can't leak "Max" into the UI
+    // for models that don't actually support it.
+    const guarded = supportsXhigh ? rawLevels : rawLevels.filter((l) => l !== 'xhigh');
+    const availableLevels = filterLevelsForModel(slot.modelConfig?.modelId ?? '', guarded);
+    const currentLevel = (session.thinkingLevel as any) ?? slot.thinkingLevel;
+    return { family, availableLevels, supportsThinking, supportsXhigh, currentLevel };
   });
 
   // ── Model switch (per-slot) ──────────────

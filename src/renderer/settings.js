@@ -852,8 +852,7 @@ async function populateRoleModelSelects(presetStatusMap) {
     const fetchStatus = () =>
       typeof window.api.getModelStatus === 'function' ? window.api.getModelStatus() : Promise.resolve({});
     const [modelsData, statusMap] = await Promise.all([window.api.getModels(), presetStatusMap ?? fetchStatus()]);
-    if (!microJudgeContainer) return;
-    for (const select of microJudgeContainer.querySelectorAll('.judge-model')) {
+    const fillSelect = (select) => {
       const previousValue = select.value;
       clearChildren(select);
       for (const models of Object.values(modelsData)) {
@@ -866,7 +865,12 @@ async function populateRoleModelSelects(presetStatusMap) {
         }
       }
       if (previousValue) select.value = previousValue;
+    };
+    if (microJudgeContainer) {
+      for (const select of microJudgeContainer.querySelectorAll('.judge-model')) fillSelect(select);
     }
+    const bulkSelect = document.getElementById('judge-bulk-model');
+    if (bulkSelect) fillSelect(bulkSelect);
   } catch (err) {
     // biome-ignore lint/suspicious/noConsole: renderer has no structured logger
     console.warn('Failed to populate judge model selects:', err);
@@ -892,6 +896,29 @@ if (microJudgeContainer) {
     if (checkbox) checkbox.addEventListener('change', saveSubagentSettings);
     if (modelSelect) modelSelect.addEventListener('change', saveSubagentSettings);
   }
+}
+
+// Bulk model applier: writes the chosen model into every per-judge select
+// and triggers a single save — avoids 8 manual dropdown changes for the
+// common case of "use one model everywhere".
+const bulkApplyBtn = document.getElementById('judge-bulk-apply');
+const bulkModelSelect = document.getElementById('judge-bulk-model');
+if (bulkApplyBtn && bulkModelSelect && microJudgeContainer) {
+  bulkApplyBtn.addEventListener('click', async () => {
+    const value = bulkModelSelect.value;
+    if (!value) return;
+    for (const select of microJudgeContainer.querySelectorAll('.judge-model')) {
+      if (select.value !== value) select.value = value;
+    }
+    await saveSubagentSettings();
+    const original = bulkApplyBtn.textContent;
+    bulkApplyBtn.textContent = 'Applied ✓';
+    bulkApplyBtn.disabled = true;
+    setTimeout(() => {
+      bulkApplyBtn.textContent = original;
+      bulkApplyBtn.disabled = false;
+    }, 1500);
+  });
 }
 
 // ── Figma Plugin setup ──────────────────

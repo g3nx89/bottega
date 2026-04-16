@@ -368,10 +368,41 @@ function syncModelDropdown(modelConfig) {
   localStorage.setItem('bottega:model', modelConfig.modelId);
 }
 
+// Align chip/tab/session: push user preference to session if supported but
+// diverging, otherwise adopt session as source of truth. Returns the caps
+// object with a possibly-updated currentLevel so callers can render immediately.
+async function reconcileEffortCaps(tab, caps) {
+  if (!tab?.id) return caps;
+  const pref = tab.thinkingLevel || currentEffort;
+  const prefSupported = caps.availableLevels.includes(pref);
+  if (prefSupported && pref !== caps.currentLevel) {
+    const res = await window.api.setThinking(tab.id, pref);
+    const effective = res?.level ?? pref;
+    tab.thinkingLevel = effective;
+    setEffortLabel(effective);
+    _effortCapsCache.delete(tab.id);
+    return { ...caps, currentLevel: effective };
+  }
+  tab.thinkingLevel = caps.currentLevel;
+  setEffortLabel(caps.currentLevel);
+  return caps;
+}
+
 function syncEffortToTab(tab) {
   const effort = tab.thinkingLevel || currentEffort;
   const level = EFFORT_LEVELS.find((e) => e.id === effort);
   if (level && barEffortLabel) barEffortLabel.textContent = level.label;
+  if (!tab?.id || typeof window.api.getThinkingCapabilities !== 'function') return;
+
+  window.api
+    .getThinkingCapabilities(tab.id)
+    .then(async (caps) => {
+      _effortCapsCache.set(tab.id, caps);
+      if (tab.id !== activeTabId) return;
+      applyEffortCapsToChip(caps);
+      await reconcileEffortCaps(tab, caps);
+    })
+    .catch(() => {});
 }
 
 /** Update the model and effort bar labels to reflect a tab's actual config. */
@@ -964,10 +995,19 @@ function renderAssistantTurn(tab, turn) {
     }
   }
 
-  // Render text with markdown — renderMarkdown() calls escapeHtml() first (safe)
+  const content = tab.currentAssistantBubble.querySelector('.message-content');
   if (turn.text) {
-    const content = tab.currentAssistantBubble.querySelector('.message-content');
     content.insertAdjacentHTML('beforeend', renderMarkdown(turn.text));
+  } else if (content) {
+    content.remove();
+  }
+
+  // If the bubble ended up completely empty (e.g. all tools were hidden
+  // task_create/update and no text), remove the wrapper so it doesn't
+  // render as a phantom gray rectangle.
+  const bubble = tab.currentAssistantBubble;
+  if (bubble && !bubble.children.length) {
+    bubble.remove();
   }
 
   tab.currentAssistantBubble = null;
@@ -1720,7 +1760,12 @@ window.api.onTabUpdated((slotInfo) => {
     // can disagree with the bar label after a switchModel call.
     if (slotInfo.modelConfig) tab.modelConfig = slotInfo.modelConfig;
     renderTabBar();
-    if (slotInfo.id === activeTabId) syncModelToTab(tab.modelConfig);
+    if (slotInfo.id === activeTabId) {
+      syncModelToTab(tab.modelConfig);
+      // Model switch recreates the session — effort capabilities may have
+      // changed (different xhigh support, different default). Re-reconcile.
+      syncEffortToTab(tab);
+    }
   }
 });
 
@@ -1754,6 +1799,13 @@ tabAddBtn.addEventListener('click', () => {
   for (const info of existingTabs) {
     const tab = createTabState(info);
     tabs.set(tab.id, tab);
+  }
+  // The figma:connected IPC fires when the WS handshake completes — which can
+  // happen before the renderer mounts listeners. Derive the global status dot
+  // from the restored tabs' connection state so a reconnect isn't needed.
+  if (existingTabs.some((t) => t.isConnected)) {
+    statusDot.className = 'status-dot connected';
+    statusDot.title = 'Figma connected';
   }
   if (existingTabs.length > 0) {
     switchToTab(existingTabs[0].id);
@@ -1840,10 +1892,36 @@ const barEffortLabel = document.getElementById('bar-effort-label');
 
 const EFFORT_LEVELS = [
   { id: 'off', label: 'Off' },
+  { id: 'minimal', label: 'Minimal' },
   { id: 'low', label: 'Low' },
   { id: 'medium', label: 'Medium' },
   { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Max' },
 ];
+
+// Anthropic=token budget, OpenAI=reasoning_effort enum, Google=model-dependent.
+// Surfacing the semantic distinction prevents the "all providers alike" illusion.
+const EFFORT_FAMILY_LABELS = {
+  anthropic: 'Thinking budget',
+  openai: 'Reasoning effort',
+  google: 'Thinking',
+  unknown: 'Thinking effort',
+};
+
+const _effortCapsCache = new Map();
+
+// Conservative fallback for when the capability IPC is unavailable or fails.
+// Never advertises minimal/xhigh — those are model-specific and showing them
+// as "always available" bleeds false options (e.g. "Max" under Gemini 3 Pro).
+function defaultEffortCaps() {
+  return {
+    family: 'unknown',
+    availableLevels: ['off', 'low', 'medium', 'high'],
+    supportsThinking: true,
+    supportsXhigh: false,
+    currentLevel: currentEffort,
+  };
+}
 
 let currentEffort = localStorage.getItem('bottega:effort') || 'medium';
 barEffortLabel.textContent = EFFORT_LEVELS.find((e) => e.id === currentEffort)
@@ -1940,19 +2018,72 @@ barModelBtn.addEventListener('click', async (e) => {
     const eagerTab = tabs.get(activeTabId);
     if (eagerTab) eagerTab.modelConfig = { provider: item.sdkProvider, modelId: item.id };
     await window.api.switchModel(activeTabId, { provider: item.sdkProvider, modelId: item.id });
-    updateContextBar(0);
+    // Don't zero the context bar — switchSession restores the history, so
+    // context is preserved. Repaint with the last known token count against
+    // the NEW model's max window (e.g. Sonnet 1M → Opus 200k shrinks the bar).
+    // Exact count lands on the next turn via onUsage.
+    const repainted = tabs.get(activeTabId);
+    updateContextBar(repainted?.lastContextTokens ?? 0);
   });
 });
 
-// Effort picker
-barEffortBtn.addEventListener('click', (e) => {
+async function fetchEffortCapabilities(slotId) {
+  if (!slotId || typeof window.api.getThinkingCapabilities !== 'function') return defaultEffortCaps();
+  try {
+    const caps = await window.api.getThinkingCapabilities(slotId);
+    _effortCapsCache.set(slotId, caps);
+    return caps;
+  } catch {
+    return _effortCapsCache.get(slotId) ?? defaultEffortCaps();
+  }
+}
+
+function applyEffortCapsToChip(caps) {
+  const familyLabel = EFFORT_FAMILY_LABELS[caps.family] ?? EFFORT_FAMILY_LABELS.unknown;
+  barEffortBtn.title = caps.supportsThinking
+    ? `${familyLabel} — click to change`
+    : `${familyLabel} — not supported by this model`;
+  barEffortBtn.classList.toggle('disabled-chip', !caps.supportsThinking);
+  barEffortBtn.setAttribute('aria-label', `Select ${familyLabel.toLowerCase()}`);
+}
+
+function setEffortLabel(levelId) {
+  const match = EFFORT_LEVELS.find((l) => l.id === levelId);
+  if (!match) return;
+  currentEffort = match.id;
+  barEffortLabel.textContent = match.label;
+  localStorage.setItem('bottega:effort', match.id);
+}
+
+barEffortBtn.addEventListener('click', async (e) => {
   e.stopPropagation();
-  const items = EFFORT_LEVELS.map((l) => ({ id: l.id, label: l.label, active: l.id === currentEffort }));
-  createDropdown(barEffortBtn, items, (item) => {
-    currentEffort = item.id;
-    barEffortLabel.textContent = item.label;
-    localStorage.setItem('bottega:effort', item.id);
-    if (activeTabId) window.api.setThinking(activeTabId, item.id);
+  let caps = await fetchEffortCapabilities(activeTabId);
+  applyEffortCapsToChip(caps);
+  // Click can fire before the background reconcile in syncEffortToTab finishes,
+  // leaving session.currentLevel stale relative to the user's preference.
+  // Reconcile inline so the dropdown's check always matches the chip.
+  const activeTab = activeTabId ? tabs.get(activeTabId) : null;
+  if (activeTab) caps = await reconcileEffortCaps(activeTab, caps);
+
+  const allowed = new Set(caps.availableLevels);
+  const items = EFFORT_LEVELS.filter((l) => allowed.has(l.id)).map((l) => ({
+    id: l.id,
+    label: l.label,
+    active: l.id === (caps.currentLevel ?? currentEffort),
+  }));
+  if (items.length === 0) items.push({ id: 'off', label: 'Off', active: true });
+
+  createDropdown(barEffortBtn, items, async (item) => {
+    if (!activeTabId) {
+      setEffortLabel(item.id);
+      return;
+    }
+    const res = await window.api.setThinking(activeTabId, item.id);
+    const effective = res?.level ?? item.id;
+    setEffortLabel(effective);
+    const tab = tabs.get(activeTabId);
+    if (tab) tab.thinkingLevel = effective;
+    _effortCapsCache.delete(activeTabId);
   });
 });
 

@@ -214,6 +214,11 @@
             </div>
             <label class="setting-sublabel" style="margin-top:8px">Micro-Judges</label>
             <span class="setting-hint">Enable/disable individual quality criteria. Use the toolbar toggle for quick on/off.</span>
+            <div class="setting-row" id="judge-bulk-row">
+              <label class="setting-sublabel" for="judge-bulk-model">Apply model to all</label>
+              <select id="judge-bulk-model" class="setting-select setting-select-sm" aria-label="Bulk model for all judges"></select>
+              <button id="judge-bulk-apply" class="setting-btn-small" type="button">Apply</button>
+            </div>
             <div id="micro-judge-list">
               <div class="micro-judge-row" data-judge="alignment">
                 <input type="checkbox" id="judge-enable-alignment" class="judge-enable" checked>

@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { AVAILABLE_MODELS } from '../agent.js';
 import { readJsonOrQuarantine } from '../fs-utils.js';
 import { ALL_MICRO_JUDGE_IDS, getJudgeDefinition } from './judge-registry.js';
 import type { MicroJudgeId, SubagentRole } from './types.js';
@@ -59,6 +60,18 @@ export const DEFAULT_SUBAGENT_SETTINGS: SubagentSettings = {
   microJudges: buildDefaultMicroJudges(),
 };
 
+/** Flat set of (provider, modelId) pairs that Bottega still exposes. Used to
+ *  drop stale entries from persisted configs — otherwise a model that was
+ *  removed from AVAILABLE_MODELS (e.g. a variant that never really worked
+ *  under a given sdkProvider) keeps silently failing with a confusing
+ *  "No API key for anthropic" when Pi SDK's getModel() returns undefined. */
+function isKnownProviderModel(provider: string, modelId: string): boolean {
+  for (const group of Object.values(AVAILABLE_MODELS)) {
+    if (group.some((m) => m.sdkProvider === provider && m.id === modelId)) return true;
+  }
+  return false;
+}
+
 /** Validate a single MicroJudgeConfig entry. */
 function validateMicroJudgeConfig(raw: any, defaultConfig: MicroJudgeConfig): MicroJudgeConfig {
   if (!raw || typeof raw !== 'object') return { ...defaultConfig };
@@ -68,7 +81,8 @@ function validateMicroJudgeConfig(raw: any, defaultConfig: MicroJudgeConfig): Mi
     raw.model &&
     typeof raw.model === 'object' &&
     typeof raw.model.provider === 'string' &&
-    typeof raw.model.modelId === 'string'
+    typeof raw.model.modelId === 'string' &&
+    isKnownProviderModel(raw.model.provider, raw.model.modelId)
   ) {
     model = { provider: raw.model.provider, modelId: raw.model.modelId };
   }

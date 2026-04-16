@@ -37,7 +37,7 @@ import type { DesignWorkflowContext } from './workflows/types.js';
 
 export interface ModelConfig {
   provider: string; // Pi SDK provider ID: 'anthropic' | 'openai-codex' | 'google' | 'google-gemini-cli'
-  modelId: string; // e.g. 'claude-sonnet-4-6', 'gpt-5.4', 'gemini-3.1-pro'
+  modelId: string; // e.g. 'claude-sonnet-4-6', 'gpt-5.4', 'gemini-3.1-pro-preview'
 }
 
 export const DEFAULT_MODEL: ModelConfig = { provider: 'anthropic', modelId: 'claude-sonnet-4-6' };
@@ -54,6 +54,40 @@ export const VALID_THINKING_LEVELS: ReadonlySet<ThinkingLevel> = new Set<Thinkin
 ]);
 export function isThinkingLevel(s: string): s is ThinkingLevel {
   return VALID_THINKING_LEVELS.has(s as ThinkingLevel);
+}
+
+/**
+ * Drop levels Pi SDK's provider would silently coerce for the given model.
+ * Pi SDK's `getAvailableThinkingLevels()` reports the generic API-family set
+ * and misses per-model clamps applied inside the provider — keeping those
+ * in the UI misleads users ("I picked Minimal but got Low").
+ *
+ * Mirrors:
+ *   @mariozechner/pi-ai/dist/providers/openai-codex-responses.js:230 (clampReasoningEffort)
+ *   @mariozechner/pi-ai/dist/providers/anthropic.js:365 (mapThinkingLevelToEffort)
+ *   @mariozechner/pi-ai/dist/providers/google-gemini-cli.js:754 (getGeminiCliThinkingLevel)
+ */
+export function filterLevelsForModel(modelId: string, levels: readonly string[]): string[] {
+  const id = (modelId.includes('/') ? (modelId.split('/').pop() ?? modelId) : modelId).toLowerCase();
+  const isGemini3Pro = /gemini-3(?:\.1)?-pro/.test(id);
+  const isAnthropicAdaptive =
+    id.includes('opus-4-6') || id.includes('opus-4.6') || id.includes('sonnet-4-6') || id.includes('sonnet-4.6');
+
+  return levels.filter((level) => {
+    // OpenAI codex-responses clamps.
+    if ((id.startsWith('gpt-5.2') || id.startsWith('gpt-5.3') || id.startsWith('gpt-5.4')) && level === 'minimal') {
+      return false;
+    }
+    if (id === 'gpt-5.1' && level === 'xhigh') return false;
+    if (id === 'gpt-5.1-codex-mini' && (level === 'minimal' || level === 'low')) return false;
+    // Anthropic adaptive thinking (Opus/Sonnet 4.6): minimal collapses into low.
+    if (isAnthropicAdaptive && level === 'minimal') return false;
+    // Gemini 3 Pro collapses minimal+low → LOW and medium+high → HIGH.
+    // Keep the "louder" end of each pair (low, high) so users still get
+    // distinct output levels, drop the aliases.
+    if (isGemini3Pro && (level === 'minimal' || level === 'medium')) return false;
+    return true;
+  });
 }
 
 /**
@@ -85,11 +119,10 @@ export const CONTEXT_SIZES: Record<string, number> = {
   'claude-haiku-4-5': 200_000,
   'gpt-5.4': 1_000_000,
   'gpt-5.4-mini': 1_000_000,
-  'gpt-5.4-nano': 1_000_000,
   'gpt-5.3-codex': 1_000_000,
-  'gemini-3-flash': 1_000_000,
-  'gemini-3.1-pro': 1_000_000,
-  'gemini-3.1-flash-lite': 1_000_000,
+  'gemini-3-flash-preview': 1_000_000,
+  'gemini-3-pro-preview': 1_000_000,
+  'gemini-3.1-pro-preview': 1_000_000,
 };
 
 /**
@@ -106,15 +139,19 @@ export const AVAILABLE_MODELS: Record<string, { id: string; label: string; sdkPr
     { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', sdkProvider: 'anthropic' },
   ],
   openai: [
+    // gpt-5.4-nano is NOT exposed via the ChatGPT (OAuth/codex) subscription —
+    // Pi SDK registers it only under api-key providers (openai, opencode,
+    // azure-openai-responses). Listing it under openai-codex produced a
+    // runtime `getModel(...) === undefined` and the judge fell through to a
+    // default provider chain that surfaced as "No API key for anthropic".
     { id: 'gpt-5.4', label: 'GPT-5.4', sdkProvider: 'openai-codex' },
     { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini', sdkProvider: 'openai-codex' },
-    { id: 'gpt-5.4-nano', label: 'GPT-5.4 Nano', sdkProvider: 'openai-codex' },
     { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex', sdkProvider: 'openai-codex' },
   ],
   google: [
-    { id: 'gemini-3-flash', label: 'Gemini 3 Flash', sdkProvider: 'google-gemini-cli' },
-    { id: 'gemini-3.1-pro', label: 'Gemini 3.1 Pro', sdkProvider: 'google-gemini-cli' },
-    { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', sdkProvider: 'google-gemini-cli' },
+    { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash', sdkProvider: 'google-gemini-cli' },
+    { id: 'gemini-3-pro-preview', label: 'Gemini 3 Pro', sdkProvider: 'google-gemini-cli' },
+    { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', sdkProvider: 'google-gemini-cli' },
   ],
 };
 

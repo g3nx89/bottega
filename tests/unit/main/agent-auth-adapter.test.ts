@@ -122,7 +122,7 @@ describe('resolveSdkModelId', () => {
   it('passes other model ids through unchanged', () => {
     expect(resolveSdkModelId('claude-opus-4-6')).toBe('claude-opus-4-6');
     expect(resolveSdkModelId('claude-sonnet-4-6')).toBe('claude-sonnet-4-6');
-    expect(resolveSdkModelId('gemini-3-flash')).toBe('gemini-3-flash');
+    expect(resolveSdkModelId('gemini-3-flash-preview')).toBe('gemini-3-flash-preview');
     expect(resolveSdkModelId('gpt-5.4')).toBe('gpt-5.4');
   });
 });

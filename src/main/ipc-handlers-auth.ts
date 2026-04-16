@@ -36,7 +36,7 @@ export function setupAuthHandlers(deps: { infra: AgentInfra; mainWindow: Browser
   const { infra, mainWindow } = deps;
 
   let loginAbortController: AbortController | null = null;
-  let loginPromptResolver: ((value: string) => void) | null = null;
+  let loginPromptResolver: { resolve: (value: string) => void; reject: (err: Error) => void } | null = null;
 
   // ── Model / key queries ──────────────────────
 
@@ -135,8 +135,8 @@ export function setupAuthHandlers(deps: { infra: AgentInfra; mainWindow: Browser
           });
         },
         onPrompt: (prompt) => {
-          return new Promise<string>((resolve) => {
-            loginPromptResolver = resolve;
+          return new Promise<string>((resolve, reject) => {
+            loginPromptResolver = { resolve, reject };
             safeSend(mainWindow.webContents, 'auth:login-event', {
               type: 'prompt',
               message: prompt.message,
@@ -149,8 +149,8 @@ export function setupAuthHandlers(deps: { infra: AgentInfra; mainWindow: Browser
           safeSend(mainWindow.webContents, 'auth:login-event', { type: 'progress', message });
         },
         onManualCodeInput: () => {
-          return new Promise<string>((resolve) => {
-            loginPromptResolver = resolve;
+          return new Promise<string>((resolve, reject) => {
+            loginPromptResolver = { resolve, reject };
             safeSend(mainWindow.webContents, 'auth:login-event', {
               type: 'prompt',
               message: MSG_PASTE_AUTH_CODE,
@@ -192,13 +192,22 @@ export function setupAuthHandlers(deps: { infra: AgentInfra; mainWindow: Browser
 
   ipcMain.handle('auth:login-respond', (_event, response: string) => {
     if (loginPromptResolver) {
-      loginPromptResolver(response);
+      loginPromptResolver.resolve(response);
       loginPromptResolver = null;
     }
   });
 
   ipcMain.handle('auth:login-cancel', () => {
     loginAbortController?.abort();
+    // Unblock any pending onPrompt/onManualCodeInput promise — pi-sdk awaits
+    // our string resolver and never observes the abort signal by itself, so
+    // without this the login() call hangs and the UI stays stuck.
+    if (loginPromptResolver) {
+      const err = new Error('Login cancelled');
+      err.name = 'AbortError';
+      loginPromptResolver.reject(err);
+      loginPromptResolver = null;
+    }
   });
 
   // ── F11: model probe / test connection / model status ──

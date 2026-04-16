@@ -159,7 +159,16 @@ contextBridge.exposeInMainWorld('api', {
   setOpacity: (opacity: number) => ipcRenderer.invoke('window:set-opacity', opacity),
 
   // ── Thinking level (per-slot) ─────────────
-  setThinking: (slotId: string, level: string) => ipcRenderer.invoke('agent:set-thinking', slotId, level),
+  setThinking: (slotId: string, level: string) =>
+    ipcRenderer.invoke('agent:set-thinking', slotId, level) as Promise<{ level: string } | undefined>,
+  getThinkingCapabilities: (slotId: string) =>
+    ipcRenderer.invoke('agent:get-thinking-capabilities', slotId) as Promise<{
+      family: 'anthropic' | 'openai' | 'google' | 'unknown';
+      availableLevels: string[];
+      supportsThinking: boolean;
+      supportsXhigh: boolean;
+      currentLevel: string;
+    }>,
 
   // ── Auth & Model (global + per-slot) ──────
   getModels: () => ipcRenderer.invoke('auth:get-models'),

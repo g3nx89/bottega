@@ -75,6 +75,9 @@ export interface BottegaTestSession {
   deps: ToolDeps;
   /** Task store for assertions */
   taskStore: TaskStore;
+  /** Underlying Pi SDK AgentSession — exposed so tests can exercise capability
+   *  methods (setThinkingLevel, getAvailableThinkingLevels, ...) directly. */
+  session: any;
   /** Cleanup */
   dispose(): void;
 }
@@ -217,6 +220,7 @@ export async function createBottegaTestSession(options: BottegaTestSessionOption
     configManager,
     deps,
     taskStore,
+    session,
 
     get playbook() {
       return {

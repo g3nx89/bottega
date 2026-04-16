@@ -37,13 +37,22 @@ function extractText(content: any[] | undefined): string {
  */
 const JUDGE_RETRY_MARKER = '[JUDGE_RETRY]';
 
+// Legacy sessions (before session-factory switched to in-memory) persisted
+// micro-judge prompts and verdicts into the main session file. Filter them
+// heuristically so restoreChat doesn't resurface them on restart.
+function looksLikeJudgePrompt(text: string): boolean {
+  const t = text.trimStart();
+  return t.startsWith('## Criterion:') || t.startsWith('# Criterion:');
+}
+
 export function extractRenderableMessages(messages: any[]): RenderableTurn[] {
   const turns: RenderableTurn[] = [];
   const toolResults = new Map<string, { success: boolean; screenshots: string[] }>();
 
-  // Pass 1: index tool results
+  // Pass 1: index tool results. Pi SDK uses role "toolResult" (camelCase);
+  // the legacy snake_case form kept here for older session files on disk.
   for (const msg of messages) {
-    if (msg.role === 'tool_result') {
+    if (msg.role === 'toolResult' || msg.role === 'tool_result') {
       const screenshots: string[] = [];
       if (msg.content) {
         for (const c of msg.content) {
@@ -67,6 +76,11 @@ export function extractRenderableMessages(messages: any[]): RenderableTurn[] {
       const text = extractText(msg.content);
       // Skip judge retry prompts and their assistant responses
       if (text.startsWith(JUDGE_RETRY_MARKER)) {
+        inRetryZone = true;
+        continue;
+      }
+      // Legacy contamination: judge criterion prompts persisted from older builds.
+      if (looksLikeJudgePrompt(text)) {
         inRetryZone = true;
         continue;
       }
@@ -94,8 +108,12 @@ export function extractRenderableMessages(messages: any[]): RenderableTurn[] {
       if (msg.content) {
         for (const c of msg.content) {
           if (c.type === 'toolCall') {
-            const result = toolResults.get(c.toolCallId);
-            tools.push({ name: c.name, id: c.toolCallId, success: result?.success ?? true });
+            // Pi SDK ToolCall content uses `id`; legacy serializations carry
+            // `toolCallId` — accept both so old session files still restore
+            // with correct spinner→check transitions.
+            const toolCallId = c.id ?? c.toolCallId;
+            const result = toolResults.get(toolCallId);
+            tools.push({ name: c.name, id: toolCallId, success: result?.success ?? true });
             if (result?.screenshots) screenshots.push(...result.screenshots);
           }
         }

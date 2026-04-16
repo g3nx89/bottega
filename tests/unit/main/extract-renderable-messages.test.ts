@@ -21,6 +21,68 @@ describe('extractRenderableMessages', () => {
     expect(extractRenderableMessages(messages)).toEqual([{ role: 'user', text: 'Hello' }]);
   });
 
+  it('should correctly wire Pi SDK toolResult → toolCall via id (camelCase role + id field)', () => {
+    // Shape produced by the real Pi SDK: role="toolResult", toolCall.id, content image has data.
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'draw a square' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: "I'll do it." },
+          { type: 'toolCall', id: 'call-abc', name: 'figma_render_jsx', arguments: {} },
+          { type: 'toolCall', id: 'call-def', name: 'figma_screenshot', arguments: {} },
+        ],
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'call-abc',
+        toolName: 'figma_render_jsx',
+        isError: false,
+        content: [{ type: 'text', text: 'ok' }],
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'call-def',
+        toolName: 'figma_screenshot',
+        isError: false,
+        content: [{ type: 'image', data: 'base64-png', mimeType: 'image/png' }],
+      },
+    ];
+    const turns = extractRenderableMessages(messages);
+    expect(turns).toHaveLength(2);
+    const assistant = turns[1];
+    expect(isAssistant(assistant)).toBe(true);
+    if (!isAssistant(assistant)) return;
+    // Critical: each tool gets a distinct, defined id so the DOM lookup in
+    // completeToolCard can find exactly one card per tool.
+    expect(assistant.tools).toEqual([
+      { name: 'figma_render_jsx', id: 'call-abc', success: true },
+      { name: 'figma_screenshot', id: 'call-def', success: true },
+    ]);
+    expect(assistant.images).toEqual(['base64-png']);
+  });
+
+  it('should still accept legacy snake_case role + toolCallId (back-compat for old session files)', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+      {
+        role: 'assistant',
+        content: [{ type: 'toolCall', toolCallId: 'legacy-1', name: 'figma_status', arguments: {} }],
+      },
+      {
+        role: 'tool_result',
+        toolCallId: 'legacy-1',
+        isError: false,
+        content: [{ type: 'text', text: 'ok' }],
+      },
+    ];
+    const turns = extractRenderableMessages(messages);
+    const assistant = turns[1];
+    expect(isAssistant(assistant)).toBe(true);
+    if (!isAssistant(assistant)) return;
+    expect(assistant.tools?.[0]).toEqual({ name: 'figma_status', id: 'legacy-1', success: true });
+  });
+
   it('should extract user message with images', () => {
     const messages = [
       {
@@ -232,6 +294,38 @@ describe('extractRenderableMessages', () => {
     expect(turns[1].text).toBe('Done!');
     expect(turns[2].text).toBe('Looks great!');
     expect(turns[3].text).toBe('Thanks!');
+  });
+
+  it('should skip legacy "## Criterion:" judge prompts persisted in old sessions', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'Make a card' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Done!' }] },
+      // Legacy contamination: judge prompt and verdict that older builds
+      // accidentally wrote into the main session file.
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: '## Criterion: Alignment\nEvaluate layout precision using the provided data.\n\nEvaluate using: ...',
+          },
+        ],
+      },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: '{"pass": true, "finding": "All aligned", "evidence": "...", "actionItems": []}' },
+        ],
+      },
+      { role: 'user', content: [{ type: 'text', text: 'Make it blue' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+    ];
+    const turns = extractRenderableMessages(messages);
+    expect(turns).toHaveLength(4);
+    expect(turns[0].text).toBe('Make a card');
+    expect(turns[1].text).toBe('Done!');
+    expect(turns[2].text).toBe('Make it blue');
+    expect(turns[3].text).toBe('Done.');
   });
 
   it('should handle a realistic multi-turn conversation', () => {

@@ -76,6 +76,23 @@ vi.mock('../../../src/main/agent.js', () => ({
   createFigmaAgent: vi.fn(),
   safeReloadAuth: vi.fn(),
   wrapPromptWithErrorCapture: vi.fn(async (session: any, text: string) => session.prompt(text)),
+  isThinkingLevel: (s: string) => ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(s),
+  filterLevelsForModel: (modelId: string, levels: readonly string[]) => {
+    const id = (modelId.includes('/') ? (modelId.split('/').pop() ?? modelId) : modelId).toLowerCase();
+    const isGemini3Pro = /gemini-3(?:\.1)?-pro/.test(id);
+    const isAnthropicAdaptive =
+      id.includes('opus-4-6') || id.includes('opus-4.6') || id.includes('sonnet-4-6') || id.includes('sonnet-4.6');
+    return levels.filter((level) => {
+      if ((id.startsWith('gpt-5.2') || id.startsWith('gpt-5.3') || id.startsWith('gpt-5.4')) && level === 'minimal') {
+        return false;
+      }
+      if (id === 'gpt-5.1' && level === 'xhigh') return false;
+      if (id === 'gpt-5.1-codex-mini' && (level === 'minimal' || level === 'low')) return false;
+      if (isAnthropicAdaptive && level === 'minimal') return false;
+      if (isGemini3Pro && (level === 'minimal' || level === 'medium')) return false;
+      return true;
+    });
+  },
 }));
 
 vi.mock('../../../src/main/image-gen/config.js', () => ({
@@ -1334,6 +1351,195 @@ describe('setupIpcHandlers', () => {
     it('returns empty array when no tracker attached', async () => {
       const result = await invokeHandler('diagnostics:get-recent-errors');
       expect(Array.isArray(result)).toBe(true);
+    });
+  });
+
+  // ── Thinking level & capabilities ─────────────────────────────
+  //
+  // These tests guard the Pi-SDK-agnostic contract between the UI and main:
+  // the renderer fetches capabilities before rendering the effort dropdown,
+  // and `set-thinking` must echo the *effective* (post-clamp) level so the
+  // chip never shows a value the provider will silently ignore.
+
+  describe('agent:set-thinking', () => {
+    it('forwards a valid level to session.setThinkingLevel and persists it on the slot', async () => {
+      const res = await invokeHandler('agent:set-thinking', slotId, 'high');
+      expect(mockSession.setThinkingLevel).toHaveBeenCalledWith('high');
+      expect(slot.thinkingLevel).toBe('high');
+      expect(res).toEqual({ level: 'high' });
+    });
+
+    it('ignores invalid levels without touching the session', async () => {
+      await invokeHandler('agent:set-thinking', slotId, 'not-a-level');
+      expect(mockSession.setThinkingLevel).not.toHaveBeenCalled();
+    });
+
+    it('returns the effective (clamped) level when the model does not support the requested one', async () => {
+      // Model only supports off+low — request "xhigh" and expect a downgrade.
+      mockSession._availableThinkingLevels = ['off', 'low'];
+      mockSession._supportsXhigh = false;
+
+      const res = await invokeHandler('agent:set-thinking', slotId, 'xhigh');
+
+      expect(mockSession.setThinkingLevel).toHaveBeenCalledWith('xhigh');
+      // Mock's clamp: xhigh → low (highest supported).
+      expect(res).toEqual({ level: 'low' });
+      expect(slot.thinkingLevel).toBe('low');
+    });
+
+    it('falls back to the requested level when the session lacks a thinkingLevel getter', async () => {
+      // Simulate a session without the getter (older SDK / scripted mock).
+      Object.defineProperty(mockSession, 'thinkingLevel', {
+        configurable: true,
+        get: () => undefined,
+      });
+      const res = await invokeHandler('agent:set-thinking', slotId, 'medium');
+      expect(res).toEqual({ level: 'medium' });
+      expect(slot.thinkingLevel).toBe('medium');
+    });
+  });
+
+  describe('agent:get-thinking-capabilities', () => {
+    it('reports anthropic family and filtered level set for Opus 4.6 (minimal dropped, xhigh kept)', async () => {
+      slot.modelConfig = { provider: 'anthropic', modelId: 'claude-opus-4-6' };
+      mockSession._availableThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+      mockSession._supportsXhigh = true;
+      mockSession._thinkingLevel = 'medium';
+
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+
+      expect(caps).toEqual({
+        family: 'anthropic',
+        availableLevels: ['off', 'low', 'medium', 'high', 'xhigh'],
+        supportsThinking: true,
+        supportsXhigh: true,
+        currentLevel: 'medium',
+      });
+    });
+
+    it('maps openai-codex provider to the openai family (not "unknown")', async () => {
+      slot.modelConfig = { provider: 'openai-codex', modelId: 'gpt-5.4' };
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+      expect(caps.family).toBe('openai');
+    });
+
+    it('maps google-gemini-cli provider to the google family', async () => {
+      slot.modelConfig = { provider: 'google-gemini-cli', modelId: 'gemini-3.1-pro-preview' };
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+      expect(caps.family).toBe('google');
+    });
+
+    it('collapses availableLevels to ["off"] when the model does not support thinking', async () => {
+      mockSession._supportsThinking = false;
+      mockSession._availableThinkingLevels = ['off'];
+
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+
+      expect(caps.supportsThinking).toBe(false);
+      expect(caps.availableLevels).toEqual(['off']);
+    });
+
+    it('falls back to a conservative capability set when the session lacks the Pi SDK helpers', async () => {
+      // Simulate an older session shape — drop the helper methods.
+      (mockSession as any).supportsThinking = undefined;
+      (mockSession as any).supportsXhighThinking = undefined;
+      (mockSession as any).getAvailableThinkingLevels = undefined;
+
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+
+      expect(caps.supportsThinking).toBe(true);
+      expect(caps.supportsXhigh).toBe(false);
+      expect(caps.availableLevels).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
+    });
+
+    it('drops "minimal" from availableLevels for GPT-5.4 (provider silently clamps minimal→low)', async () => {
+      slot.modelConfig = { provider: 'openai-codex', modelId: 'gpt-5.4' };
+      mockSession._availableThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+      mockSession._supportsXhigh = true;
+
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+
+      expect(caps.availableLevels).toEqual(['off', 'low', 'medium', 'high', 'xhigh']);
+    });
+
+    it('drops "xhigh" from availableLevels for GPT-5.1 (provider clamps xhigh→high)', async () => {
+      slot.modelConfig = { provider: 'openai-codex', modelId: 'gpt-5.1' };
+      mockSession._availableThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+      mockSession._supportsXhigh = true;
+
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+
+      expect(caps.availableLevels).not.toContain('xhigh');
+      expect(caps.availableLevels).toContain('minimal');
+    });
+
+    it('drops "minimal" for Claude Sonnet 4.6 (adaptive thinking collapses minimal→low)', async () => {
+      slot.modelConfig = { provider: 'anthropic', modelId: 'claude-sonnet-4-6' };
+      mockSession._availableThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high'];
+
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+
+      expect(caps.availableLevels).toEqual(['off', 'low', 'medium', 'high']);
+    });
+
+    it('drops "minimal" for Claude Opus 4.6 but keeps "xhigh" (distinct "max" tier)', async () => {
+      slot.modelConfig = { provider: 'anthropic', modelId: 'claude-opus-4-6' };
+      mockSession._availableThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+      mockSession._supportsXhigh = true;
+
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+
+      expect(caps.availableLevels).toEqual(['off', 'low', 'medium', 'high', 'xhigh']);
+    });
+
+    it('keeps "minimal" for Claude Haiku 4.5 (budget-based thinking, each level distinct)', async () => {
+      slot.modelConfig = { provider: 'anthropic', modelId: 'claude-haiku-4-5' };
+      mockSession._availableThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high'];
+
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+
+      expect(caps.availableLevels).toContain('minimal');
+    });
+
+    it('drops "minimal" and "medium" for Gemini 3 Pro (collapses to low+high only)', async () => {
+      slot.modelConfig = { provider: 'google-gemini-cli', modelId: 'gemini-3.1-pro' };
+      mockSession._availableThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high'];
+
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+
+      expect(caps.availableLevels).toEqual(['off', 'low', 'high']);
+    });
+
+    it('hard-drops "xhigh" when supportsXhigh=false even if Pi SDK accidentally includes it', async () => {
+      slot.modelConfig = { provider: 'google-gemini-cli', modelId: 'gemini-3-flash' };
+      // Simulate a Pi SDK quirk returning xhigh despite supportsXhigh=false.
+      mockSession._availableThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+      mockSession._supportsXhigh = false;
+
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+
+      expect(caps.supportsXhigh).toBe(false);
+      expect(caps.availableLevels).not.toContain('xhigh');
+    });
+
+    it('keeps all levels for Gemini 3 Flash (1:1 mapping, no collapse)', async () => {
+      slot.modelConfig = { provider: 'google-gemini-cli', modelId: 'gemini-3-flash' };
+      mockSession._availableThinkingLevels = ['off', 'minimal', 'low', 'medium', 'high'];
+
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+
+      expect(caps.availableLevels).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
+    });
+
+    it('returns the current session-effective level (not the slot cache) so repaint is correct after a model swap', async () => {
+      // Slot cache says medium, but the session has since been clamped to low.
+      slot.thinkingLevel = 'medium';
+      mockSession._thinkingLevel = 'low';
+      mockSession._availableThinkingLevels = ['off', 'low'];
+
+      const caps = await invokeHandler('agent:get-thinking-capabilities', slotId);
+
+      expect(caps.currentLevel).toBe('low');
     });
   });
 });

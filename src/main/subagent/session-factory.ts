@@ -14,6 +14,7 @@ import {
   type CreateAgentSessionResult,
   createAgentSession,
   DefaultResourceLoader,
+  SessionManager,
 } from '@mariozechner/pi-coding-agent';
 import { type AgentInfra, resolveSdkModelId } from '../agent.js';
 import type { SubagentModelConfig } from './config.js';
@@ -49,7 +50,11 @@ export async function createSubagentSession(
     tools: [],
     customTools: tools,
     resourceLoader,
-    sessionManager: infra.sessionManager,
+    // Ephemeral: subagents must not persist into the parent slot's session
+    // file. Sharing infra.sessionManager leaked judge prompts + verdict JSON
+    // into the main chat history, which then surfaced on restart via
+    // restoreChat as raw "## Criterion: ..." / "pass:true,finding:..." bubbles.
+    sessionManager: SessionManager.inMemory(os.tmpdir()),
     authStorage: infra.authStorage,
     modelRegistry: infra.modelRegistry,
   });
