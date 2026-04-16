@@ -6,6 +6,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 
 ## [Unreleased]
 
+## [0.15.3] - 2026-04-16
+
+### Fixed
+- Re-judge leaves "..." thinking bubble stuck indefinitely when session prompt errors silently — now always emits agent:end as safety net after force-rerun completes
+
 ## [0.15.2] - 2026-04-16
 
 ### Fixed
@@ -302,7 +307,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 - Settings panel with window transparency slider
 - Graceful shutdown, persistent WS reconnect, pin window, structured logging
 
-[Unreleased]: https://github.com/g3nx89/bottega/compare/v0.15.2...HEAD
+[Unreleased]: https://github.com/g3nx89/bottega/compare/v0.15.3...HEAD
+[0.15.3]: https://github.com/g3nx89/bottega/compare/v0.15.2...v0.15.3
 [0.15.2]: https://github.com/g3nx89/bottega/compare/v0.15.1...v0.15.2
 [0.15.1]: https://github.com/g3nx89/bottega/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/g3nx89/bottega/compare/v0.14.0...v0.15.0
