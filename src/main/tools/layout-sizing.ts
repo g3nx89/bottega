@@ -1,5 +1,6 @@
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -7,7 +8,7 @@ export function createLayoutSizingTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_set_layout_sizing',
       label: 'Set Layout Sizing',
       description:
@@ -27,7 +28,7 @@ export function createLayoutSizingTools(deps: ToolDeps): ToolDefinition[] {
           }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const nodeId = String(params.nodeId).replace(/[^0-9:;]/g, '');
           const horizontal = params.horizontal;
@@ -65,6 +66,6 @@ export function createLayoutSizingTools(deps: ToolDeps): ToolDefinition[] {
           return textResult(typeof result === 'string' ? JSON.parse(result) : result);
         });
       },
-    },
+    }),
   ];
 }

@@ -131,7 +131,6 @@ describe('Judge harness — no credentials path (Issue 1 fix)', () => {
           subscribe: vi.fn((c: any) => {
             cb = c;
           }),
-          newSession: vi.fn().mockResolvedValue(undefined),
           prompt: vi.fn().mockImplementation(async () => {
             cb?.({
               assistantMessageEvent: {

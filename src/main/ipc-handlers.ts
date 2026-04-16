@@ -261,9 +261,6 @@ export interface AgentSessionLike {
   prompt(text: string): Promise<void>;
   abort(): Promise<void>;
   subscribe(callback: (event: any) => void): void;
-  // Session persistence methods (Pi SDK AgentSession)
-  newSession(options?: { parentSession?: string }): Promise<boolean>;
-  switchSession(sessionPath: string): Promise<boolean>;
   setThinkingLevel?(level: string): void;
   setModel?(model: any): Promise<void>;
   // Optional so mocks/scripted sessions don't need to implement them.
@@ -919,7 +916,9 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
       eventRouter.finalizeTurn(slot);
       slot.isStreaming = false;
     }
-    await slot.session.newSession();
+    await slot.runtime.newSession();
+    // Re-subscribe: runtime swaps the AgentSession instance, so prior listeners target a stale object.
+    subscribeToSlot(slot);
     slot.suggester.reset();
     persistSlotSession(slot);
     slotManager.persistState();

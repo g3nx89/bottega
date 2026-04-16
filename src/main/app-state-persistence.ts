@@ -19,6 +19,36 @@ export interface AppState {
   savedAt: string;
   activeSlotFileKey: string | null;
   slots: PersistedSlot[];
+  /** Idempotency flag: legacy dated model IDs migrated to the new family names. */
+  _migratedModelIds?: boolean;
+}
+
+/**
+ * Anthropic retired dated model IDs (e.g. claude-sonnet-4-20250514) in favor of
+ * family IDs (claude-sonnet-4-6). Users with stale app-state files still point
+ * at the dated IDs and get `getModel() === undefined` at session start.
+ * Migrate in place on load so the next save normalizes to the new IDs.
+ */
+const LEGACY_MODEL_ID_MAP: Record<string, string> = {
+  'claude-sonnet-4-20250514': 'claude-sonnet-4-6',
+  'claude-opus-4-20250514': 'claude-opus-4-6',
+  'claude-sonnet-4-5-20250929': 'claude-sonnet-4-6',
+  'claude-opus-4-5-20250929': 'claude-opus-4-6',
+};
+
+export function migrateLegacyModelIds(state: AppState): AppState {
+  if (state._migratedModelIds) return state;
+  let migratedCount = 0;
+  const slots = state.slots.map((slot) => {
+    const replacement = LEGACY_MODEL_ID_MAP[slot.modelConfig?.modelId];
+    if (!replacement) return slot;
+    migratedCount++;
+    return { ...slot, modelConfig: { ...slot.modelConfig, modelId: replacement } };
+  });
+  if (migratedCount > 0) {
+    log.info({ count: migratedCount }, 'Migrated legacy model IDs');
+  }
+  return { ...state, slots, _migratedModelIds: true };
 }
 
 const CURRENT_VERSION = 1;
@@ -36,11 +66,13 @@ export class AppStatePersistence {
 
   /** Read state from disk. Corrupt files are quarantined; returns null to start fresh. */
   load(): AppState | null {
-    return readJsonOrQuarantine<AppState>(
+    const state = readJsonOrQuarantine<AppState>(
       this.statePath,
       (v): v is AppState =>
         !!v && typeof v === 'object' && typeof (v as any).version === 'number' && Array.isArray((v as any).slots),
     );
+    if (!state) return null;
+    return migrateLegacyModelIds(state);
   }
 
   /** Save state to disk (debounced 500ms). Multiple calls within the window → single write. */

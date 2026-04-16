@@ -21,7 +21,6 @@ vi.mock('../../../../src/main/subagent/session-factory.js', () => ({
         resolve({
           session: {
             subscribe: vi.fn(),
-            newSession: vi.fn().mockResolvedValue(undefined),
             prompt: vi.fn().mockResolvedValue(undefined),
             abort: vi.fn().mockResolvedValue(undefined),
           },

@@ -1,5 +1,6 @@
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import type { ImageGenerator } from '../image-gen/image-generator.js';
 import {
@@ -60,7 +61,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
 
   return [
     // ── figma_generate_image ──────────────────
-    {
+    defineTool({
       name: 'figma_generate_image',
       label: 'Generate Image',
       description: `Generate images from text prompts using Gemini's Nano Banana models. Supports multiple artistic styles and variation types. Optionally applies the result directly as an image fill on Figma nodes.`,
@@ -106,7 +107,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
           }),
         ),
       }),
-      async execute(_toolCallId, params: any, signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
         const gen = requireImageGen(deps);
         const prompts = buildBatchPrompts(params.prompt, {
           styles: params.styles,
@@ -119,7 +120,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
 
         if (params.nodeIds?.length && result.images.length > 0) {
           await operationQueue.execute(async () => {
-            await connector.setImageFill(params.nodeIds, result.images[0]!, params.scaleMode ?? 'FILL');
+            await connector.setImageFill(params.nodeIds!, result.images[0]!, params.scaleMode ?? 'FILL');
           });
         }
 
@@ -132,10 +133,10 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
             : 'Use figma_set_image_fill to apply images to nodes.',
         });
       },
-    },
+    }),
 
     // ── figma_edit_image ──────────────────────
-    {
+    defineTool({
       name: 'figma_edit_image',
       label: 'Edit Image',
       description:
@@ -154,13 +155,13 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         }),
         nodeId: Type.String({ description: 'Figma node ID with an image to edit' }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return editNodeImage(deps, params, 'Edited image applied. Use figma_screenshot to verify the result.');
       },
-    },
+    }),
 
     // ── figma_restore_image ──────────────────
-    {
+    defineTool({
       name: 'figma_restore_image',
       label: 'Restore Image',
       description:
@@ -180,13 +181,13 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         }),
         nodeId: Type.String({ description: 'Figma node ID with an image to restore' }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return editNodeImage(deps, params, 'Restored image applied. Use figma_screenshot to verify.');
       },
-    },
+    }),
 
     // ── figma_generate_icon ──────────────────
-    {
+    defineTool({
       name: 'figma_generate_icon',
       label: 'Generate Icon',
       description:
@@ -219,7 +220,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         ),
         nodeId: Type.Optional(Type.String({ description: 'Figma node ID to apply the icon as fill' })),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const gen = requireImageGen(deps);
         const prompt = buildIconPrompt(params.prompt, {
           type: params.type,
@@ -235,7 +236,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
 
         if (params.nodeId) {
           await operationQueue.execute(async () => {
-            await connector.setImageFill([params.nodeId], result.images[0]!, 'FILL');
+            await connector.setImageFill([params.nodeId!], result.images[0]!, 'FILL');
           });
         }
 
@@ -247,10 +248,10 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
             : 'Use figma_set_image_fill to place the icon on a node.',
         });
       },
-    },
+    }),
 
     // ── figma_generate_pattern ────────────────
-    {
+    defineTool({
       name: 'figma_generate_pattern',
       label: 'Generate Pattern',
       description:
@@ -291,7 +292,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
           }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const gen = requireImageGen(deps);
         const prompt = buildPatternPrompt(params.prompt, {
           type: params.type,
@@ -309,7 +310,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         if (params.nodeIds?.length) {
           const mode = params.scaleMode ?? (params.type === 'seamless' ? 'TILE' : 'FILL');
           await operationQueue.execute(async () => {
-            await connector.setImageFill(params.nodeIds, result.images[0]!, mode);
+            await connector.setImageFill(params.nodeIds!, result.images[0]!, mode);
           });
         }
 
@@ -321,10 +322,10 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
             : 'Use figma_set_image_fill with scaleMode: TILE for seamless patterns.',
         });
       },
-    },
+    }),
 
     // ── figma_generate_story ─────────────────
-    {
+    defineTool({
       name: 'figma_generate_story',
       label: 'Generate Story',
       description:
@@ -358,7 +359,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         frameWidth: Type.Optional(Type.Number({ description: 'Width of each story frame in px (default: 400)' })),
         frameHeight: Type.Optional(Type.Number({ description: 'Height of each story frame in px (default: 300)' })),
       }),
-      async execute(_toolCallId, params: any, signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
         const gen = requireImageGen(deps);
         const numSteps = params.steps || 4;
         const type = params.type || 'story';
@@ -443,10 +444,10 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
           hint: 'Story frames created. Use figma_screenshot to verify.',
         });
       },
-    },
+    }),
 
     // ── figma_generate_diagram ────────────────
-    {
+    defineTool({
       name: 'figma_generate_diagram',
       label: 'Generate Diagram',
       description: 'Generate technical diagrams, flowcharts, and architectural mockups using AI image generation.',
@@ -489,7 +490,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
         ),
         nodeId: Type.Optional(Type.String({ description: 'Figma node ID to apply the diagram as fill' })),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const gen = requireImageGen(deps);
         const prompt = buildDiagramPrompt(params.prompt, {
           type: params.type,
@@ -507,7 +508,7 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
 
         if (params.nodeId) {
           await operationQueue.execute(async () => {
-            await connector.setImageFill([params.nodeId], result.images[0]!, 'FILL');
+            await connector.setImageFill([params.nodeId!], result.images[0]!, 'FILL');
           });
         }
 
@@ -519,6 +520,6 @@ export function createImageGenTools(deps: ToolDeps): ToolDefinition[] {
             : 'Use figma_set_image_fill to place the diagram on a Figma node.',
         });
       },
-    },
+    }),
   ];
 }

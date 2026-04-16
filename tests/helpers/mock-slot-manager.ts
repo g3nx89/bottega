@@ -7,10 +7,17 @@ import { PromptQueue } from '../../src/main/prompt-queue.js';
  */
 export function createMockSlotManager(session: any, opts?: { fileKey?: string; fileName?: string }) {
   const slotId = 'test-slot-id';
+  const runtime = {
+    session,
+    newSession: session?._newSessionFn ?? vi.fn().mockResolvedValue({ cancelled: false }),
+    switchSession: session?._switchSessionFn ?? vi.fn().mockResolvedValue({ cancelled: false }),
+    dispose: vi.fn().mockResolvedValue(undefined),
+  };
   const slot = {
     id: slotId,
     fileKey: opts?.fileKey ?? 'test-file-key',
     fileName: opts?.fileName ?? 'TestFile.fig',
+    runtime,
     session,
     isStreaming: false,
     modelConfig: { provider: 'anthropic', modelId: 'claude-sonnet-4' },

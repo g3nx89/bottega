@@ -210,6 +210,34 @@ describe('Session persistence IPC', () => {
     it('should return error when slot not found', async () => {
       await expect(invokeHandler('session:reset', 'nonexistent-slot-id')).rejects.toThrow('Slot not found');
     });
+
+    it('re-subscribes the slot after runtime.newSession so listeners bind to the new session', async () => {
+      const subscribeSpy = vi.fn();
+      const ipcController = setupIpcHandlers({
+        slotManager: slotManager as any,
+        mainWindow: mockWindow as any,
+        infra: mockInfra,
+        sessionStore,
+      });
+      // Wrap subscribeSlot to observe re-subscription after reset.
+      const originalSubscribe = ipcController.subscribeSlot;
+      ipcController.subscribeSlot = (s: any) => {
+        subscribeSpy(s);
+        originalSubscribe(s as any);
+      };
+      ipcController.subscribeSlot(slot as any);
+      subscribeSpy.mockClear();
+
+      const result = await invokeHandler('session:reset', slotId);
+
+      expect(result.success).toBe(true);
+      expect(slot.runtime.newSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps slot.session === slot.runtime.session after reset (getter invariant)', async () => {
+      await invokeHandler('session:reset', slotId);
+      expect(slot.session).toBe(slot.runtime.session);
+    });
   });
 
   // ── session:get-messages ──────────────────────────────

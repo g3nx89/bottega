@@ -3,10 +3,13 @@ import path from 'node:path';
 import { getModel } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import {
+  type AgentSessionRuntime,
   AuthStorage,
-  type CreateAgentSessionResult,
-  createAgentSession,
-  DefaultResourceLoader,
+  type CreateAgentSessionRuntimeFactory,
+  type CreateAgentSessionRuntimeResult,
+  createAgentSessionFromServices,
+  createAgentSessionRuntime,
+  createAgentSessionServices,
   ModelRegistry,
   SessionManager,
 } from '@mariozechner/pi-coding-agent';
@@ -71,7 +74,12 @@ export function filterLevelsForModel(modelId: string, levels: readonly string[])
   const id = (modelId.includes('/') ? (modelId.split('/').pop() ?? modelId) : modelId).toLowerCase();
   const isGemini3Pro = /gemini-3(?:\.1)?-pro/.test(id);
   const isAnthropicAdaptive =
-    id.includes('opus-4-6') || id.includes('opus-4.6') || id.includes('sonnet-4-6') || id.includes('sonnet-4.6');
+    id.includes('opus-4-6') ||
+    id.includes('opus-4.6') ||
+    id.includes('opus-4-7') ||
+    id.includes('opus-4.7') ||
+    id.includes('sonnet-4-6') ||
+    id.includes('sonnet-4.6');
 
   return levels.filter((level) => {
     // OpenAI codex-responses clamps.
@@ -115,6 +123,7 @@ export const OAUTH_PROVIDER_INFO: Record<string, { label: string; description: s
 export const CONTEXT_SIZES: Record<string, number> = {
   'claude-opus-4-6': 200_000,
   'claude-opus-4-6-1m': 1_000_000,
+  'claude-opus-4-7': 1_000_000,
   'claude-sonnet-4-6': 1_000_000,
   'claude-haiku-4-5': 200_000,
   'gpt-5.4': 1_000_000,
@@ -133,6 +142,7 @@ export const CONTEXT_SIZES: Record<string, number> = {
  */
 export const AVAILABLE_MODELS: Record<string, { id: string; label: string; sdkProvider: string }[]> = {
   anthropic: [
+    { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', sdkProvider: 'anthropic' },
     { id: 'claude-opus-4-6', label: 'Claude Opus 4.6', sdkProvider: 'anthropic' },
     { id: 'claude-opus-4-6-1m', label: 'Claude Opus 4.6 (1M)', sdkProvider: 'anthropic' },
     { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', sdkProvider: 'anthropic' },
@@ -154,6 +164,17 @@ export const AVAILABLE_MODELS: Record<string, { id: string; label: string; sdkPr
     { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro', sdkProvider: 'google-gemini-cli' },
   ],
 };
+
+/** Flat lookup map: `${sdkProvider}:${id}` → entry. Built once from AVAILABLE_MODELS. */
+const MODEL_LOOKUP = new Map(
+  Object.values(AVAILABLE_MODELS)
+    .flat()
+    .map((m) => [`${m.sdkProvider}:${m.id}`, m] as const),
+);
+
+function getModelLabel(provider: string, modelId: string): string {
+  return MODEL_LOOKUP.get(`${provider}:${modelId}`)?.label ?? modelId;
+}
 
 /**
  * Map Bottega's synthetic model IDs (e.g. claude-opus-4-6-1m) onto the real
@@ -538,57 +559,6 @@ export async function createAgentInfra(
   };
 }
 
-/** Shared helper: builds resource loader + creates agent session. */
-async function buildAgentSession(
-  infra: AgentInfra,
-  tools: ToolDefinition[],
-  modelConfig: ModelConfig,
-  fileKey?: string,
-): Promise<CreateAgentSessionResult> {
-  // Synthetic IDs (e.g. claude-opus-4-6-1m) map to a real Pi SDK model id;
-  // the suffix only carries Bottega-side behavior (context window + beta header).
-  const sdkModelId = resolveSdkModelId(modelConfig.modelId);
-  const sharedModel = getModel(modelConfig.provider as any, sdkModelId as any);
-  // Clone the SDK model rather than mutating the shared registry object —
-  // getModel() returns the same reference on every call, so mutating headers
-  // in place would leak the 1M beta header into every other session using
-  // Claude Opus 4.6 (prompt-suggester, subagent sessions, etc.).
-  const model: typeof sharedModel = { ...sharedModel };
-  if (modelConfig.modelId === 'claude-opus-4-6-1m') {
-    (model as any).headers = { ...((sharedModel as any).headers ?? {}), 'anthropic-beta': 'context-1m-2025-08-07' };
-  }
-
-  const allModels = Object.values(AVAILABLE_MODELS).flat();
-  const entry = allModels.find((m) => m.sdkProvider === modelConfig.provider && m.id === modelConfig.modelId);
-  const modelLabel = entry?.label || modelConfig.modelId;
-
-  // Read DS block from cache if fileKey available
-  const dsData = fileKey ? readDesignSystemBlock(infra.designSystemCache, fileKey) : undefined;
-
-  const resourceLoader = new DefaultResourceLoader({
-    cwd: os.tmpdir(),
-    systemPrompt: buildSystemPrompt(modelLabel, dsData),
-    noExtensions: true,
-    noSkills: true,
-    noPromptTemplates: true,
-    noThemes: true,
-    extensionFactories: [infra.compressionExtensionFactory, infra.taskExtensionFactory, infra.workflowExtensionFactory],
-  });
-  await resourceLoader.reload();
-
-  return createAgentSession({
-    cwd: os.tmpdir(),
-    model,
-    thinkingLevel: DEFAULT_THINKING_LEVEL,
-    tools: [],
-    customTools: tools,
-    resourceLoader,
-    sessionManager: infra.sessionManager,
-    authStorage: infra.authStorage,
-    modelRegistry: infra.modelRegistry,
-  });
-}
-
 /**
  * Create file-scoped tools for a specific Figma file.
  * Each call produces a ScopedConnector pinned to `fileKey` and a per-file OperationQueue,
@@ -621,15 +591,69 @@ export function createScopedTools(
   return { tools, connector, taskStore };
 }
 
-/**
- * Create an agent session for a specific slot (file-scoped tools already created).
- * Used by SlotManager when creating or recreating sessions per-tab.
- */
-export async function createFigmaAgentForSlot(
+function createSlotRuntimeFactory(
+  infra: AgentInfra,
+  scopedTools: ToolDefinition[],
+  modelConfig: ModelConfig,
+  fileKey?: string,
+): CreateAgentSessionRuntimeFactory {
+  return async (opts): Promise<CreateAgentSessionRuntimeResult> => {
+    const sdkModelId = resolveSdkModelId(modelConfig.modelId);
+    const sharedModel = getModel(modelConfig.provider as any, sdkModelId as any);
+    const model: typeof sharedModel = { ...sharedModel };
+    if (modelConfig.modelId === 'claude-opus-4-6-1m') {
+      (model as any).headers = {
+        ...((sharedModel as any).headers ?? {}),
+        'anthropic-beta': 'context-1m-2025-08-07',
+      };
+    }
+
+    const modelLabel = getModelLabel(modelConfig.provider, modelConfig.modelId);
+    const dsData = fileKey ? readDesignSystemBlock(infra.designSystemCache, fileKey) : undefined;
+
+    const services = await createAgentSessionServices({
+      cwd: opts.cwd,
+      agentDir: opts.agentDir,
+      authStorage: infra.authStorage,
+      modelRegistry: infra.modelRegistry,
+      resourceLoaderOptions: {
+        systemPrompt: buildSystemPrompt(modelLabel, dsData),
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        extensionFactories: [
+          infra.compressionExtensionFactory,
+          infra.taskExtensionFactory,
+          infra.workflowExtensionFactory,
+        ],
+      },
+    });
+
+    const result = await createAgentSessionFromServices({
+      services,
+      sessionManager: opts.sessionManager,
+      sessionStartEvent: opts.sessionStartEvent,
+      model,
+      thinkingLevel: DEFAULT_THINKING_LEVEL,
+      tools: [],
+      customTools: scopedTools,
+    });
+
+    return { ...result, services, diagnostics: services.diagnostics };
+  };
+}
+
+export async function createFigmaAgentRuntimeForSlot(
   infra: AgentInfra,
   scopedTools: ToolDefinition[],
   modelConfig: ModelConfig = DEFAULT_MODEL,
   fileKey?: string,
-): Promise<CreateAgentSessionResult> {
-  return buildAgentSession(infra, scopedTools, modelConfig, fileKey);
+): Promise<AgentSessionRuntime> {
+  const factory = createSlotRuntimeFactory(infra, scopedTools, modelConfig, fileKey);
+  return createAgentSessionRuntime(factory, {
+    cwd: os.tmpdir(),
+    agentDir: os.tmpdir(),
+    sessionManager: infra.sessionManager,
+  });
 }

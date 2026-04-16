@@ -1,5 +1,6 @@
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -7,7 +8,7 @@ export function createStyleTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_set_text_style',
       label: 'Set Text Style',
       description:
@@ -32,14 +33,14 @@ export function createStyleTools(deps: ToolDeps): ToolDefinition[] {
           StringEnum(['TOP', 'CENTER', 'BOTTOM'] as const, { description: 'Vertical alignment' }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setTextStyle(params.nodeId, params);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_set_effects',
       label: 'Set Effects',
       description:
@@ -66,14 +67,14 @@ export function createStyleTools(deps: ToolDeps): ToolDefinition[] {
           { description: 'Array of effects to apply (replaces existing effects)' },
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setEffects(params.nodeId, params.effects);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_set_opacity',
       label: 'Set Opacity',
       description: 'Set the opacity of a node (0 = fully transparent, 1 = fully opaque).',
@@ -82,14 +83,14 @@ export function createStyleTools(deps: ToolDeps): ToolDefinition[] {
         nodeId: Type.String({ description: 'Node ID' }),
         opacity: Type.Number({ description: 'Opacity value from 0 (transparent) to 1 (opaque)' }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setOpacity(params.nodeId, params.opacity);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_set_corner_radius',
       label: 'Set Corner Radius',
       description: 'Set corner radius on a node. Use uniform radius for all corners, or set individual corners.',
@@ -102,12 +103,12 @@ export function createStyleTools(deps: ToolDeps): ToolDefinition[] {
         bottomLeft: Type.Optional(Type.Number({ description: 'Bottom-left corner radius' })),
         bottomRight: Type.Optional(Type.Number({ description: 'Bottom-right corner radius' })),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setCornerRadius(params.nodeId, params);
           return textResult(result);
         });
       },
-    },
+    }),
   ];
 }

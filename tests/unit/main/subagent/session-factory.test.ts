@@ -21,6 +21,10 @@ vi.mock('@mariozechner/pi-coding-agent', () => {
         constructorCalls.push(args);
       }
     },
+    SessionManager: {
+      inMemory: vi.fn().mockReturnValue({ inMemory: true }),
+      create: vi.fn().mockReturnValue({}),
+    },
   };
 });
 
@@ -77,11 +81,11 @@ describe('Session Factory', () => {
     expect(createAgentSession).toHaveBeenCalledWith(expect.objectContaining({ tools: [], customTools: tools }));
   });
 
-  it('passes infra auth/session/model references', async () => {
+  it('passes infra auth/model references and an in-memory session manager', async () => {
     await createSubagentSession(mockInfra, [], { provider: 'anthropic', modelId: 'claude-sonnet-4-6' }, 'test');
     expect(createAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        sessionManager: mockInfra.sessionManager,
+        sessionManager: expect.objectContaining({ inMemory: true }),
         authStorage: mockInfra.authStorage,
         modelRegistry: mockInfra.modelRegistry,
       }),

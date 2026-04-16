@@ -1,5 +1,6 @@
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -53,7 +54,7 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_batch_bind_variable',
       label: 'Batch Bind Variable',
       description:
@@ -85,7 +86,7 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
           { description: 'Array of variable bindings to apply', maxItems: 200 },
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const results: Array<{
             nodeId: string;
@@ -96,7 +97,7 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
           }> = [];
           for (const binding of params.bindings) {
             try {
-              await connector.bindVariable(binding.nodeId, binding.variableName, binding.property);
+              await connector.bindVariable(binding.nodeId, binding.variableName, binding.property as any);
               results.push({
                 nodeId: binding.nodeId,
                 variableName: binding.variableName,
@@ -118,8 +119,8 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
           return textResult({ succeeded, failed, total: results.length, results });
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_setup_tokens',
       label: 'Setup Design Tokens',
       description:
@@ -137,7 +138,7 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
           }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           // Check for existing collection (idempotent)
           const existing = await connector.getVariables();
@@ -232,6 +233,6 @@ export function createTokenTools(deps: ToolDeps): ToolDefinition[] {
           }
         });
       },
-    },
+    }),
   ];
 }

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, crashReporter, dialog, ipcMain, safeStorage } from 'electron';
 import { createChildLogger, logFilePath, logger, sessionUid } from '../figma/logger.js';
 import { DEFAULT_WS_PORT } from '../figma/port-discovery.js';
-import { type AgentInfra, buildAuthAdapter, createAgentInfra, OAUTH_PROVIDER_MAP } from './agent.js';
+import { type AgentInfra, buildAuthAdapter, createAgentInfra, DEFAULT_MODEL, OAUTH_PROVIDER_MAP } from './agent.js';
 import { AppStatePersistence } from './app-state-persistence.js';
 import { readMeta, writeMeta } from './auth-meta.js';
 import { readSnapshot, writeSnapshot } from './auth-snapshot.js';
@@ -354,7 +354,7 @@ if (!gotTheLock) {
 
       // 5. Usage tracker (remote diagnostics — opt-in, created before IPC to pass it)
       // Mutable ref for model config — updated by IPC handler after model switch
-      const currentModel = { provider: 'anthropic', modelId: 'claude-sonnet-4-20250514' };
+      const currentModel = { provider: DEFAULT_MODEL.provider, modelId: DEFAULT_MODEL.modelId };
       const diagConfig = loadDiagnosticsConfig();
       const usageTracker = new UsageTracker(createChildLogger({ component: 'usage' }), diagConfig, {
         getModelConfig: () => currentModel,

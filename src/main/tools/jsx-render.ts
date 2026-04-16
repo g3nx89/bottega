@@ -1,5 +1,6 @@
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { loadIconSvg, resolveIcons } from '../icon-loader.js';
 import { parseJsx } from '../jsx-parser.js';
@@ -51,7 +52,7 @@ export function createJsxRenderTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_render_jsx',
       label: 'Render JSX',
       // nosemgrep: missing-template-string-indicator — multiline description with backtick syntax, no interpolation
@@ -85,7 +86,7 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
         y: Type.Optional(Type.Number({ description: 'Y position' })),
         parentId: Type.Optional(Type.String({ description: 'Parent node ID' })),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           // 1. Parse JSX → TreeNode (includes Fragment flattening)
           const tree = parseJsx(params.jsx);
@@ -112,8 +113,8 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_create_icon',
       label: 'Create Icon',
       description: 'Create a vector icon node from Iconify. Use format "prefix:name" (e.g. "mdi:home", "lucide:star").',
@@ -132,7 +133,7 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
         y: Type.Optional(Type.Number({ description: 'Y position' })),
         parentId: Type.Optional(Type.String({ description: 'Parent node ID' })),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const svg = await loadIconSvg(params.name, params.size ?? 24);
           const color = normalizeHexColor(params.color ?? '#000000');
@@ -144,8 +145,8 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_bind_variable',
       label: 'Bind Variable',
       description:
@@ -175,12 +176,12 @@ For icons, use <Icon name="prefix:name" size={24} />.`,
           },
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
-          await connector.bindVariable(params.nodeId, params.variableName, params.property);
+          await connector.bindVariable(params.nodeId, params.variableName, params.property as any);
           return textResult({ success: true });
         });
       },
-    },
+    }),
   ];
 }

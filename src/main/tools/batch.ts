@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -6,7 +7,7 @@ export function createBatchTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_batch_set_text',
       label: 'Batch Set Text',
       description:
@@ -23,14 +24,14 @@ export function createBatchTools(deps: ToolDeps): ToolDefinition[] {
           { description: 'Array of text updates to apply', maxItems: 200 },
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.batchSetText(params.updates);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_batch_set_fills',
       label: 'Batch Set Fills',
       description:
@@ -45,14 +46,14 @@ export function createBatchTools(deps: ToolDeps): ToolDefinition[] {
           { description: 'Array of fill updates to apply', maxItems: 200 },
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.batchSetFills(params.updates);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_batch_transform',
       label: 'Batch Transform',
       description:
@@ -70,14 +71,14 @@ export function createBatchTools(deps: ToolDeps): ToolDefinition[] {
           { description: 'Array of transform updates to apply', maxItems: 200 },
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.batchTransform(params.updates);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_batch_rename',
       label: 'Batch Rename',
       description:
@@ -92,7 +93,7 @@ export function createBatchTools(deps: ToolDeps): ToolDefinition[] {
           { description: 'Array of rename updates to apply', maxItems: 200 },
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const results: Array<{ nodeId: string; name: string; success: boolean; error?: string }> = [];
           for (const update of params.updates) {
@@ -113,6 +114,6 @@ export function createBatchTools(deps: ToolDeps): ToolDefinition[] {
           return textResult({ succeeded, failed, total: results.length, results });
         });
       },
-    },
+    }),
   ];
 }

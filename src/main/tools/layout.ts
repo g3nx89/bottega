@@ -1,5 +1,6 @@
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -7,7 +8,7 @@ export function createLayoutTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_auto_layout',
       label: 'Set Auto Layout',
       description:
@@ -43,12 +44,12 @@ export function createLayoutTools(deps: ToolDeps): ToolDefinition[] {
           StringEnum(['FIXED', 'AUTO'] as const, { description: 'Counter axis sizing (AUTO = hug contents)' }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setAutoLayout(params.nodeId, params);
           return textResult(result);
         });
       },
-    },
+    }),
   ];
 }

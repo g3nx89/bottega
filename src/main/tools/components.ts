@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -6,7 +7,7 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_instantiate',
       label: 'Instantiate Component',
       description:
@@ -51,7 +52,7 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
           }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           if (!params.componentKey && !params.nodeId) {
             return textResult({
@@ -74,8 +75,8 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_set_instance_properties',
       label: 'Set Instance Properties',
       description:
@@ -85,14 +86,14 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
         nodeId: Type.String({ description: 'Instance node ID' }),
         properties: Type.Record(Type.String(), Type.Any(), { description: 'Property name → value map' }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setInstanceProperties(params.nodeId, params.properties);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_arrange_component_set',
       label: 'Arrange Component Set',
       description:
@@ -107,7 +108,7 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
         nodeId: Type.String({ description: 'Component set node ID' }),
         columns: Type.Optional(Type.Number({ description: 'Number of columns (default: auto)' })),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const nodeId = String(params.nodeId).replace(/[^0-9:]/g, '');
           const cols = Math.max(1, Math.floor(Number(params.columns) || 4));
@@ -138,8 +139,8 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_create_component',
       label: 'Create Component',
       description:
@@ -157,7 +158,7 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
           Type.String({ description: 'Parent node ID (ignored when converting — component stays in same parent)' }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const name = String(params.name);
           const fromFrameId = params.fromFrameId ? String(params.fromFrameId).replace(/[^0-9:;]/g, '') : undefined;
@@ -242,8 +243,8 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
           return textResult(typeof result === 'string' ? JSON.parse(result) : result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_set_variant',
       label: 'Set Component Variant',
       description:
@@ -255,12 +256,12 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
           description: 'Variant properties as key-value pairs, e.g. { "State": "Hover", "Size": "Large" }',
         }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setVariant(params.nodeId, params.variant);
           return textResult(result);
         });
       },
-    },
+    }),
   ];
 }

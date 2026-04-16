@@ -1,7 +1,7 @@
 /**
  * Session factory — creates ephemeral Pi SDK sessions for subagents.
  *
- * Key differences from parent session (agent.ts buildAgentSession):
+ * Key differences from parent slot runtime (agent.ts createSlotRuntimeFactory):
  * - No compression extension (subagents are short-lived)
  * - Lighter system prompts (role-specific)
  * - Read-only tool set

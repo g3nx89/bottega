@@ -9,7 +9,6 @@ vi.mock('../../../../src/main/subagent/session-factory.js', () => ({
   createSubagentSession: vi.fn().mockResolvedValue({
     session: {
       subscribe: vi.fn(),
-      newSession: vi.fn().mockResolvedValue(undefined),
       prompt: vi.fn().mockResolvedValue(undefined),
       abort: vi.fn().mockResolvedValue(undefined),
     },
@@ -252,7 +251,6 @@ describe('Orchestrator', () => {
           subscribe: vi.fn((cb: any) => {
             subscribeCb = cb;
           }),
-          newSession: vi.fn().mockResolvedValue(undefined),
           prompt: vi.fn().mockImplementation(async () => {
             if (promptDelay > 0) {
               await new Promise((resolve) => setTimeout(resolve, promptDelay));
@@ -303,7 +301,6 @@ describe('Orchestrator', () => {
             subscribe: vi.fn((cb: any) => {
               subscribeCb = cb;
             }),
-            newSession: vi.fn().mockResolvedValue(undefined),
             prompt: vi.fn().mockImplementation(async () => {
               promptCallOrder.push(idx);
               if (subscribeCb) {
@@ -348,7 +345,6 @@ describe('Orchestrator', () => {
             subscribe: vi.fn((cb: any) => {
               subscribeCb = cb;
             }),
-            newSession: vi.fn().mockResolvedValue(undefined),
             prompt: vi.fn().mockImplementation(async () => {
               if (idx === 0) {
                 // First judge hangs forever (simulates >30s timeout)
@@ -408,7 +404,6 @@ describe('Orchestrator', () => {
         return {
           session: {
             subscribe: vi.fn(),
-            newSession: vi.fn().mockResolvedValue(undefined),
             prompt: vi.fn().mockImplementation(async () => {
               // Simulate AbortError from per-judge timeout
               const err = new DOMException('The operation was aborted', 'AbortError');
@@ -484,7 +479,6 @@ describe('Orchestrator', () => {
             subscribe: vi.fn((cb: any) => {
               subscribeCb = cb;
             }),
-            newSession: vi.fn().mockResolvedValue(undefined),
             prompt: vi.fn().mockImplementation(async () => {
               // Abort the parent signal mid-execution
               controller.abort();
@@ -533,7 +527,6 @@ describe('Orchestrator', () => {
             subscribe: vi.fn((cb: any) => {
               subscribeCb = cb;
             }),
-            newSession: vi.fn().mockResolvedValue(undefined),
             prompt: vi.fn().mockImplementation(async () => {
               if (subscribeCb) {
                 subscribeCb({
@@ -583,7 +576,6 @@ describe('Orchestrator', () => {
         return {
           session: {
             subscribe: vi.fn(),
-            newSession: vi.fn().mockResolvedValue(undefined),
             prompt: vi.fn().mockRejectedValue(new Error('API rate limit exceeded')),
             abort: vi.fn().mockResolvedValue(undefined),
           },
@@ -655,7 +647,6 @@ describe('Orchestrator', () => {
             subscribe: vi.fn((cb: any) => {
               subscribeCb = cb;
             }),
-            newSession: vi.fn().mockResolvedValue(undefined),
             prompt: vi.fn().mockImplementation(async () => {
               if (subscribeCb) {
                 subscribeCb({
@@ -819,7 +810,6 @@ describe('Orchestrator', () => {
               subscribe: vi.fn((cb: any) => {
                 subscribeCb = cb;
               }),
-              newSession: vi.fn().mockResolvedValue(undefined),
               prompt: vi.fn().mockImplementation(async (userPrompt: string) => {
                 calls.push({ judgeIdx: myIdx, prompt: userPrompt });
                 if (subscribeCb) {

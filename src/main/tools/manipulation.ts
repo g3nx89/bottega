@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -6,7 +7,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_set_fills',
       label: 'Set Fills',
       description:
@@ -22,7 +23,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
           Type.String({ description: 'Variable name to bind the fill color to (e.g. "colors/primary")' }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setNodeFills(params.nodeId, params.fills);
           if (params.bindTo) {
@@ -42,8 +43,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_set_strokes',
       label: 'Set Strokes',
       description:
@@ -58,7 +59,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
           Type.String({ description: 'Variable name to bind the stroke color to (e.g. "colors/border")' }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setNodeStrokes(params.nodeId, params.strokes, params.weight);
           if (params.bindTo) {
@@ -78,8 +79,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_set_text',
       label: 'Set Text',
       description: 'Set the text content and optionally font properties of a text node.',
@@ -92,7 +93,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
         fontSize: Type.Optional(Type.Number({ description: 'Font size in px' })),
         fontWeight: Type.Optional(Type.String({ description: 'Font weight/style (e.g. "Bold", "Medium")' })),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setTextContent(params.nodeId, params.text, {
             fontFamily: params.fontFamily,
@@ -102,8 +103,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_set_image_fill',
       label: 'Set Image Fill',
       description:
@@ -119,7 +120,7 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
           }),
         ),
       }),
-      async execute(_toolCallId, params: any, signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
         // Fail fast if the Bridge plugin is not connected — otherwise the WS command
         // waits the full timeout before surfacing the error, starving the turn
         // budget and producing an empty user-facing response (P-006 / UX-005).
@@ -179,8 +180,8 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_resize',
       label: 'Resize Node',
       description:
@@ -191,14 +192,14 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
         width: Type.Number({ description: 'New width in px' }),
         height: Type.Number({ description: 'New height in px' }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.resizeNode(params.nodeId, params.width, params.height);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_move',
       label: 'Move Node',
       description:
@@ -209,14 +210,14 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
         x: Type.Number({ description: 'X position' }),
         y: Type.Number({ description: 'Y position' }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.moveNode(params.nodeId, params.x, params.y);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_create_child',
       label: 'Create Child Node',
       description: 'Create a new child node inside a parent. Types: FRAME, RECTANGLE, ELLIPSE, TEXT, LINE.',
@@ -228,14 +229,14 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
           Type.Record(Type.String(), Type.Any(), { description: 'Initial properties (width, height, fills, etc.)' }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.createChildNode(params.parentId, params.type, params.props);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_clone',
       label: 'Clone Node',
       description:
@@ -244,14 +245,14 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID to clone' }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.cloneNode(params.nodeId);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_delete',
       label: 'Delete Node',
       description: 'Delete a node and its children from the Figma document. Irreversible.',
@@ -259,14 +260,14 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID to delete' }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.deleteNode(params.nodeId);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_rename',
       label: 'Rename Node',
       description:
@@ -276,14 +277,14 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
         nodeId: Type.String({ description: 'Node ID' }),
         name: Type.String({ description: 'New name' }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.renameNode(params.nodeId, params.name);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_flatten_layers',
       label: 'Flatten Layers',
       description:
@@ -299,12 +300,12 @@ export function createManipulationTools(deps: ToolDeps): ToolDefinition[] {
           }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.flattenLayers(params.nodeId, params.maxDepth);
           return textResult(result);
         });
       },
-    },
+    }),
   ];
 }

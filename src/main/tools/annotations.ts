@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -6,7 +7,7 @@ export function createAnnotationTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_get_annotations',
       label: 'Get Annotations',
       description:
@@ -21,13 +22,13 @@ export function createAnnotationTools(deps: ToolDeps): ToolDefinition[] {
           Type.Number({ description: 'Max child traversal depth (default: 1, max: 10)', default: 1 }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const depth = Math.min(params.depth || 1, 10);
         const result = await connector.getAnnotations(params.nodeId, params.includeChildren, depth);
         return textResult(result);
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_set_annotations',
       label: 'Set Annotations',
       description:
@@ -59,14 +60,14 @@ export function createAnnotationTools(deps: ToolDeps): ToolDefinition[] {
           }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.setAnnotations(params.nodeId, params.annotations, params.mode);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_get_annotation_categories',
       label: 'Get Annotation Categories',
       description:
@@ -77,6 +78,6 @@ export function createAnnotationTools(deps: ToolDeps): ToolDefinition[] {
         const result = await connector.getAnnotationCategories();
         return textResult(result);
       },
-    },
+    }),
   ];
 }

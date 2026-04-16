@@ -21,7 +21,6 @@ vi.mock('../../../../src/main/subagent/session-factory.js', () => {
           subscribe: vi.fn((cb: any) => {
             subscriber = cb;
           }),
-          newSession: vi.fn().mockResolvedValue(undefined),
           prompt: vi.fn().mockImplementation(async () => {
             // Simulate text_delta events
             if (subscriber) {

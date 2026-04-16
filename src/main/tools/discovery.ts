@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { extractTree } from '../compression/project-tree.js';
 import { MODE_EXTRACTORS, MODE_WALK, type SemanticMode } from '../compression/semantic-modes.js';
@@ -81,7 +82,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, figmaAPI, designSystemCache, configManager, fileKey } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_get_file_data',
       label: 'Get File Data',
       description:
@@ -100,7 +101,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
           }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const rawMode = params.mode ?? configManager.getActiveConfig().defaultSemanticMode;
         if (!(rawMode in MODE_EXTRACTORS))
           return textResult({ error: `Invalid mode: ${rawMode}. Valid: ${Object.keys(MODE_EXTRACTORS).join(', ')}` });
@@ -124,8 +125,8 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
           return textResult(rawResult);
         }
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_search_components',
       label: 'Search Components',
       description: 'Search for components by name. Searches local components or a library file.',
@@ -136,7 +137,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
           Type.String({ description: 'File key of a library to search. If omitted, searches local components.' }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const format = configManager.getActiveConfig().outputFormat;
         if (params.libraryFileKey) {
           const result = await figmaAPI.searchComponents(params.libraryFileKey, params.query);
@@ -148,8 +149,8 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
           : components;
         return textResult(filtered, format);
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_get_library_components',
       label: 'Get Library Components',
       description:
@@ -159,7 +160,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       parameters: Type.Object({
         fileKey: Type.String({ description: 'File key of the library' }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const format = configManager.getActiveConfig().outputFormat;
         const [components, componentSets] = await Promise.all([
           figmaAPI.getComponents(params.fileKey),
@@ -167,8 +168,8 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
         ]);
         return textResult({ components, componentSets }, format);
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_get_component_details',
       label: 'Get Component Details',
       description:
@@ -177,12 +178,12 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       parameters: Type.Object({
         nodeId: Type.String({ description: 'Node ID of the component' }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const result = await connector.getComponentFromPluginUI(params.nodeId);
         return textResult(result);
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_get_component_deep',
       label: 'Deep Component Extraction',
       description:
@@ -193,13 +194,13 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
         nodeId: Type.String({ description: 'Component node ID (e.g., "695:313")' }),
         depth: Type.Optional(Type.Number({ description: 'Max tree depth (default: 10, max: 20)', default: 10 })),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const depth = Math.min(Math.max(params.depth || 10, 1), 20);
         const result = await connector.deepGetComponent(params.nodeId, depth);
         return textResult(result);
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_analyze_component_set',
       label: 'Analyze Component Set',
       description:
@@ -209,12 +210,12 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       parameters: Type.Object({
         nodeId: Type.String({ description: 'COMPONENT_SET node ID (e.g., "214:274")' }),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const result = await connector.analyzeComponentSet(params.nodeId);
         return textResult(result);
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_design_system',
       label: 'Design System Overview',
       description:
@@ -228,7 +229,7 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
           }),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const config = configManager.getActiveConfig();
         const shouldCompact = config.compactDesignSystem;
         const format = config.outputFormat;
@@ -275,8 +276,8 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
         const { compact } = designSystemCache.set(raw, fileKey, isPartial ? 30_000 : undefined);
         return textResult(shouldCompact ? compact : raw, format);
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_scan_text_nodes',
       label: 'Scan Text Nodes',
       description:
@@ -287,11 +288,11 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
         maxDepth: Type.Optional(Type.Number({ description: 'Max traversal depth (default: unlimited)' })),
         maxResults: Type.Optional(Type.Number({ description: 'Max text nodes to return (default: 1000)' })),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         // Read-only — no operationQueue needed
         const result = await connector.scanTextNodes(params.nodeId, params.maxDepth, params.maxResults);
         return textResult(result);
       },
-    },
+    }),
   ];
 }

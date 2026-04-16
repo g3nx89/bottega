@@ -1,5 +1,6 @@
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -30,7 +31,7 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue, wsServer } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_execute',
       label: 'Execute Plugin Code',
       description:
@@ -41,14 +42,14 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
         code: Type.String({ description: 'JavaScript code to execute in Figma plugin context' }),
         timeout: Type.Optional(Type.Number({ description: 'Timeout in ms (default: 30000)', default: 30000 })),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const result = await connector.executeCodeViaUI(params.code, params.timeout ?? 30000);
           return textResult(result);
         });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_screenshot',
       label: 'Screenshot',
       description:
@@ -60,7 +61,7 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
         ),
         format: Type.Optional(StringEnum(['PNG', 'JPG'] as const, { default: 'PNG' })),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const maxDimension = getVisionMaxDimension(deps.getProvider?.() ?? '');
         const result = await connector.captureScreenshot(params.nodeId ?? '', {
           format: (params.format ?? 'PNG').toUpperCase(),
@@ -85,8 +86,8 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
         }
         return textResult(result);
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_status',
       label: 'Connection Status',
       description: 'Check the connection status with Figma Desktop and the currently connected file.',
@@ -105,8 +106,8 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
         const dsStatus = dsCache?.dsStatus ?? 'unknown';
         return textResult({ connected, fileInfo, files, dsStatus, slotFileKey });
       },
-    },
-    {
+    }),
+    defineTool({
       name: 'figma_get_selection',
       label: 'Get Selection',
       description: 'Get the currently selected nodes in Figma.',
@@ -123,6 +124,6 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
         const selection = wsServer.getCurrentSelection();
         return textResult(selection);
       },
-    },
+    }),
   ];
 }

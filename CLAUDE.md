@@ -140,7 +140,7 @@ node tests/electron-smoke.mjs
 - **node_modules are external**: `packages: 'external'` in esbuild — all npm deps resolve at runtime from node_modules, not bundled.
 - **WS events emit objects**: `fileConnected` emits `{ fileKey, fileName }`, not a plain string.
 - **Pi SDK system prompt**: Injected via `DefaultResourceLoader({ systemPrompt })` with `noExtensions/noSkills/noPromptTemplates/noThemes: true`.
-- **Tool params typed as `any`**: ToolDefinition generic inference doesn't work when returning `ToolDefinition[]`. Params are cast to `any` in execute — runtime validation is via TypeBox schemas.
+- **Tool params typed via `defineTool()`**: Tools use Pi SDK's `defineTool({...})` wrapper to preserve TypeBox inference. Params in `execute` are typed from `Static<TParams>` — no `any` casts.
 - **Upstream sync**: `src/figma/` and `figma-desktop-bridge/` are embedded/forked. Track in respective `UPSTREAM.md` files.
 - **Context compression**: `compression/` profiles tune how verbose tool results are. Active profile switchable at runtime via IPC; the extension factory reads live config on every `tool_result`.
 - **Image generation**: `image-gen/` wraps Gemini API (`@google/genai`). Tools can generate, edit, and restore images on Figma nodes. Requires a Gemini API key configured in Settings.

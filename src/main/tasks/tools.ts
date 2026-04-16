@@ -4,6 +4,7 @@
  */
 
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { textResult, withAbortCheck } from '../tools/index.js';
 import type { TaskStore } from './store.js';
@@ -11,7 +12,7 @@ import type { TaskStore } from './store.js';
 const STATUS_ORDERING: Record<string, number> = { pending: 0, in_progress: 1, completed: 2 };
 
 export function createTaskTools(store: TaskStore): ToolDefinition[] {
-  const taskCreate: ToolDefinition = {
+  const taskCreate = defineTool({
     name: 'task_create',
     label: 'Create Task',
     description: `Create a task to track a discrete unit of work.
@@ -35,13 +36,13 @@ Create all tasks upfront with clear imperative subjects.`,
       ),
       metadata: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: 'Arbitrary key-value metadata' })),
     }),
-    async execute(_toolCallId: string, params: any) {
+    async execute(_toolCallId: string, params) {
       const task = store.create(params.subject, params.description, params.activeForm, params.metadata);
       return textResult(`Task #${task.id} created: ${task.subject}`);
     },
-  };
+  });
 
-  const taskUpdate: ToolDefinition = {
+  const taskUpdate = defineTool({
     name: 'task_update',
     label: 'Update Task',
     description: `Update a task's status, details, or dependencies.
@@ -73,7 +74,7 @@ Workflow:
         Type.Array(Type.String(), { description: 'Task IDs that must complete before this one starts' }),
       ),
     }),
-    async execute(_toolCallId: string, params: any) {
+    async execute(_toolCallId: string, params) {
       const { taskId, ...fields } = params;
       const { task, changedFields, warnings } = store.update(taskId, fields);
 
@@ -94,9 +95,9 @@ Workflow:
       }
       return textResult(msg);
     },
-  };
+  });
 
-  const taskList: ToolDefinition = {
+  const taskList = defineTool({
     name: 'task_list',
     label: 'List Tasks',
     description: `List all tasks sorted by status (pending → in_progress → completed), then by ID.
@@ -135,7 +136,7 @@ Shows open blockers for each task. Use after completing a task to check remainin
 
       return textResult(lines.join('\n'));
     },
-  };
+  });
 
   return [taskCreate, taskUpdate, taskList].map(withAbortCheck);
 }

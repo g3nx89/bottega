@@ -23,17 +23,18 @@ vi.mock('../../../src/main/agent.js', async () => {
       tools: [{ name: 'mock_tool' }],
       connector: {},
     }),
-    createFigmaAgentForSlot: vi.fn().mockResolvedValue({
+    createFigmaAgentRuntimeForSlot: vi.fn().mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
         abort: vi.fn().mockResolvedValue(undefined),
         subscribe: vi.fn(),
-        newSession: vi.fn().mockResolvedValue(true),
-        switchSession: vi.fn().mockResolvedValue(true),
         setThinkingLevel: vi.fn(),
         sessionFile: '/tmp/test-session.jsonl',
         messages: [],
       },
+      newSession: vi.fn().mockResolvedValue({ cancelled: false }),
+      switchSession: vi.fn().mockResolvedValue({ cancelled: false }),
+      dispose: vi.fn().mockResolvedValue(undefined),
     }),
   };
 });
@@ -50,7 +51,7 @@ vi.mock('../../../src/main/prompt-suggester.js', () => ({
 
 // ── Imports (after mocks) ─────────────────────────────────────────
 
-import { createFigmaAgentForSlot, createScopedTools, DEFAULT_MODEL } from '../../../src/main/agent.js';
+import { createFigmaAgentRuntimeForSlot, createScopedTools, DEFAULT_MODEL } from '../../../src/main/agent.js';
 import { AppStatePersistence } from '../../../src/main/app-state-persistence.js';
 import { SessionStore } from '../../../src/main/session-store.js';
 import { MAX_SLOTS, SlotManager } from '../../../src/main/slot-manager.js';
@@ -96,6 +97,31 @@ function makeInfra(overrides: Partial<any> = {}): any {
   };
 }
 
+// ── Shared mock factories ─────────────────────────────────────────
+
+function makeMockSession(overrides: Record<string, unknown> = {}) {
+  return {
+    prompt: vi.fn().mockResolvedValue(undefined),
+    abort: vi.fn().mockResolvedValue(undefined),
+    subscribe: vi.fn(),
+    setThinkingLevel: vi.fn(),
+    sessionFile: '/tmp/test-session.jsonl',
+    messages: [],
+    ...overrides,
+  };
+}
+
+function makeMockRuntime(overrides: { session?: Record<string, unknown> } & Record<string, unknown> = {}) {
+  const { session: sessionOverrides, ...runtimeOverrides } = overrides;
+  return {
+    session: makeMockSession(sessionOverrides),
+    newSession: vi.fn().mockResolvedValue({ cancelled: false }),
+    switchSession: vi.fn().mockResolvedValue({ cancelled: false }),
+    dispose: vi.fn().mockResolvedValue(undefined),
+    ...runtimeOverrides,
+  };
+}
+
 // ── Test setup ────────────────────────────────────────────────────
 
 describe('SlotManager', () => {
@@ -119,18 +145,7 @@ describe('SlotManager', () => {
       tools: [{ name: 'mock_tool' }],
       connector: {},
     });
-    (createFigmaAgentForSlot as ReturnType<typeof vi.fn>).mockResolvedValue({
-      session: {
-        prompt: vi.fn().mockResolvedValue(undefined),
-        abort: vi.fn().mockResolvedValue(undefined),
-        subscribe: vi.fn(),
-        newSession: vi.fn().mockResolvedValue(true),
-        switchSession: vi.fn().mockResolvedValue(true),
-        setThinkingLevel: vi.fn(),
-        sessionFile: '/tmp/test-session.jsonl',
-        messages: [],
-      },
-    });
+    (createFigmaAgentRuntimeForSlot as ReturnType<typeof vi.fn>).mockResolvedValue(makeMockRuntime());
 
     manager = new SlotManager(infra, sessionStore, appState, wsServer as any);
   });
@@ -210,17 +225,27 @@ describe('SlotManager', () => {
       expect(createScopedTools).toHaveBeenCalledWith(infra, 'file-abc', expect.any(Function));
     });
 
-    it('calls createFigmaAgentForSlot with default model', async () => {
+    it('calls createFigmaAgentRuntimeForSlot with default model', async () => {
       await manager.createSlot('file-abc', 'Design.fig');
 
-      expect(createFigmaAgentForSlot).toHaveBeenCalledWith(infra, [{ name: 'mock_tool' }], DEFAULT_MODEL, 'file-abc');
+      expect(createFigmaAgentRuntimeForSlot).toHaveBeenCalledWith(
+        infra,
+        [{ name: 'mock_tool' }],
+        DEFAULT_MODEL,
+        'file-abc',
+      );
     });
 
-    it('calls createFigmaAgentForSlot with custom model', async () => {
+    it('calls createFigmaAgentRuntimeForSlot with custom model', async () => {
       const customModel = { provider: 'openai', modelId: 'gpt-4o' };
       await manager.createSlot('file-abc', 'Design.fig', customModel);
 
-      expect(createFigmaAgentForSlot).toHaveBeenCalledWith(infra, [{ name: 'mock_tool' }], customModel, 'file-abc');
+      expect(createFigmaAgentRuntimeForSlot).toHaveBeenCalledWith(
+        infra,
+        [{ name: 'mock_tool' }],
+        customModel,
+        'file-abc',
+      );
     });
 
     it('calls createScopedTools with __unbound__ when no fileKey', async () => {
@@ -234,28 +259,21 @@ describe('SlotManager', () => {
 
       const slot = await manager.createSlot('file-abc', 'Design.fig');
 
-      expect(slot.session.switchSession).toHaveBeenCalledWith('/sessions/old-session.jsonl');
+      expect(slot.runtime.switchSession).toHaveBeenCalledWith('/sessions/old-session.jsonl');
     });
 
     it('falls back to newSession when switchSession fails', async () => {
       sessionStore.set('file-abc', '/sessions/old-session.jsonl', 'Design.fig');
 
-      const mockSession = {
-        prompt: vi.fn().mockResolvedValue(undefined),
-        abort: vi.fn().mockResolvedValue(undefined),
-        subscribe: vi.fn(),
-        newSession: vi.fn().mockResolvedValue(true),
+      const mockRuntime = makeMockRuntime({
         switchSession: vi.fn().mockRejectedValue(new Error('session corrupted')),
-        setThinkingLevel: vi.fn(),
-        sessionFile: '/tmp/test-session.jsonl',
-        messages: [],
-      };
-      (createFigmaAgentForSlot as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ session: mockSession });
+      });
+      (createFigmaAgentRuntimeForSlot as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mockRuntime);
 
       const slot = await manager.createSlot('file-abc', 'Design.fig');
 
-      expect(slot.session.switchSession).toHaveBeenCalled();
-      expect(slot.session.newSession).toHaveBeenCalled();
+      expect(slot.runtime.switchSession).toHaveBeenCalled();
+      expect(slot.runtime.newSession).toHaveBeenCalled();
     });
   });
 
@@ -341,7 +359,7 @@ describe('SlotManager', () => {
 
       await manager.recreateSession(slot.id, newConfig);
 
-      expect(createFigmaAgentForSlot).toHaveBeenLastCalledWith(infra, expect.any(Array), newConfig, 'file-abc');
+      expect(createFigmaAgentRuntimeForSlot).toHaveBeenLastCalledWith(infra, expect.any(Array), newConfig, 'file-abc');
     });
 
     it('updates slot session and modelConfig, reuses scopedTools', async () => {
@@ -350,23 +368,33 @@ describe('SlotManager', () => {
       const originalTools = slot.scopedTools;
       const newConfig = { provider: 'openai', modelId: 'gpt-5.4' };
 
-      const newSession = {
-        prompt: vi.fn().mockResolvedValue(undefined),
-        abort: vi.fn().mockResolvedValue(undefined),
-        subscribe: vi.fn(),
-        newSession: vi.fn().mockResolvedValue(true),
-        switchSession: vi.fn().mockResolvedValue(true),
-        setThinkingLevel: vi.fn(),
-        sessionFile: '/tmp/new-session.jsonl',
-        messages: [],
-      };
-      (createFigmaAgentForSlot as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ session: newSession });
+      const newRuntime = makeMockRuntime({ session: { sessionFile: '/tmp/new-session.jsonl' } });
+      (createFigmaAgentRuntimeForSlot as ReturnType<typeof vi.fn>).mockResolvedValueOnce(newRuntime);
 
       await manager.recreateSession(slot.id, newConfig);
 
       expect(slot.session).not.toBe(originalSession);
       expect(slot.modelConfig).toEqual(newConfig);
       expect(slot.scopedTools).toBe(originalTools); // reused, not recreated
+    });
+
+    it('disposes prior runtime before building the replacement', async () => {
+      const slot = await manager.createSlot('file-abc', 'Design.fig');
+      const priorRuntime = slot.runtime;
+      const newRuntime = makeMockRuntime({ session: { sessionFile: '/tmp/disposed.jsonl' } });
+      (createFigmaAgentRuntimeForSlot as ReturnType<typeof vi.fn>).mockResolvedValueOnce(newRuntime);
+      await manager.recreateSession(slot.id, { provider: 'openai', modelId: 'gpt-5.4' });
+      expect(priorRuntime.dispose).toHaveBeenCalledTimes(1);
+      expect(slot.runtime).toBe(newRuntime);
+    });
+
+    it('keeps slot.session in sync with slot.runtime.session after recreate', async () => {
+      const slot = await manager.createSlot('file-abc', 'Design.fig');
+      const newRuntime = makeMockRuntime({ session: { sessionFile: '/tmp/sync.jsonl' } });
+      (createFigmaAgentRuntimeForSlot as ReturnType<typeof vi.fn>).mockResolvedValueOnce(newRuntime);
+      await manager.recreateSession(slot.id, { provider: 'openai', modelId: 'gpt-5.4' });
+      expect(slot.session).toBe(slot.runtime.session);
+      expect(slot.session).toBe(newRuntime.session);
     });
 
     it('throws for unknown slotId', async () => {
@@ -472,7 +500,7 @@ describe('SlotManager', () => {
 
   describe('setActiveSlot', () => {
     it('sets active slot ID', async () => {
-      const _first = await manager.createSlot('file-abc', 'Design.fig');
+      await manager.createSlot('file-abc', 'Design.fig');
       const second = await manager.createSlot('file-def', 'Other.fig');
 
       manager.setActiveSlot(second.id);
@@ -481,7 +509,7 @@ describe('SlotManager', () => {
     });
 
     it('activeSlot getter returns slot matching activeSlotId', async () => {
-      const _first = await manager.createSlot('file-abc', 'Design.fig');
+      await manager.createSlot('file-abc', 'Design.fig');
       const second = await manager.createSlot('file-def', 'Other.fig');
 
       manager.setActiveSlot(second.id);
@@ -495,17 +523,9 @@ describe('SlotManager', () => {
   describe('removeSlot with abort rejection', () => {
     it('propagates abort rejection but slot remains until caller retries', async () => {
       const abortError = new Error('abort failed: stream already closed');
-      const mockSession = {
-        prompt: vi.fn().mockResolvedValue(undefined),
-        abort: vi.fn().mockRejectedValue(abortError),
-        subscribe: vi.fn(),
-        newSession: vi.fn().mockResolvedValue(true),
-        switchSession: vi.fn().mockResolvedValue(true),
-        setThinkingLevel: vi.fn(),
-        sessionFile: '/tmp/test-session.jsonl',
-        messages: [],
-      };
-      (createFigmaAgentForSlot as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ session: mockSession });
+      (createFigmaAgentRuntimeForSlot as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        makeMockRuntime({ session: { abort: vi.fn().mockRejectedValue(abortError) } }),
+      );
 
       const slot = await manager.createSlot('file-abort', 'Abort.fig');
       slot.isStreaming = true;
@@ -530,16 +550,16 @@ describe('SlotManager', () => {
 
   describe('recreateSession lock contention', () => {
     it('second concurrent recreateSession returns early without duplicating work', async () => {
-      // Make createFigmaAgentForSlot slow so the first call is still in-flight
+      // Make createFigmaAgentRuntimeForSlot slow so the first call is still in-flight
       let resolveFirst!: (value: any) => void;
       const slowAgent = new Promise((resolve) => {
         resolveFirst = resolve;
       });
 
       const slot = await manager.createSlot('file-lock', 'Lock.fig');
-      const originalCallCount = (createFigmaAgentForSlot as ReturnType<typeof vi.fn>).mock.calls.length;
+      const originalCallCount = (createFigmaAgentRuntimeForSlot as ReturnType<typeof vi.fn>).mock.calls.length;
 
-      (createFigmaAgentForSlot as ReturnType<typeof vi.fn>).mockImplementationOnce(() => slowAgent);
+      (createFigmaAgentRuntimeForSlot as ReturnType<typeof vi.fn>).mockImplementationOnce(() => slowAgent);
 
       const newConfig = { provider: 'openai', modelId: 'gpt-5' };
 
@@ -552,22 +572,11 @@ describe('SlotManager', () => {
       await second;
 
       // Now let the first call complete
-      resolveFirst({
-        session: {
-          prompt: vi.fn().mockResolvedValue(undefined),
-          abort: vi.fn().mockResolvedValue(undefined),
-          subscribe: vi.fn(),
-          newSession: vi.fn().mockResolvedValue(true),
-          switchSession: vi.fn().mockResolvedValue(true),
-          setThinkingLevel: vi.fn(),
-          sessionFile: '/tmp/new-session.jsonl',
-          messages: [],
-        },
-      });
+      resolveFirst(makeMockRuntime({ session: { sessionFile: '/tmp/new-session.jsonl' } }));
       await first;
 
-      // createFigmaAgentForSlot should have been called only once more (from the first call)
-      const newCallCount = (createFigmaAgentForSlot as ReturnType<typeof vi.fn>).mock.calls.length;
+      // createFigmaAgentRuntimeForSlot should have been called only once more (from the first call)
+      const newCallCount = (createFigmaAgentRuntimeForSlot as ReturnType<typeof vi.fn>).mock.calls.length;
       expect(newCallCount - originalCallCount).toBe(1);
     });
   });
@@ -600,7 +609,7 @@ describe('SlotManager', () => {
 
   describe('concurrent removeSlot on different slots', () => {
     it('Promise.all removeSlot on 4 slots removes all and nulls activeSlotId', async () => {
-      const slots = [];
+      const slots: Awaited<ReturnType<typeof manager.createSlot>>[] = [];
       for (let i = 0; i < 4; i++) {
         slots.push(await manager.createSlot(`file-c${i}`, `Conc${i}.fig`));
       }

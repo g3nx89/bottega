@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { getModel } from '@mariozechner/pi-ai';
-import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import type { AgentSessionRuntime, ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { createChildLogger } from '../figma/logger.js';
 import type { FigmaWebSocketServer } from '../figma/websocket-server.js';
 import {
   type AgentInfra,
-  createFigmaAgentForSlot,
+  createFigmaAgentRuntimeForSlot,
   createScopedTools,
   DEFAULT_MODEL,
   DEFAULT_THINKING_LEVEL,
@@ -40,7 +40,9 @@ export interface SessionSlot extends TurnTracking {
   id: string;
   fileKey: string | null;
   fileName: string | null;
-  session: AgentSessionLike;
+  runtime: AgentSessionRuntime;
+  /** Getter returning `runtime.session` — derived so no manual sync is needed. */
+  readonly session: AgentSessionLike;
   isStreaming: boolean;
   thinkingLevel: ThinkingLevel;
   modelConfig: ModelConfig;
@@ -97,7 +99,7 @@ export class SlotManager {
 
   /** Try switchSession from SessionStore, fall back to newSession. */
   private async initSession(
-    session: AgentSessionLike,
+    runtime: AgentSessionRuntime,
     fileKey: string | null,
     modelConfig?: ModelConfig,
   ): Promise<void> {
@@ -105,31 +107,31 @@ export class SlotManager {
       const entry = this.sessionStore.get(fileKey);
       if (entry?.sessionPath) {
         try {
-          await session.switchSession(entry.sessionPath);
+          await runtime.switchSession(entry.sessionPath);
           // Pi SDK switchSession restores the model from the session file,
           // which may differ from the requested config. Force-override so
           // the active model matches what the user selected / what the slot
           // was created with.
-          if (modelConfig) await this.forceModel(session, modelConfig);
+          if (modelConfig) await this.forceModel(runtime.session as AgentSessionLike, modelConfig);
           return;
         } catch (err) {
           log.warn({ err, fileKey }, 'switchSession failed, falling back to newSession');
         }
       }
     }
-    await session.newSession();
+    await runtime.newSession();
   }
 
-  /** Force the session's active model to match the requested config. */
+  /**
+   * Force the session's active model to match the requested config.
+   * Errors propagate: silent failure would leave the agent running the
+   * restored-from-file model while the UI + telemetry report the new one.
+   */
   private async forceModel(session: AgentSessionLike, modelConfig: ModelConfig): Promise<void> {
     const sdkModelId = resolveSdkModelId(modelConfig.modelId);
     const targetModel = getModel(modelConfig.provider as any, sdkModelId as any);
     if (targetModel && session.setModel) {
-      try {
-        await session.setModel(targetModel);
-      } catch (err) {
-        log.warn({ err, modelConfig }, 'Failed to force model after switchSession');
-      }
+      await session.setModel(targetModel);
     }
   }
 
@@ -148,18 +150,17 @@ export class SlotManager {
     // Mutable ref: tools capture a closure over this; slot manager updates it on model switch
     const providerRef = { current: effectiveModel.provider };
     const { tools, taskStore } = createScopedTools(this.infra, fileKey || UNBOUND_FILE_KEY, () => providerRef.current);
-    const result = await createFigmaAgentForSlot(this.infra, tools, effectiveModel, fileKey);
-    const session = result.session as AgentSessionLike;
+    const runtime = await createFigmaAgentRuntimeForSlot(this.infra, tools, effectiveModel, fileKey);
 
-    await this.initSession(session, fileKey ?? null, effectiveModel);
+    await this.initSession(runtime, fileKey ?? null, effectiveModel);
 
     const suggester = new PromptSuggester(this.infra.authStorage);
 
-    const slot: SessionSlot = {
+    const slot = {
       id: randomUUID(),
       fileKey: fileKey ?? null,
       fileName: fileName ?? null,
-      session,
+      runtime,
       isStreaming: false,
       thinkingLevel: DEFAULT_THINKING_LEVEL,
       modelConfig: effectiveModel,
@@ -178,7 +179,14 @@ export class SlotManager {
       lastTurnToolNames: [],
       lastTurnMutatedNodeIds: [],
       sessionToolHistory: new Set<string>(),
-    };
+    } as unknown as SessionSlot;
+    Object.defineProperty(slot, 'session', {
+      get(this: SessionSlot) {
+        return this.runtime.session as AgentSessionLike;
+      },
+      enumerable: true,
+      configurable: false,
+    });
 
     this.slots.set(slot.id, slot);
     if (fileKey) this.fileKeyIndex.set(fileKey, slot.id);
@@ -272,23 +280,26 @@ export class SlotManager {
         slot.promptQueue.clear();
       }
 
-      // Reuse existing scoped tools — fileKey doesn't change on model switch
-      const result = await createFigmaAgentForSlot(
+      // Build + init the replacement BEFORE disposing the old runtime. If
+      // construction throws (auth failure, missing model), the slot keeps
+      // pointing at the working old runtime instead of a disposed one.
+      const runtime = await createFigmaAgentRuntimeForSlot(
         this.infra,
         slot.scopedTools,
         modelConfig,
         slot.fileKey ?? undefined,
       );
-      const session = result.session as AgentSessionLike;
 
-      await this.initSession(session, slot.fileKey, modelConfig);
+      await this.initSession(runtime, slot.fileKey, modelConfig);
 
-      slot.session = session;
+      const priorRuntime = slot.runtime;
+      slot.runtime = runtime;
       slot.modelConfig = modelConfig;
+      void priorRuntime.dispose().catch((err) => log.warn({ err, slotId }, 'runtime.dispose failed'));
       slot._providerRef.current = modelConfig.provider;
       slot.suggester = new PromptSuggester(this.infra.authStorage);
       if (slot.thinkingLevel !== DEFAULT_THINKING_LEVEL) {
-        session.setThinkingLevel?.(slot.thinkingLevel);
+        slot.session.setThinkingLevel?.(slot.thinkingLevel);
       }
 
       this.persistState();

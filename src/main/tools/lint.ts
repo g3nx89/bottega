@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -236,7 +237,7 @@ export function createLintTools(deps: ToolDeps): ToolDefinition[] {
   const { connector } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_lint',
       label: 'Lint Design',
       description:
@@ -246,7 +247,7 @@ export function createLintTools(deps: ToolDeps): ToolDefinition[] {
         nodeId: Type.Optional(Type.String({ description: 'Node ID to lint. If omitted, lints entire page.' })),
         rules: Type.Optional(Type.Array(Type.String(), { description: 'Specific rule names to check' })),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         const rawResult = await connector.lintDesign(params.nodeId, params.rules);
 
         // If connector returns structured node data, enhance with client-side matching
@@ -328,6 +329,6 @@ export function createLintTools(deps: ToolDeps): ToolDefinition[] {
         // Fallback: return raw connector result as-is (legacy connector)
         return textResult(rawResult);
       },
-    },
+    }),
   ];
 }

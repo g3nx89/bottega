@@ -1,5 +1,6 @@
 import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
+import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { type ToolDeps, textResult } from './index.js';
 
@@ -7,7 +8,7 @@ export function createDsPageTools(deps: ToolDeps): ToolDefinition[] {
   const { connector, operationQueue } = deps;
 
   return [
-    {
+    defineTool({
       name: 'figma_update_ds_page',
       label: 'Update Design System Page',
       description:
@@ -31,7 +32,7 @@ export function createDsPageTools(deps: ToolDeps): ToolDefinition[] {
           ),
         ),
       }),
-      async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
           const sectionTag = `[DS::${params.section}]`;
           const pluginCode = buildDsPagePluginCode(sectionTag, params.action, params.text, params.samples ?? []);
@@ -45,7 +46,7 @@ export function createDsPageTools(deps: ToolDeps): ToolDefinition[] {
           return textResult(parsed);
         });
       },
-    },
+    }),
   ];
 }
 

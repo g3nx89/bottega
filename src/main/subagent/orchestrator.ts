@@ -160,8 +160,6 @@ async function runSingleSubagent(
       }
     });
 
-    await session.newSession();
-
     // Build the prompt with briefing and task context
     const promptParts = [briefing];
     if (context.scope) {
@@ -418,8 +416,6 @@ export async function runMicroJudgeBatch(
           output += event.assistantMessageEvent.delta;
         }
       });
-
-      await session.newSession();
 
       // Build user prompt with criterion instructions + relevant data
       const criterionPrompt = getMicroJudgeCriterionPrompt(judgeId);
