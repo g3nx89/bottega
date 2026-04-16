@@ -6,6 +6,40 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-04-16
+
+### Added
+- Dynamic per-model reasoning effort menu with Pi SDK capability introspection
+- Per-model level filtering: drops silently coerced levels (GPT-5.x minimal, Anthropic adaptive minimal, Gemini 3 Pro minimal+medium)
+- Contextual chip labels per provider family (Thinking budget / Reasoning effort / Thinking)
+- Bulk "Apply model to all" for micro-judge model configuration
+- Auth overhaul with factory reset, self-healing state, and OAuth test buttons
+- Auth-model-fix plan (Sprint A-D, F1-F21) for multi-provider credential management
+- Self-healing config validation: stale model references auto-fallback to defaults
+
+### Changed
+- Subagent sessions use in-memory SessionManager to prevent judge prompt leaks into main history
+- Context bar preserves token count across model switches instead of resetting to zero
+- Global status dot derived from restored tab state at boot (fixes IPC race)
+
+### Fixed
+- Session restore: tool cards stuck on spinner (Pi SDK uses `c.id` not `c.toolCallId`, `toolResult` not `tool_result`)
+- Session restore: blinking cursor on text-less tool turns (empty `.message-content` removed)
+- Session restore: phantom gray rectangles from hidden-only tool turns
+- Session restore: legacy judge "Criterion:" prompts filtered from chat history
+- Effort dropdown desync between chip label, menu checkmark, and session state after tab/model switch
+- Removed gpt-5.4-nano from AVAILABLE_MODELS (not available via OpenAI codex subscription)
+- Judge pre-check surfaces missing credentials as explicit SKIP instead of silent vacuous PASS
+- IPC: add return await in figma:clear-page handler
+
+## [0.14.0] - 2026-04-15
+
+### Added
+- Componentization judge overhaul with YAML-based tree detection and ancestor dedup
+
+### Fixed
+- Auto-updater freeze and esbuild ENOTDIR after update
+
 ## [0.13.0] - 2026-04-13
 
 ### Added
