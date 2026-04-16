@@ -825,6 +825,11 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
       return { success: false, error: err.message };
     } finally {
       activeBatchControllers.delete(`judge-${slotId}`);
+      // Safety net: the judge retry calls slot.session.prompt() which streams
+      // events including thinking indicators. If the session prompt errors or
+      // the event subscription is lost, agent:end never fires and the thinking
+      // bubble ("...") stays forever. Always emit agent:end after force-rerun.
+      safeSend(wc, 'agent:end', slotId);
     }
   });
 
