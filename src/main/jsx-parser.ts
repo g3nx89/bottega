@@ -53,12 +53,33 @@ export function parseJsx(jsxString: string): TreeNode {
     })()
   `;
 
-  const { code: compiled } = transformSync(wrappedCode, {
-    jsx: 'transform',
-    jsxFactory: 'h',
-    jsxFragment: '"Fragment"',
-    loader: 'jsx',
-  });
+  let compiled: string;
+  try {
+    ({ code: compiled } = transformSync(wrappedCode, {
+      jsx: 'transform',
+      jsxFactory: 'h',
+      jsxFragment: '"Fragment"',
+      loader: 'jsx',
+    }));
+  } catch (err: unknown) {
+    // Map esbuild error back to the user's JSX source.
+    // The wrapper prepends 11 lines before the JSX insertion on line 12,
+    // so <stdin>:N maps to jsxString line (N - 11).
+    const msg = err instanceof Error ? err.message : String(err);
+    const lineMatch = msg.match(/<stdin>:(\d+):(\d+)/);
+    const WRAPPER_OFFSET = 11;
+    if (lineMatch) {
+      const srcLine = Math.max(1, Number(lineMatch[1]) - WRAPPER_OFFSET);
+      const col = lineMatch[2];
+      const jsxLines = jsxString.split('\n');
+      const problemLine = jsxLines[srcLine - 1]?.trim() ?? '';
+      const snippet = problemLine ? `\n  → line ${srcLine}: ${problemLine}` : '';
+      throw new Error(
+        `JSX syntax error at line ${srcLine}:${col}${snippet}\n${msg.replace(/<stdin>:\d+:\d+: ERROR: /, '')}`,
+      );
+    }
+    throw err;
+  }
 
   const tree = vm.runInContext(compiled, jsxContext) as TreeNode;
   let result = flattenTree(tree);

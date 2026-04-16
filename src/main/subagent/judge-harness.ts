@@ -396,6 +396,28 @@ export async function runJudgeHarness(
         const failedJudgeIds = allVerdicts.filter((v) => v.status === 'evaluated' && !v.pass).map((v) => v.judgeId);
         currentJudgeIds = failedJudgeIds.length > 0 ? failedJudgeIds : currentJudgeIds;
 
+        // Re-fetch context when componentization failed — the retry agent
+        // modified the Figma tree (deleted frames, created components/instances)
+        // so the original prefetchedData has stale node IDs. Without this,
+        // the retry prompt references nodes that no longer exist.
+        if (failedJudgeIds.includes('componentization' as MicroJudgeId)) {
+          try {
+            const freshData = await prefetchForMicroJudges(
+              readOnlyTools,
+              dataNeeds,
+              signal,
+              connector.fileKey,
+              targetNodeId,
+              connector,
+            );
+            prefetchedData = freshData;
+            log.info({ slotId: slot.id }, 'Re-fetched componentAnalysis for retry');
+          } catch (err: unknown) {
+            if ((err as Error)?.name === 'AbortError') break;
+            log.warn({ err, slotId: slot.id }, 'Re-fetch for retry failed — using stale data');
+          }
+        }
+
         // Build enriched retry prompt with node IDs, tool hints, evidence values, and progressive context.
         // Pass componentAnalysis so retry prompt can extract nodeIds directly from withinScreen
         // rather than depending on LLM evidence text (which is unreliable).

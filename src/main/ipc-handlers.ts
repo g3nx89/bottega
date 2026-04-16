@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { cpSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -185,13 +185,16 @@ function pluginNeedsSync(src: string, dest: string): boolean {
   try {
     const destManifest = join(dest, PLUGIN_MANIFEST);
     if (!existsSync(destManifest)) return true;
-    // Compare file sizes as a cheap content-change heuristic (mtime is unreliable after cpSync)
-    const srcSize = statSync(join(src, PLUGIN_MANIFEST)).size;
-    const destSize = statSync(destManifest).size;
-    if (srcSize !== destSize) return true;
-    const srcCodeSize = statSync(join(src, 'code.js')).size;
-    const destCodeSize = statSync(join(dest, 'code.js')).size;
-    return srcCodeSize !== destCodeSize;
+    // Byte-level comparison of all payload files. Size-only checks miss
+    // same-length edits (e.g. PLUGIN_VERSION 1→2). mtime is unreliable
+    // after cpSync so we compare content directly — files are small (<200KB).
+    for (const file of [PLUGIN_MANIFEST, 'code.js', 'ui.html']) {
+      const srcFile = join(src, file);
+      const destFile = join(dest, file);
+      if (!existsSync(destFile)) return true;
+      if (!readFileSync(srcFile).equals(readFileSync(destFile))) return true;
+    }
+    return false;
   } catch {
     return true;
   }
@@ -262,6 +265,7 @@ export interface AgentSessionLike {
   newSession(options?: { parentSession?: string }): Promise<boolean>;
   switchSession(sessionPath: string): Promise<boolean>;
   setThinkingLevel?(level: string): void;
+  setModel?(model: any): Promise<void>;
   // Optional so mocks/scripted sessions don't need to implement them.
   getAvailableThinkingLevels?(): string[];
   supportsThinking?(): boolean;

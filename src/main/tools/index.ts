@@ -54,8 +54,11 @@ export function textResult(data: unknown, format: 'json' | 'yaml' = 'json') {
 const QA_RECORDING = process.env.BOTTEGA_QA_RECORDING === '1';
 
 /** Truncate large values for logging (code, JSX, SVG, base64). */
-function sanitizeForLog(params: unknown): Record<string, unknown> {
-  if (!params || typeof params !== 'object') return {};
+/** Serialize params as a JSON string for logging — prevents Axiom column explosion.
+ *  Each tool has different param names; logging as nested object creates a new
+ *  Axiom column per unique param key (50+ columns from params.* alone). */
+function sanitizeForLog(params: unknown): string {
+  if (!params || typeof params !== 'object') return '{}';
   const clean: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(params as Record<string, unknown>)) {
     if (typeof v === 'string' && v.length > 200) {
@@ -64,7 +67,7 @@ function sanitizeForLog(params: unknown): Record<string, unknown> {
       clean[k] = v;
     }
   }
-  return clean;
+  return JSON.stringify(clean);
 }
 
 /** Extract a short text preview from tool result content. */

@@ -56,8 +56,8 @@ describe('isMutationTool', () => {
     expect(isMutationTool('')).toBe(false);
   });
 
-  it('MUTATION_TOOLS Set has 25 entries', () => {
-    expect(MUTATION_TOOLS.size).toBe(25);
+  it('MUTATION_TOOLS Set has 26 entries', () => {
+    expect(MUTATION_TOOLS.size).toBe(26);
   });
 });
 

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { getModel } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { createChildLogger } from '../figma/logger.js';
 import type { FigmaWebSocketServer } from '../figma/websocket-server.js';
@@ -9,6 +10,7 @@ import {
   DEFAULT_MODEL,
   DEFAULT_THINKING_LEVEL,
   type ModelConfig,
+  resolveSdkModelId,
   type ThinkingLevel,
 } from './agent.js';
 import { type AppState, AppStatePersistence } from './app-state-persistence.js';
@@ -94,12 +96,21 @@ export class SlotManager {
   ) {}
 
   /** Try switchSession from SessionStore, fall back to newSession. */
-  private async initSession(session: AgentSessionLike, fileKey: string | null): Promise<void> {
+  private async initSession(
+    session: AgentSessionLike,
+    fileKey: string | null,
+    modelConfig?: ModelConfig,
+  ): Promise<void> {
     if (fileKey) {
       const entry = this.sessionStore.get(fileKey);
       if (entry?.sessionPath) {
         try {
           await session.switchSession(entry.sessionPath);
+          // Pi SDK switchSession restores the model from the session file,
+          // which may differ from the requested config. Force-override so
+          // the active model matches what the user selected / what the slot
+          // was created with.
+          if (modelConfig) await this.forceModel(session, modelConfig);
           return;
         } catch (err) {
           log.warn({ err, fileKey }, 'switchSession failed, falling back to newSession');
@@ -107,6 +118,19 @@ export class SlotManager {
       }
     }
     await session.newSession();
+  }
+
+  /** Force the session's active model to match the requested config. */
+  private async forceModel(session: AgentSessionLike, modelConfig: ModelConfig): Promise<void> {
+    const sdkModelId = resolveSdkModelId(modelConfig.modelId);
+    const targetModel = getModel(modelConfig.provider as any, sdkModelId as any);
+    if (targetModel && session.setModel) {
+      try {
+        await session.setModel(targetModel);
+      } catch (err) {
+        log.warn({ err, modelConfig }, 'Failed to force model after switchSession');
+      }
+    }
   }
 
   async createSlot(fileKey?: string, fileName?: string, modelConfig?: ModelConfig): Promise<SessionSlot> {
@@ -127,7 +151,7 @@ export class SlotManager {
     const result = await createFigmaAgentForSlot(this.infra, tools, effectiveModel, fileKey);
     const session = result.session as AgentSessionLike;
 
-    await this.initSession(session, fileKey ?? null);
+    await this.initSession(session, fileKey ?? null, effectiveModel);
 
     const suggester = new PromptSuggester(this.infra.authStorage);
 
@@ -257,7 +281,7 @@ export class SlotManager {
       );
       const session = result.session as AgentSessionLike;
 
-      await this.initSession(session, slot.fileKey);
+      await this.initSession(session, slot.fileKey, modelConfig);
 
       slot.session = session;
       slot.modelConfig = modelConfig;

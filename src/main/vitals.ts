@@ -72,7 +72,8 @@ export interface SettingsSnapshotData {
   thinkingLevel: string;
   compressionProfile: string;
   contextSize: number;
-  auth: Record<string, AuthStatusEntry>;
+  /** JSON-serialized Record<string, AuthStatusEntry> — single Axiom column, not N sub-columns. */
+  auth: string;
   imageGen: { hasKey: boolean; model: string };
   windowPinned: boolean;
   windowOpacity: number;
@@ -101,12 +102,16 @@ function getOr<T>(getter: (() => T) | undefined, fallback: T): T {
 }
 
 export function captureSettings(refs: SettingsRefs): SettingsSnapshotData {
+  // auth is serialized to JSON string to prevent Axiom column explosion —
+  // dynamic provider keys (anthropic, openai, google) each become a column
+  // when Axiom flattens nested objects.
+  const authRaw = getOr(refs.getAuthStatus, {} as Record<string, AuthStatusEntry>);
   return {
     model: getOr(refs.getModelConfig, { provider: 'unknown', modelId: 'unknown' }),
     thinkingLevel: getOr(refs.getThinkingLevel, 'unknown'),
     compressionProfile: getOr(refs.getCompressionProfile, 'unknown'),
     contextSize: getOr(refs.getContextSize, 0),
-    auth: getOr(refs.getAuthStatus, {} as Record<string, AuthStatusEntry>),
+    auth: JSON.stringify(authRaw) as any,
     imageGen: getOr(refs.getImageGenInfo, { hasKey: false, model: 'unknown' }),
     windowPinned: getOr(refs.getWindowPinned, false),
     windowOpacity: getOr(refs.getWindowOpacity, 1.0),

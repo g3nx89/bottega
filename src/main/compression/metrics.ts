@@ -90,6 +90,7 @@ export const CATEGORY_MAP: Record<string, ToolCategory> = {
   figma_set_effects: 'mutation',
   figma_set_opacity: 'mutation',
   figma_set_corner_radius: 'mutation',
+  figma_create_component: 'mutation',
   figma_scan_text_nodes: 'discovery',
   figma_set_annotations: 'mutation',
   figma_screenshot: 'screenshot',

@@ -635,7 +635,7 @@ export class UsageTracker {
       ...(data.tier && { tier: data.tier }),
       ...(data.judgesRun && { judgesRun: data.judgesRun }),
       ...(data.prefetchDurationMs != null && { prefetchDurationMs: data.prefetchDurationMs }),
-      ...(data.perJudgeDurations && { perJudgeDurations: data.perJudgeDurations }),
+      ...(data.perJudgeDurations && { perJudgeDurations: JSON.stringify(data.perJudgeDurations) }),
       ...spreadTurnContext(data.context),
     });
   }

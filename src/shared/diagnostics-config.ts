@@ -89,9 +89,9 @@ export function generateSessionUid(): string {
  * Safe to embed: this token can only append data, never read or delete.
  * Override via BOTTEGA_AXIOM_TOKEN env var for development/testing.
  */
-const DEFAULT_AXIOM_TOKEN = 'xaat-39a0811f-08b4-47fa-987b-aa7b154673e6';
+const DEFAULT_AXIOM_TOKEN = 'xaat-09ff507e-78a6-41b0-90f0-6c57489e51ce';
 const AXIOM_TOKEN = process.env.BOTTEGA_AXIOM_TOKEN || DEFAULT_AXIOM_TOKEN;
-const AXIOM_DATASET = process.env.BOTTEGA_AXIOM_DATASET || 'bottega-logs';
+const AXIOM_DATASET = process.env.BOTTEGA_AXIOM_DATASET || 'bottega-logs-v2';
 
 export function createAxiomTransport(
   config: DiagnosticsConfig,
