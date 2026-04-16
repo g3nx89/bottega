@@ -6,6 +6,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-04-16
+
+### Added
+- `claude-opus-4-7` model entry in the picker with native 1M context window and adaptive `xhigh` thinking support
+- `migrateLegacyModelIds` at app-state load: maps retired dated Anthropic IDs (e.g. `claude-sonnet-4-20250514`) to current family names (`claude-sonnet-4-6`), idempotent via `_migratedModelIds` flag
+- `createFigmaAgentRuntimeForSlot` using Pi SDK's `AgentSessionRuntime` (replaces removed `AgentSession.newSession`/`switchSession` from Pi SDK 0.65.0)
+- New tests: `tests/unit/main/agent-runtime.test.ts` (model registry + legacy migration), runtime dispose and session-mirror invariant tests in `slot-manager.test.ts`, `resetSessionCore` re-subscribe + invariant tests in `session-persistence.test.ts`
+
+### Changed
+- Pi SDK bumped from `^0.64.0` to `^0.67.6` (`@mariozechner/pi-ai` + `@mariozechner/pi-coding-agent`)
+- All 58 Figma + task tools refactored to use Pi SDK's `defineTool()` wrapper, preserving TypeBox parameter inference and dropping `params: any` casts
+- `SessionSlot.session` converted from mutable mirror to readonly getter deriving from `runtime.session` — invariant `slot.session === slot.runtime.session` is now unrepresentable-as-violated
+- `recreateSession` in `slot-manager.ts` builds and initializes the replacement runtime before disposing the old one — no more disposed-runtime references on failure
+- `forceModel` propagates `setModel` errors instead of silently swallowing them (prevents UI claiming a switched model while agent runs the old one)
+- `MODEL_LOOKUP` Map + `getModelLabel` helper replace per-call `Object.values(AVAILABLE_MODELS).flat()` scans in the hot runtime factory path
+
+### Fixed
+- Pi SDK 0.67.2 auto-retry on `request ended without sending any chunks` now applies (no code change needed; migration unblocked the fix)
+- Pi SDK 0.67.2 `partialJson` streaming leak in persisted tool calls resolved via upgrade
+- Anthropic `cache_control` breakpoint on the last tool definition (Pi SDK 0.67.4) now active — reduces cost on repeated turns with Bottega's ~55-tool schema
+
 ## [0.15.3] - 2026-04-16
 
 ### Fixed
@@ -307,7 +328,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/), adhering to [Se
 - Settings panel with window transparency slider
 - Graceful shutdown, persistent WS reconnect, pin window, structured logging
 
-[Unreleased]: https://github.com/g3nx89/bottega/compare/v0.15.3...HEAD
+[Unreleased]: https://github.com/g3nx89/bottega/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/g3nx89/bottega/compare/v0.15.3...v0.16.0
 [0.15.3]: https://github.com/g3nx89/bottega/compare/v0.15.2...v0.15.3
 [0.15.2]: https://github.com/g3nx89/bottega/compare/v0.15.1...v0.15.2
 [0.15.1]: https://github.com/g3nx89/bottega/compare/v0.15.0...v0.15.1
