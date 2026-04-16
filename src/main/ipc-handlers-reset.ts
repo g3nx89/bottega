@@ -75,6 +75,8 @@ async function confirm(title: string, message: string, detail: string): Promise<
 
 export interface ResetHandlerDeps {
   infra: AgentInfra;
+  /** Called instead of app.relaunch()+app.exit(0) — lets the host do graceful cleanup first. */
+  gracefulRelaunch?: () => void;
   /** Optional overrides for testing. */
   paths?: {
     bottegaDir?: string;
@@ -83,7 +85,7 @@ export interface ResetHandlerDeps {
   };
 }
 
-export function setupResetHandlers({ infra, paths }: ResetHandlerDeps): void {
+export function setupResetHandlers({ infra, gracefulRelaunch, paths }: ResetHandlerDeps): void {
   const bottegaDir = paths?.bottegaDir ?? defaultBottegaDir();
   const appSupportDir = paths?.appSupportDir ?? defaultAppSupportDir();
   const logsDir = paths?.logsDir ?? defaultLogsDir();
@@ -132,8 +134,12 @@ export function setupResetHandlers({ infra, paths }: ResetHandlerDeps): void {
     // the bottegaDir wipe above since all encrypted blobs live there.
     void safeStorage.isEncryptionAvailable;
     log.info('Factory reset completed — relaunching');
-    app.relaunch();
-    app.exit(0);
+    if (gracefulRelaunch) {
+      gracefulRelaunch();
+    } else {
+      app.relaunch();
+      app.exit(0);
+    }
     return { ok: true };
   });
 }

@@ -123,6 +123,8 @@ const appState: {
   slotManager: InstanceType<typeof SlotManager> | null;
 } = { infra: null, usageTracker: null, slotManager: null };
 let cleaningUp = false;
+/** When true, `before-quit` skips preventDefault so app.quit() proceeds after cleanup. */
+let skipQuitPrevention = false;
 
 /** Run fn, swallowing errors (best-effort cleanup step). */
 async function safeRun(fn: () => void | Promise<void>, label = 'cleanup step'): Promise<void> {
@@ -412,7 +414,18 @@ if (!gotTheLock) {
         figmaAuthStore,
       });
 
-      setupResetHandlers({ infra });
+      setupResetHandlers({
+        infra,
+        gracefulRelaunch: () => {
+          // Schedule relaunch, then quit through the normal cleanup pipeline
+          // (WS server stop, port release, single-instance lock freed).
+          // app.exit(0) would bypass before-quit → leaked port → relaunched
+          // process spins at 100% CPU trying to bind or hitting stale state.
+          app.relaunch();
+          skipQuitPrevention = true;
+          app.quit();
+        },
+      });
 
       // Subscribe restored slots to IPC events
       for (const slotInfo of slotManager.listSlots()) {
@@ -750,7 +763,7 @@ if (!gotTheLock) {
 } // end single-instance else
 
 app.on('before-quit', (event) => {
-  if (!cleaningUp) {
+  if (!cleaningUp && !skipQuitPrevention) {
     event.preventDefault();
     void cleanup(0);
   }
