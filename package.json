@@ -29,19 +29,19 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@axiomhq/pino": "^1.5.0",
-    "@google/genai": "^1.46.0",
-    "@iconify/core": "^2.0.0",
-    "@iconify/utils": "^2.0.0",
+    "@axiomhq/pino": "^1.6.0",
+    "@google/genai": "^1.50.1",
+    "@iconify/core": "^4.1.0",
+    "@iconify/utils": "^3.1.0",
     "@mariozechner/pi-ai": "^0.67.6",
     "@mariozechner/pi-coding-agent": "^0.67.6",
-    "@sinclair/typebox": "^0.34.0",
+    "@sinclair/typebox": "^0.34.49",
     "archiver": "^7.0.1",
     "electron-updater": "^6.8.3",
-    "esbuild": "^0.25.0",
-    "pino": "^9.5.0",
+    "esbuild": "^0.28.0",
+    "pino": "^10.3.1",
     "pino-pretty": "^13.0.0",
-    "ws": "^8.19.0"
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.8",
