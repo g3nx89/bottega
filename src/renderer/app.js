@@ -1143,7 +1143,15 @@ function removeThinkingIndicator(tab) {
 }
 
 window.api.onTextDelta((slotId, text) => withTab(slotId, (tab) => appendToAssistant(tab, text)));
-window.api.onThinking((slotId, _text) => withTab(slotId, (tab) => showThinkingIndicator(tab)));
+window.api.onThinking((slotId, _text) =>
+  withTab(slotId, (tab) => {
+    // Defense in depth: drop late thinking events that arrive after the turn
+    // completed. Pi SDK post-judge stragglers would otherwise re-create the
+    // bubble with no subsequent agent:end to clear it (stuck-bubble regression).
+    if (!tab.isStreaming) return;
+    showThinkingIndicator(tab);
+  }),
+);
 window.api.onToolStart((slotId, toolName, toolCallId) =>
   withTab(slotId, (tab) => addToolCard(tab, toolName, toolCallId)),
 );
@@ -1292,6 +1300,30 @@ window.api.onStreamError?.((slotId, payload) => {
   const tab = tabs.get(slotId);
   if (!tab) return;
   tab._lastStreamError = payload;
+});
+
+// Image-gen failure banner — surfaced when Gemini call fails (missing/invalid key, quota, etc.)
+window.api.onImageGenError?.((slotId, toolName, error) => {
+  const tab = tabs.get(slotId);
+  if (!tab?.chatContainer) return;
+  const lower = String(error || '').toLowerCase();
+  const needsKey = lower.includes('api key') || lower.includes('not configured') || lower.includes('authentication');
+  const banner = document.createElement('div');
+  banner.className = 'image-gen-error-banner';
+  const title = document.createElement('strong');
+  title.textContent = 'Image generation failed';
+  const detail = document.createElement('div');
+  detail.className = 'detail';
+  detail.textContent = `${toolName}: ${error}`;
+  banner.append(title, detail);
+  if (needsKey) {
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = 'Open Settings → Image Generation and add a Gemini API key from aistudio.google.com/apikey.';
+    banner.appendChild(hint);
+  }
+  tab.chatContainer.appendChild(banner);
+  tab.chatContainer.scrollTop = tab.chatContainer.scrollHeight;
 });
 
 window.api.onAgentEnd((slotId) => {

@@ -317,7 +317,7 @@ describe('createEventRouter', () => {
       expect(secondCall.toolCallCount).toBe(0);
     });
 
-    it('does not emit agent:end if user aborted during judge harness', async () => {
+    it('safety-net emits agent:end after abort during judge harness (stuck-bubble guard)', async () => {
       const { loadSubagentSettings } = await import('../../../src/main/subagent/config.js');
       const { runJudgeHarness } = await import('../../../src/main/subagent/judge-harness.js');
       const { categorizeToolName } = await import('../../../src/main/compression/metrics.js');
@@ -357,10 +357,13 @@ describe('createEventRouter', () => {
       // Give the async handleAgentEnd time to complete (it returns early because isStreaming=false)
       await new Promise((r) => process.nextTick(r));
 
-      // agent:end should NOT have been sent (user aborted during judge)
+      // NEW BEHAVIOR: agent:end MUST be emitted by the dispatcher safety-net even when
+      // handleAgentEnd returns early (isStreaming=false from abort). Without it the
+      // renderer's thinking bubble stays visible forever. The abort path in
+      // ipc-handlers.ts already sent one agent:end; this duplicate is idempotent.
       const safeSendCalls = (safeSend as any).mock.calls;
       const agentEndCalls = safeSendCalls.filter((c: any) => c[1] === 'agent:end');
-      expect(agentEndCalls).toHaveLength(0);
+      expect(agentEndCalls.length).toBeGreaterThanOrEqual(1);
 
       // trackTurnEnd should NOT have been called (early return because isStreaming=false)
       expect(judgeDeps.usageTracker.trackTurnEnd).not.toHaveBeenCalled();
@@ -910,6 +913,182 @@ describe('createEventRouter', () => {
       handler({ type: 'agent_end' });
       await vi.waitFor(() => expect(deps.usageTracker.trackTurnEnd).toHaveBeenCalled(), { timeout: 500 });
       expect(_recordLastGood).toHaveBeenCalled();
+    });
+  });
+
+  describe('image generation payload-aware tracking (bug #2)', () => {
+    function subscribe(deps: any, router: any, slot: any) {
+      slot.session.subscribe = vi.fn();
+      deps.slotManager.getSlot.mockReturnValue(slot);
+      router.subscribeToSlot(slot);
+      return (slot.session.subscribe as any).mock.calls[0][0];
+    }
+
+    it('marks image gen as failure when payload reports success:false (even if Pi SDK isError=false)', async () => {
+      const { safeSend } = await import('../../../src/main/safe-send.js');
+      (safeSend as any).mockClear();
+
+      const deps = makeDeps();
+      const slot = makeSlot();
+      const router = createEventRouter(deps as any);
+      const handler = subscribe(deps, router, slot);
+
+      handler({ type: 'tool_execution_start', toolName: 'figma_generate_image', toolCallId: 'gen-1' });
+      handler({
+        type: 'tool_execution_end',
+        toolName: 'figma_generate_image',
+        toolCallId: 'gen-1',
+        isError: false,
+        result: {
+          content: [{ type: 'text', text: JSON.stringify({ success: false, error: 'Authentication failed' }) }],
+        },
+      });
+
+      // trackImageGen must reflect payload-level failure, not the wrapper's isError
+      const imgCall = deps.usageTracker.trackImageGen.mock.calls.at(-1);
+      expect(imgCall[0]).toBe('generate_image');
+      expect(imgCall[2]).toBe(false);
+
+      // And a user-facing banner event must be dispatched with the parsed error text
+      const banner = (safeSend as any).mock.calls.find((c: any[]) => c[1] === 'agent:image-gen-error');
+      expect(banner).toBeDefined();
+      expect(banner[3]).toBe('figma_generate_image');
+      expect(banner[4]).toContain('Authentication failed');
+    });
+
+    it('marks image gen as success when payload reports success:true', async () => {
+      const { safeSend } = await import('../../../src/main/safe-send.js');
+      (safeSend as any).mockClear();
+
+      const deps = makeDeps();
+      const slot = makeSlot();
+      const router = createEventRouter(deps as any);
+      const handler = subscribe(deps, router, slot);
+
+      handler({ type: 'tool_execution_start', toolName: 'figma_generate_image', toolCallId: 'gen-2' });
+      handler({
+        type: 'tool_execution_end',
+        toolName: 'figma_generate_image',
+        toolCallId: 'gen-2',
+        isError: false,
+        result: {
+          content: [{ type: 'text', text: JSON.stringify({ success: true, imageCount: 1 }) }],
+        },
+      });
+
+      expect(deps.usageTracker.trackImageGen.mock.calls.at(-1)[2]).toBe(true);
+      const banner = (safeSend as any).mock.calls.find((c: any[]) => c[1] === 'agent:image-gen-error');
+      expect(banner).toBeUndefined();
+    });
+
+    it('falls back to raw text content for the error banner when tool threw (non-JSON payload)', async () => {
+      const { safeSend } = await import('../../../src/main/safe-send.js');
+      (safeSend as any).mockClear();
+
+      const deps = makeDeps();
+      const slot = makeSlot();
+      const router = createEventRouter(deps as any);
+      const handler = subscribe(deps, router, slot);
+
+      handler({ type: 'tool_execution_start', toolName: 'figma_generate_icon', toolCallId: 'gen-3' });
+      handler({
+        type: 'tool_execution_end',
+        toolName: 'figma_generate_icon',
+        toolCallId: 'gen-3',
+        isError: true,
+        result: {
+          content: [{ type: 'text', text: 'Image generation not configured. Add a Gemini API key in Settings.' }],
+        },
+      });
+
+      const banner = (safeSend as any).mock.calls.find((c: any[]) => c[1] === 'agent:image-gen-error');
+      expect(banner).toBeDefined();
+      expect(banner[4]).toContain('Gemini API key');
+    });
+  });
+
+  describe('stuck thinking bubble safety net (bug #1)', () => {
+    function subscribe(deps: any, router: any, slot: any) {
+      slot.session.subscribe = vi.fn();
+      deps.slotManager.getSlot.mockReturnValue(slot);
+      router.subscribeToSlot(slot);
+      return (slot.session.subscribe as any).mock.calls[0][0];
+    }
+
+    it('drops thinking_delta events that arrive after agent_end (post-judge stragglers)', async () => {
+      const { safeSend } = await import('../../../src/main/safe-send.js');
+      (safeSend as any).mockClear();
+
+      const deps = makeDeps();
+      const slot = makeSlot();
+      const router = createEventRouter(deps as any);
+      const handler = subscribe(deps, router, slot);
+
+      handler({ type: 'agent_end' });
+      await vi.waitFor(
+        () => {
+          const calls = (safeSend as any).mock.calls.filter((c: any[]) => c[1] === 'agent:end');
+          expect(calls.length).toBeGreaterThan(0);
+        },
+        { timeout: 500 },
+      );
+
+      (safeSend as any).mockClear();
+      // Late Pi SDK thinking_delta after turn finalized
+      handler({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'late think' } });
+      handler({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'late text' } });
+
+      const leaked = (safeSend as any).mock.calls.filter(
+        (c: any[]) => c[1] === 'agent:thinking' || c[1] === 'agent:text-delta',
+      );
+      expect(leaked).toHaveLength(0);
+    });
+
+    it('dispatcher safety-net emits agent:end even when handleAgentEnd returns early (isStreaming=false)', async () => {
+      const { safeSend } = await import('../../../src/main/safe-send.js');
+      (safeSend as any).mockClear();
+
+      const deps = makeDeps();
+      const slot = makeSlot({ isStreaming: false }); // simulate prior abort
+      const router = createEventRouter(deps as any);
+      const handler = subscribe(deps, router, slot);
+
+      handler({ type: 'agent_end' });
+      await vi.waitFor(
+        () => {
+          const calls = (safeSend as any).mock.calls.filter((c: any[]) => c[1] === 'agent:end');
+          expect(calls.length).toBeGreaterThanOrEqual(1);
+        },
+        { timeout: 500 },
+      );
+    });
+
+    it('allows thinking_delta of the NEXT turn (new promptId clears finalized gate)', async () => {
+      const { safeSend } = await import('../../../src/main/safe-send.js');
+      (safeSend as any).mockClear();
+
+      const deps = makeDeps();
+      const slot = makeSlot();
+      const router = createEventRouter(deps as any);
+      const handler = subscribe(deps, router, slot);
+
+      handler({ type: 'agent_end' });
+      await vi.waitFor(() => expect((safeSend as any).mock.calls.some((c: any[]) => c[1] === 'agent:end')).toBe(true), {
+        timeout: 500,
+      });
+
+      // Simulate a new turn starting — promptId changes
+      slot.currentPromptId = 'prompt-next';
+      slot.isStreaming = true;
+      (safeSend as any).mockClear();
+
+      handler({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'new turn think' } });
+      handler({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'new turn text' } });
+
+      const thinking = (safeSend as any).mock.calls.filter((c: any[]) => c[1] === 'agent:thinking');
+      const text = (safeSend as any).mock.calls.filter((c: any[]) => c[1] === 'agent:text-delta');
+      expect(thinking).toHaveLength(1);
+      expect(text).toHaveLength(1);
     });
   });
 });

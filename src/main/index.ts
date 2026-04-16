@@ -219,12 +219,12 @@ if (!gotTheLock) {
       // 2. Image generation state (shared between tools and IPC handlers)
       const imageGenSettings = loadImageGenSettings();
       const apiKey = effectiveApiKey(imageGenSettings);
-      const imageGenState = {
-        generator: new ImageGenerator({ apiKey, model: imageGenSettings.model }),
+      const imageGenState: { generator: ImageGenerator | null; settings: typeof imageGenSettings } = {
+        generator: apiKey ? new ImageGenerator({ apiKey, model: imageGenSettings.model }) : null,
         settings: imageGenSettings,
       };
       log.info(
-        { model: imageGenState.generator.model, isDefault: !imageGenSettings.apiKey },
+        { model: imageGenState.generator?.model ?? imageGenSettings.model, hasKey: !!apiKey },
         'Image generator initialized',
       );
 

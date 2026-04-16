@@ -14,8 +14,16 @@ import { type ToolDeps, textResult } from './index.js';
 
 function requireImageGen(deps: ToolDeps): ImageGenerator {
   const gen = deps.getImageGenerator?.();
-  if (!gen)
-    throw new Error('Image generation not configured. Add a Gemini API key in Settings \u2192 Image Generation.');
+  if (!gen) {
+    // Surface a structured payload error so the wrapper in tool execute can return
+    // textResult({success:false, error}) instead of throwing — keeps the agent
+    // turn alive and lets session-events emit a user-facing banner via agent:image-gen-error.
+    const err = new Error(
+      'Image generation not configured. Add a Gemini API key in Settings → Image Generation (aistudio.google.com/apikey).',
+    );
+    (err as any).code = 'IMAGE_GEN_NOT_CONFIGURED';
+    throw err;
+  }
   return gen;
 }
 

@@ -17,6 +17,37 @@ import { abortActiveJudge, READ_ONLY_CATEGORIES, runJudgeHarness } from './subag
 
 const log = createChildLogger({ component: 'session-events' });
 
+/**
+ * Tools that wrap errors in payload (textResult({success:false, error})) rather
+ * than throwing report success at the Pi SDK level. Parse the JSON text content
+ * to recover the real outcome.
+ */
+function parseToolPayload(result: any): { success?: unknown; error?: unknown } | null {
+  const textPart = result?.content?.find?.((c: any) => c?.type === 'text');
+  if (!textPart?.text) return null;
+  try {
+    const parsed = JSON.parse(textPart.text);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractPayloadSuccess(result: any): boolean | undefined {
+  const payload = parseToolPayload(result);
+  if (payload && typeof payload.success === 'boolean') return payload.success;
+  return undefined;
+}
+
+function extractPayloadError(result: any): string | undefined {
+  const payload = parseToolPayload(result);
+  if (payload && typeof payload.error === 'string') return payload.error;
+  // Fallback: Pi SDK wraps thrown errors as plain text content (non-JSON).
+  const textPart = result?.content?.find?.((c: any) => c?.type === 'text');
+  if (textPart?.text && typeof textPart.text === 'string') return textPart.text;
+  return undefined;
+}
+
 export interface EventRouterDeps {
   slotManager: SlotManager;
   mainWindow: { webContents: Electron.WebContents };
@@ -69,6 +100,26 @@ export function createEventRouter(deps: EventRouterDeps) {
   const turnResponseLength = new Map<string, number>();
   // UX-003: nodeIds mutated/created during this turn, used to scope the judge screenshot.
   const turnMutatedNodeIds = new Map<string, string[]>();
+  // Tracks the last finalized promptId per slot (agent:end emitted). Late Pi SDK
+  // events carrying this promptId are dropped, preventing the "stuck thinking
+  // bubble" regression where a post-judge thinking_delta re-creates the bubble
+  // after it was cleared. A new turn uses a fresh promptId and is not affected.
+  const lastFinalizedPromptId = new Map<string, string>();
+
+  function isTurnFinalized(slot: SessionSlot): boolean {
+    const finalized = lastFinalizedPromptId.get(slot.id);
+    // Finalized if we've recorded finalization AND either no current prompt
+    // (between turns) OR the current prompt matches the finalized one.
+    if (!finalized) return false;
+    return !slot.currentPromptId || slot.currentPromptId === finalized;
+  }
+
+  /** Idempotent agent:end emission — also marks this turn as finalized to block late events. */
+  function emitAgentEnd(wc: Electron.WebContents, slot: SessionSlot): void {
+    if (slot.currentPromptId) lastFinalizedPromptId.set(slot.id, slot.currentPromptId);
+    else if (slot.lastCompletedPromptId) lastFinalizedPromptId.set(slot.id, slot.lastCompletedPromptId);
+    safeSend(wc, 'agent:end', slot.id);
+  }
 
   /** Get prompt correlation context from the slot's current turn. */
   function turnContext(slot: SessionSlot): { promptId: string | undefined; slotId: string; turnIndex: number } {
@@ -93,6 +144,11 @@ export function createEventRouter(deps: EventRouterDeps) {
   function handleMessageUpdate(wc: Electron.WebContents, slot: SessionSlot, event: any) {
     // Suppress streaming during judge retry — internal repair should not leak into chat
     if (judgeInProgress.has(slot.id)) return;
+    // Drop late events arriving after the turn was finalized (e.g., post-judge
+    // thinking stragglers from Pi SDK). Without this, a late thinking_delta
+    // re-creates the thinking bubble in the renderer with no subsequent agent:end
+    // to clear it — the classic "stuck bubble" symptom.
+    if (isTurnFinalized(slot)) return;
     if (event.assistantMessageEvent?.type === 'text_delta') {
       safeSend(wc, 'agent:text-delta', slot.id, event.assistantMessageEvent.delta);
       slot.suggester.appendAssistantText(event.assistantMessageEvent.delta);
@@ -227,7 +283,15 @@ export function createEventRouter(deps: EventRouterDeps) {
       event.toolName.startsWith('figma_edit_') ||
       event.toolName === 'figma_restore_image'
     ) {
-      usageTracker?.trackImageGen(event.toolName.replace('figma_', ''), 'gemini', !event.isError, durationMs);
+      const payloadSuccess = extractPayloadSuccess(event.result);
+      const imageGenSuccess = !event.isError && payloadSuccess !== false;
+      usageTracker?.trackImageGen(event.toolName.replace('figma_', ''), 'gemini', imageGenSuccess, durationMs);
+      if (!imageGenSuccess) {
+        const errorMsg =
+          extractPayloadError(event.result) ?? (event.isError ? 'Tool threw' : 'Image generation failed');
+        log.warn({ tool: event.toolName, error: errorMsg, durationMs }, 'Image generation failed');
+        safeSend(wc, 'agent:image-gen-error', slot.id, event.toolName, errorMsg);
+      }
     }
     if (event.toolName === 'figma_screenshot' && !event.isError && event.result?.content) {
       const imageContent = event.result.content.find((c: any) => c.type === 'image');
@@ -509,12 +573,12 @@ export function createEventRouter(deps: EventRouterDeps) {
         slot.isStreaming = false;
         slot.promptQueue.clear();
         safeSend(wc, 'agent:text-delta', slot.id, `\n\nError: ${err.message || MSG_REQUEST_FAILED_FALLBACK}`);
-        safeSend(wc, 'agent:end', slot.id);
+        emitAgentEnd(wc, slot);
         safeSend(wc, 'queue:updated', slot.id, []);
       });
     } else {
       slot.isStreaming = false;
-      safeSend(wc, 'agent:end', slot.id);
+      emitAgentEnd(wc, slot);
       persistSlotSession(slot);
       slotManager.persistState();
 
@@ -543,7 +607,16 @@ export function createEventRouter(deps: EventRouterDeps) {
     tool_execution_end: handleToolEnd,
     message_end: handleMessageEnd,
     agent_end: (wc, slot) => {
-      handleAgentEnd(wc, slot).catch((err) => log.error({ err, slotId: slot.id }, 'agent_end handler error'));
+      // Safety net: no matter what path handleAgentEnd takes (early returns when
+      // !isStreaming, judge re-entrancy guard, async throws), guarantee agent:end
+      // is emitted to clear the renderer's thinking bubble. emitAgentEnd is
+      // idempotent via the finalized-promptId map, so duplicate emissions in the
+      // happy path are safe.
+      handleAgentEnd(wc, slot)
+        .catch((err) => log.error({ err, slotId: slot.id }, 'agent_end handler error'))
+        .finally(() => {
+          if (!isTurnFinalized(slot)) emitAgentEnd(wc, slot);
+        });
     },
     auto_compaction_start: (wc, slot) => safeSend(wc, 'agent:compaction', slot.id, true),
     auto_compaction_end: (wc, slot) => {

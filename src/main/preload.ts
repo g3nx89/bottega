@@ -284,6 +284,11 @@ contextBridge.exposeInMainWorld('api', {
   onAutoFallback: (cb: (slotId: string, payload: { from: string; to: string; reason: string }) => void) => {
     ipcRenderer.on('agent:auto-fallback', (_event, slotId: string, payload) => cb(slotId, payload));
   },
+  onImageGenError: (cb: (slotId: string, toolName: string, error: string) => void) => {
+    ipcRenderer.on('agent:image-gen-error', (_event, slotId: string, toolName: string, error: string) =>
+      cb(slotId, toolName, error),
+    );
+  },
   onFigmaTokenLost: (cb: () => void) => {
     ipcRenderer.on('figma:token_lost', () => cb());
   },

@@ -698,9 +698,9 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     await saveImageGenSettings(imageGenState.settings);
 
     const key = effectiveApiKey(imageGenState.settings);
-    imageGenState.generator = new ImageGenerator({ apiKey: key, model: imageGenState.settings.model });
+    imageGenState.generator = key ? new ImageGenerator({ apiKey: key, model: imageGenState.settings.model }) : null;
     log.info(
-      { model: imageGenState.generator.model, isDefault: !imageGenState.settings.apiKey },
+      { model: imageGenState.generator?.model ?? imageGenState.settings.model, hasKey: !!key },
       'Image generator updated',
     );
 
