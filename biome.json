@@ -47,7 +47,7 @@
   },
   "overrides": [
     {
-      "includes": ["src/renderer/slash-commands.js"],
+      "includes": ["src/renderer/**/*.js"],
       "linter": {
         "rules": {
           "correctness": {

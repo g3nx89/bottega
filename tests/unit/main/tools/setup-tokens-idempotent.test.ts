@@ -127,6 +127,108 @@ describe('figma_setup_tokens idempotent', () => {
     expect(deps.connector.createVariable).toHaveBeenCalled();
   });
 
+  it('renames unmatched existing modes before adding new ones', async () => {
+    // Existing collection has Figma's default "Mode 1" (doesn't match requested "Light")
+    deps.connector.getVariables.mockResolvedValue({
+      collections: [
+        {
+          id: 'col1',
+          name: 'Tokens',
+          modes: [{ modeId: 'mode1', name: 'Mode 1' }],
+          variables: [],
+        },
+      ],
+    });
+    deps.connector.renameMode.mockResolvedValue({ modeId: 'mode1', name: 'Light' });
+    deps.connector.createVariable.mockResolvedValue({ id: 'var1' });
+
+    await tool.execute(
+      'call1',
+      {
+        collectionName: 'Tokens',
+        modes: ['Light'],
+        variables: [{ name: 'colors/primary', type: 'COLOR', values: { Light: { r: 0.65, g: 0.35, b: 1 } } }],
+      },
+      null,
+      null,
+      null,
+    );
+
+    // Should rename Mode 1 → Light instead of creating a new mode
+    expect(deps.connector.renameMode).toHaveBeenCalledWith('col1', 'mode1', 'Light');
+    expect(deps.connector.addMode).not.toHaveBeenCalled();
+    expect(deps.connector.updateVariable).toHaveBeenCalledWith('var1', 'mode1', { r: 0.65, g: 0.35, b: 1 });
+  });
+
+  it('resolves variables from flat Desktop Bridge payload shape', async () => {
+    // Real Figma Desktop Bridge returns variables in a top-level flat array with
+    // variableCollectionId, NOT embedded inside each collection object.
+    deps.connector.getVariables.mockResolvedValue({
+      collections: [
+        {
+          id: 'col1',
+          name: 'Tokens',
+          modes: [{ modeId: 'mode1', name: 'Light' }],
+          // no `variables` key here — the flat array below is authoritative
+        },
+      ],
+      variables: [
+        { id: 'var-flat', name: 'colors/primary', variableCollectionId: 'col1', resolvedType: 'COLOR' },
+        { id: 'var-other', name: 'colors/primary', variableCollectionId: 'other-col' }, // must be filtered out
+      ],
+    });
+
+    await tool.execute(
+      'call1',
+      {
+        collectionName: 'Tokens',
+        modes: ['Light'],
+        variables: [{ name: 'colors/primary', type: 'COLOR', values: { Light: { r: 0, g: 1, b: 0 } } }],
+      },
+      null,
+      null,
+      null,
+    );
+
+    // Should update the flat-shape existing variable, not create a duplicate
+    expect(deps.connector.createVariable).not.toHaveBeenCalled();
+    expect(deps.connector.updateVariable).toHaveBeenCalledWith('var-flat', 'mode1', { r: 0, g: 1, b: 0 });
+  });
+
+  it('throws clear error when variable value references unknown mode', async () => {
+    deps.connector.getVariables.mockResolvedValue({
+      collections: [
+        {
+          id: 'col1',
+          name: 'Tokens',
+          modes: [{ modeId: 'mode1', name: 'Light' }],
+          variables: [],
+        },
+      ],
+    });
+    deps.connector.createVariable.mockResolvedValue({ id: 'var1' });
+
+    await expect(
+      tool.execute(
+        'call1',
+        {
+          collectionName: 'Tokens',
+          modes: ['Light'],
+          variables: [
+            {
+              name: 'colors/primary',
+              type: 'COLOR',
+              values: { Unknown: { r: 1, g: 0, b: 0 } },
+            },
+          ],
+        },
+        null,
+        null,
+        null,
+      ),
+    ).rejects.toThrow(/Mode "Unknown" not found/);
+  });
+
   it('adds new modes to existing collection', async () => {
     deps.connector.getVariables.mockResolvedValue({
       collections: [

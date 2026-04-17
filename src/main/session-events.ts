@@ -238,17 +238,33 @@ export function createEventRouter(deps: EventRouterDeps) {
     }
   }
 
+  function buildContentPreviewItem(c: any): Record<string, unknown> {
+    const item: Record<string, unknown> = { type: c.type };
+    if (c.type === 'text') item.text = (c.text || '').slice(0, 200);
+    if (c.type === 'image') {
+      item.hasData = !!c.data;
+      item.dataLen = c.data?.length;
+    }
+    return item;
+  }
+
+  function buildResultPreview(result: any): Record<string, unknown>[] | string {
+    const content = result?.content;
+    if (!Array.isArray(content)) return 'no content';
+    return content.map(buildContentPreviewItem);
+  }
+
   function handleToolEnd(wc: Electron.WebContents, slot: SessionSlot, event: any) {
     if (judgeInProgress.has(slot.id)) return;
-    const resultPreview = event.result?.content
-      ? event.result.content.map((c: any) => ({
-          type: c.type,
-          ...(c.type === 'text' ? { text: (c.text || '').slice(0, 200) } : {}),
-          ...(c.type === 'image' ? { hasData: !!c.data, dataLen: c.data?.length } : {}),
-        }))
-      : 'no content';
     log.info({ tool: event.toolName, callId: event.toolCallId, isError: event.isError, slotId: slot.id }, 'Tool end');
-    log.debug({ tool: event.toolName, callId: event.toolCallId, resultContent: resultPreview }, 'Tool result detail');
+    // Preview construction walks the full content array; only pay for it when
+    // a consumer actually needs it (debug log or error telemetry).
+    const debugEnabled = typeof (log as any).isLevelEnabled === 'function' && (log as any).isLevelEnabled('debug');
+    const needPreview = debugEnabled || event.isError;
+    const resultPreview = needPreview ? buildResultPreview(event.result) : undefined;
+    if (debugEnabled) {
+      log.debug({ tool: event.toolName, callId: event.toolCallId, resultContent: resultPreview }, 'Tool result detail');
+    }
     safeSend(wc, 'agent:tool-end', slot.id, event.toolName, event.toolCallId, !event.isError, event.result);
 
     const startTime = toolStartTimes.get(event.toolCallId);

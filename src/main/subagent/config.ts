@@ -89,48 +89,60 @@ function validateMicroJudgeConfig(raw: any, defaultConfig: MicroJudgeConfig): Mi
   return { enabled, model };
 }
 
-/** Validate and clamp a parsed config, returning defaults for invalid fields. */
-function validateConfig(raw: any): SubagentSettings {
-  if (!raw || typeof raw !== 'object') return { ...DEFAULT_SUBAGENT_SETTINGS };
+const SUBAGENT_ROLES: SubagentRole[] = ['scout', 'analyst', 'auditor', 'judge'];
 
-  const defaults = DEFAULT_SUBAGENT_SETTINGS;
-  const roles: SubagentRole[] = ['scout', 'analyst', 'auditor', 'judge'];
-
-  const models = { ...defaults.models };
-  if (raw.models && typeof raw.models === 'object') {
-    for (const role of roles) {
-      const m = raw.models[role];
-      if (m && typeof m === 'object' && typeof m.provider === 'string' && typeof m.modelId === 'string') {
-        models[role] = { provider: m.provider, modelId: m.modelId };
-      }
+function validateModels(
+  raw: any,
+  defaults: Record<SubagentRole, SubagentModelConfig>,
+): Record<SubagentRole, SubagentModelConfig> {
+  const models = { ...defaults };
+  if (!raw || typeof raw !== 'object') return models;
+  for (const role of SUBAGENT_ROLES) {
+    const m = raw[role];
+    if (m && typeof m === 'object' && typeof m.provider === 'string' && typeof m.modelId === 'string') {
+      models[role] = { provider: m.provider, modelId: m.modelId };
     }
   }
+  return models;
+}
 
+function validateJudgeMode(raw: unknown, fallback: 'off' | 'auto'): 'off' | 'auto' {
   // Migration: 'ask' → 'auto' (toggle is the new paradigm, 'ask' users had judge active)
-  let judgeMode: 'off' | 'auto';
-  if (raw.judgeMode === 'ask') {
-    judgeMode = 'auto';
-  } else {
-    judgeMode = VALID_JUDGE_MODES.has(raw.judgeMode) ? (raw.judgeMode as 'off' | 'auto') : defaults.judgeMode;
-  }
+  if (raw === 'ask') return 'auto';
+  return VALID_JUDGE_MODES.has(raw as string) ? (raw as 'off' | 'auto') : fallback;
+}
 
-  const autoRetry = typeof raw.autoRetry === 'boolean' ? raw.autoRetry : defaults.autoRetry;
-  const maxRetries =
-    typeof raw.maxRetries === 'number' && Number.isFinite(raw.maxRetries)
-      ? Math.max(1, Math.min(10, Math.round(raw.maxRetries)))
-      : defaults.maxRetries;
+function validateMaxRetries(raw: unknown, fallback: number): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return fallback;
+  return Math.max(1, Math.min(10, Math.round(raw)));
+}
 
-  // Migrate or validate microJudges
-  const microJudges = { ...defaults.microJudges };
-  if (raw.microJudges && typeof raw.microJudges === 'object') {
-    for (const id of ALL_MICRO_JUDGE_IDS) {
-      if (raw.microJudges[id]) {
-        microJudges[id] = validateMicroJudgeConfig(raw.microJudges[id], defaults.microJudges[id]);
-      }
+function validateAllMicroJudges(
+  raw: any,
+  defaults: Record<MicroJudgeId, MicroJudgeConfig>,
+): Record<MicroJudgeId, MicroJudgeConfig> {
+  const microJudges = { ...defaults };
+  if (!raw || typeof raw !== 'object') return microJudges;
+  for (const id of ALL_MICRO_JUDGE_IDS) {
+    if (raw[id]) {
+      microJudges[id] = validateMicroJudgeConfig(raw[id], defaults[id]);
     }
   }
+  return microJudges;
+}
 
-  return { models, judgeMode, autoRetry, maxRetries, microJudges };
+/** Validate and clamp a parsed config, returning defaults for invalid fields.
+ *  Exported for unit testing — not part of the public API. */
+export function validateConfig(raw: any): SubagentSettings {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_SUBAGENT_SETTINGS };
+  const defaults = DEFAULT_SUBAGENT_SETTINGS;
+  return {
+    models: validateModels(raw.models, defaults.models),
+    judgeMode: validateJudgeMode(raw.judgeMode, defaults.judgeMode),
+    autoRetry: typeof raw.autoRetry === 'boolean' ? raw.autoRetry : defaults.autoRetry,
+    maxRetries: validateMaxRetries(raw.maxRetries, defaults.maxRetries),
+    microJudges: validateAllMicroJudges(raw.microJudges, defaults.microJudges),
+  };
 }
 
 /** In-memory cache — avoids synchronous disk reads on every agent turn. */

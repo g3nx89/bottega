@@ -63,7 +63,7 @@ export function createWorkflowExtensionFactory(getState: () => WorkflowState | n
         const state = getState();
 
         // No active pack — pass through
-        if (!state || !state.pack) {
+        if (!state?.pack) {
           _lastInjectedPackId = null;
           _refsInjectedForPack = false;
           return null;

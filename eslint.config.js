@@ -73,6 +73,7 @@ export default tseslint.config(
       'src/main/ipc-handlers.ts',
       'src/main/ipc-handlers-auth.ts',
       'src/main/ipc-handlers-figma-auth.ts',
+      'src/main/ipc-handlers-reset.ts',
       'src/main/figma-auth-store.ts',
       'src/main/auto-updater.ts',
       'src/main/diagnostics.ts',

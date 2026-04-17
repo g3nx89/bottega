@@ -479,7 +479,7 @@ export async function createAgentInfra(
   const workflowExtensionFactory = createWorkflowExtensionFactory((): WorkflowState | null => {
     const fileKey = _activeWorkflowFileKey;
     const slot = _workflowStateMap.get(fileKey);
-    if (!slot || !slot.message) return null;
+    if (!slot?.message) return null;
 
     const key = `${slot.message}|${fileKey}`;
     if (slot.cacheKey === key && slot.cachedState !== undefined) {

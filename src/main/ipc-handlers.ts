@@ -1,9 +1,5 @@
-import { execFile } from 'node:child_process';
-import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { promisify } from 'node:util';
-import { app, type BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { existsSync } from 'node:fs';
+import { type BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { createChildLogger } from '../figma/logger.js';
 import {
   type AgentInfra,
@@ -18,6 +14,12 @@ import {
 import { checkForUpdates, downloadUpdate, getAppVersion, quitAndInstall } from './auto-updater.js';
 import { exportDiagnosticsZip, formatSystemInfoForClipboard } from './diagnostics.js';
 import type { FigmaAuthStore } from './figma-auth-store.js';
+import {
+  getInstalledManifestPath,
+  getPluginTargetPath,
+  type PluginSyncResult,
+  syncFigmaPlugin,
+} from './figma-plugin-sync.js';
 import { effectiveApiKey, type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
 import { DEFAULT_IMAGE_MODEL, IMAGE_GEN_MODELS, ImageGenerator } from './image-gen/image-generator.js';
 import { setupAuthHandlers } from './ipc-handlers-auth.js';
@@ -26,7 +28,6 @@ import {
   MSG_EXPORT_DIALOG_TITLE,
   MSG_EXPORT_FILTER_NAME,
   MSG_IMAGEGEN_NOT_INITIALIZED,
-  MSG_PLUGIN_NOT_FOUND,
   MSG_REQUEST_FAILED_FALLBACK,
   messageForStreamError,
 } from './messages.js';
@@ -47,199 +48,7 @@ import type { SessionStore } from './session-store.js';
 import type { SessionSlot, SlotManager } from './slot-manager.js';
 import { loadSubagentSettings, saveSubagentSettings } from './subagent/config.js';
 
-export { extractRenderableMessages, type RenderableTurn };
-
-// ── Figma plugin helpers (module-level, used by both IPC and startup) ──
-
-const PLUGIN_MANIFEST = 'manifest.json';
-const PLUGIN_ID = 'bottega-bridge';
-const PLUGIN_NAME = 'Bottega Bridge';
-const pluginLog = createChildLogger({ component: 'plugin-sync' });
-
-function getPluginSourcePath(): string | null {
-  const candidates = [
-    join(process.resourcesPath, 'figma-desktop-bridge'),
-    join(app.getAppPath(), 'figma-desktop-bridge'),
-    // Dev mode: app.getAppPath() points to dist/, plugin is at project root
-    join(app.getAppPath(), '..', 'figma-desktop-bridge'),
-  ];
-  for (const dir of candidates) {
-    if (existsSync(join(dir, PLUGIN_MANIFEST))) return dir;
-  }
-  return null;
-}
-
-function getPluginTargetPath(): string {
-  return join(app.getPath('userData'), 'figma-plugin');
-}
-
-function getFigmaSettingsPath(): string {
-  return join(homedir(), 'Library', 'Application Support', 'Figma', 'settings.json');
-}
-
-const execFileAsync = promisify(execFile);
-
-async function isFigmaRunning(): Promise<boolean> {
-  try {
-    const { stdout } = await execFileAsync('pgrep', ['-x', 'Figma'], { timeout: 3000 });
-    return stdout.trim().length > 0;
-  } catch {
-    return false;
-  }
-}
-
-interface FigmaExtEntry {
-  id: number;
-  manifestPath: string;
-  lastKnownName?: string;
-  lastKnownPluginId?: string;
-  fileMetadata: {
-    type: 'manifest' | 'code' | 'ui';
-    codeFileId?: number;
-    uiFileIds?: number[];
-    manifestFileId?: number;
-  };
-}
-
-/** Read-only check: is the plugin already registered in Figma's settings.json? Safe to call anytime. */
-function isPluginRegistered(): boolean {
-  const settingsPath = getFigmaSettingsPath();
-  if (!existsSync(settingsPath)) return false;
-  try {
-    const raw = readFileSync(settingsPath, 'utf-8');
-    const settings = JSON.parse(raw);
-    const extensions: FigmaExtEntry[] = settings.localFileExtensions ?? [];
-    return extensions.some((e) => e.fileMetadata?.type === 'manifest' && e.lastKnownPluginId === PLUGIN_ID);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Check if plugin is registered in Figma's settings.json; if not, append entries.
- * Single file read — avoids double parse. Never removes existing entries.
- * Must only be called when Figma is NOT running (Figma overwrites on exit).
- * Returns 'already' if already registered, 'registered' if newly added, 'failed' otherwise.
- */
-function ensurePluginRegistered(pluginDir: string): 'already' | 'registered' | 'failed' {
-  const settingsPath = getFigmaSettingsPath();
-  if (!existsSync(settingsPath)) {
-    pluginLog.warn('Figma settings.json not found — cannot auto-register plugin');
-    return 'failed';
-  }
-
-  try {
-    const raw = readFileSync(settingsPath, 'utf-8');
-    const settings = JSON.parse(raw);
-    const extensions: FigmaExtEntry[] = settings.localFileExtensions ?? [];
-
-    if (extensions.some((e) => e.fileMetadata?.type === 'manifest' && e.lastKnownPluginId === PLUGIN_ID)) {
-      return 'already';
-    }
-
-    const maxId = extensions.reduce((max, e) => Math.max(max, e.id), 0);
-    const mId = maxId + 1;
-    const cId = maxId + 2;
-    const uId = maxId + 3;
-
-    extensions.push(
-      {
-        id: mId,
-        manifestPath: join(pluginDir, 'manifest.json'),
-        lastKnownName: PLUGIN_NAME,
-        lastKnownPluginId: PLUGIN_ID,
-        fileMetadata: { type: 'manifest', codeFileId: cId, uiFileIds: [uId] },
-      },
-      {
-        id: cId,
-        manifestPath: join(pluginDir, 'code.js'),
-        fileMetadata: { type: 'code', manifestFileId: mId },
-      },
-      {
-        id: uId,
-        manifestPath: join(pluginDir, 'ui.html'),
-        fileMetadata: { type: 'ui', manifestFileId: mId },
-      },
-    );
-
-    settings.localFileExtensions = extensions;
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-    pluginLog.info({ mId, pluginDir }, 'Plugin auto-registered in Figma settings.json');
-    return 'registered';
-  } catch (err) {
-    pluginLog.warn({ err }, 'Failed to auto-register plugin in Figma settings');
-    return 'failed';
-  }
-}
-
-export interface PluginSyncResult {
-  synced: boolean;
-  autoRegistered: boolean;
-  alreadyRegistered: boolean;
-  figmaRunning: boolean;
-  error?: string;
-}
-
-/** Check if installed plugin files differ from the bundled source. */
-function pluginNeedsSync(src: string, dest: string): boolean {
-  try {
-    const destManifest = join(dest, PLUGIN_MANIFEST);
-    if (!existsSync(destManifest)) return true;
-    // Byte-level comparison of all payload files. Size-only checks miss
-    // same-length edits (e.g. PLUGIN_VERSION 1→2). mtime is unreliable
-    // after cpSync so we compare content directly — files are small (<200KB).
-    for (const file of [PLUGIN_MANIFEST, 'code.js', 'ui.html']) {
-      const srcFile = join(src, file);
-      const destFile = join(dest, file);
-      if (!existsSync(destFile)) return true;
-      if (!readFileSync(srcFile).equals(readFileSync(destFile))) return true;
-    }
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Sync plugin files from app bundle to userData and auto-register in Figma if needed.
- * Called at startup and from the manual install IPC handler.
- */
-export async function syncFigmaPlugin(): Promise<PluginSyncResult> {
-  const src = getPluginSourcePath();
-  if (!src) {
-    pluginLog.warn('Plugin source not found — skipping sync');
-    return {
-      synced: false,
-      autoRegistered: false,
-      alreadyRegistered: false,
-      figmaRunning: false,
-      error: MSG_PLUGIN_NOT_FOUND,
-    };
-  }
-
-  const dest = getPluginTargetPath();
-  try {
-    if (pluginNeedsSync(src, dest)) {
-      cpSync(src, dest, { recursive: true, force: true });
-      pluginLog.info({ dest }, 'Plugin files synced');
-    }
-  } catch (err: any) {
-    pluginLog.error({ err }, 'Failed to sync plugin files');
-    return { synced: false, autoRegistered: false, alreadyRegistered: false, figmaRunning: false, error: err.message };
-  }
-
-  const figmaRunning = await isFigmaRunning();
-  let autoRegistered = false;
-  let alreadyRegistered = isPluginRegistered();
-
-  if (!alreadyRegistered && !figmaRunning) {
-    const result = ensurePluginRegistered(dest);
-    alreadyRegistered = result === 'already';
-    autoRegistered = result === 'registered';
-  }
-
-  return { synced: true, autoRegistered, alreadyRegistered, figmaRunning };
-}
+export { extractRenderableMessages, type PluginSyncResult, type RenderableTurn, syncFigmaPlugin };
 
 /** Controller returned by setupIpcHandlers for cross-module coordination. */
 export interface IpcController {
@@ -833,7 +642,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   // ── Figma plugin setup (global) ──────────────────
 
   ipcMain.handle('plugin:check', () => {
-    return { installed: existsSync(join(getPluginTargetPath(), PLUGIN_MANIFEST)) };
+    return { installed: existsSync(getInstalledManifestPath()) };
   });
 
   ipcMain.handle('plugin:install', async () => {
@@ -844,7 +653,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     }
     // Show Finder fallback only when manual import is needed
     if (!result.autoRegistered && !result.alreadyRegistered) {
-      shell.showItemInFolder(join(getPluginTargetPath(), PLUGIN_MANIFEST));
+      shell.showItemInFolder(getInstalledManifestPath());
     }
     usageTracker?.trackFigmaPluginInstalled(true);
     return {

@@ -35,6 +35,35 @@ const NAMING_MAJOR_AUTO_COUNT = 3;
 /** Naming: this many containers without auto-layout signals structural debt. */
 const NAMING_MAJOR_NO_LAYOUT_COUNT = 2;
 
+// ── Per-judge classifiers (pure, evidence-driven) ─────────────────────
+
+function classifyAlignment(ev: JudgeEvidence['alignment']): EvidenceSeverity | null {
+  if (ev.verdict !== 'misaligned') return null;
+  if (ev.findings.length === 0) return null;
+  const maxDev = Math.max(...ev.findings.map((f) => f.maxDeviation));
+  return maxDev > ALIGNMENT_MAJOR_PX ? 'major' : 'minor';
+}
+
+function classifyVisualHierarchy(ev: JudgeEvidence['visual_hierarchy']): EvidenceSeverity | null {
+  if (ev.verdict !== 'flat') return null;
+  return ev.textCount >= TYPOGRAPHY_MAJOR_TEXT_COUNT ? 'major' : 'minor';
+}
+
+function classifyConsistency(ev: JudgeEvidence['consistency']): EvidenceSeverity | null {
+  if (ev.verdict !== 'inconsistent') return null;
+  if (ev.findings.length === 0) return null;
+  const maxDev = Math.max(...ev.findings.map((f) => Math.max(...f.values) - Math.min(...f.values)));
+  return maxDev > CONSISTENCY_MAJOR_PX ? 'major' : 'minor';
+}
+
+function classifyNaming(ev: JudgeEvidence['naming']): EvidenceSeverity | null {
+  if (ev.verdict === 'ok' || ev.verdict === 'insufficient_data') return null;
+  const autoCount = ev.autoNamedFrames.length;
+  const noLayoutCount = ev.framesWithoutAutoLayout.length;
+  const isMajor = autoCount >= NAMING_MAJOR_AUTO_COUNT || noLayoutCount >= NAMING_MAJOR_NO_LAYOUT_COUNT;
+  return isMajor ? 'major' : 'minor';
+}
+
 // ── Main function ─────────────────────────────────────────────────────
 
 /**
@@ -56,41 +85,19 @@ export function computeEvidenceSeverity(
   if (!evidence) return null;
 
   switch (judgeId) {
-    case 'alignment': {
-      if (evidence.alignment.verdict !== 'misaligned') return null;
-      if (evidence.alignment.findings.length === 0) return null;
-      const maxDev = Math.max(...evidence.alignment.findings.map((f) => f.maxDeviation));
-      return maxDev > ALIGNMENT_MAJOR_PX ? 'major' : 'minor';
-    }
-
-    case 'visual_hierarchy': {
-      if (evidence.visual_hierarchy.verdict !== 'flat') return null;
-      return evidence.visual_hierarchy.textCount >= TYPOGRAPHY_MAJOR_TEXT_COUNT ? 'major' : 'minor';
-    }
-
-    case 'consistency': {
-      if (evidence.consistency.verdict !== 'inconsistent') return null;
-      if (evidence.consistency.findings.length === 0) return null;
-      const maxDev = Math.max(
-        ...evidence.consistency.findings.map((f) => Math.max(...f.values) - Math.min(...f.values)),
-      );
-      return maxDev > CONSISTENCY_MAJOR_PX ? 'major' : 'minor';
-    }
-
-    case 'naming': {
-      if (evidence.naming.verdict === 'ok' || evidence.naming.verdict === 'insufficient_data') return null;
-      const autoCount = evidence.naming.autoNamedFrames.length;
-      const noLayoutCount = evidence.naming.framesWithoutAutoLayout.length;
-      return autoCount >= NAMING_MAJOR_AUTO_COUNT || noLayoutCount >= NAMING_MAJOR_NO_LAYOUT_COUNT ? 'major' : 'minor';
-    }
-
-    // Non-evidence judges: no severity classification
+    case 'alignment':
+      return classifyAlignment(evidence.alignment);
+    case 'visual_hierarchy':
+      return classifyVisualHierarchy(evidence.visual_hierarchy);
+    case 'consistency':
+      return classifyConsistency(evidence.consistency);
+    case 'naming':
+      return classifyNaming(evidence.naming);
     case 'token_compliance':
     case 'completeness':
     case 'componentization':
     case 'design_quality':
       return null;
-
     default:
       return null;
   }

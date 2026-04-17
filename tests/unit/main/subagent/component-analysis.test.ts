@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { analyzeComponents } from '../../../../src/main/subagent/component-analysis.js';
 import {
-  analyzeComponents,
   computeFingerprint,
   computeRelaxedFingerprint,
   tokenizeName,
   tokenSimilarity,
-} from '../../../../src/main/subagent/component-analysis.js';
+} from '../../../../src/main/subagent/component-analysis-parser.js';
 
 // ── Helper: inline ParsedNode construction ──────────────────────────
 

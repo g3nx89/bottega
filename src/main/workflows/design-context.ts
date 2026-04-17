@@ -28,71 +28,46 @@ function messageContains(message: string, keywords: string[]): boolean {
   return keywords.some((kw) => lower.includes(kw));
 }
 
+function resolveInitialMode(dsStatus: ContextInput['dsStatus']): InteractionMode {
+  // Rules 1, 2, 3 — session start transitions
+  if (dsStatus === 'none' || dsStatus === 'unknown') return 'bootstrap';
+  if (dsStatus === 'partial') return 'socratic';
+  return 'execution';
+}
+
+function resolvePreviousModeTransition(prev: InteractionMode, msg: string): InteractionMode {
+  // Rule 4: bootstrap → socratic on approval
+  if (prev === 'bootstrap' && messageContains(msg, DS_APPROVAL_KEYWORDS)) return 'socratic';
+  // Rule 5: socratic → execution on confirmation
+  if (prev === 'socratic' && messageContains(msg, DS_APPROVAL_KEYWORDS)) return 'execution';
+  // Rule 6: execution → socratic on DS change request
+  if (prev === 'execution' && messageContains(msg, DS_SETUP_KEYWORDS)) return 'socratic';
+  return prev;
+}
+
 /**
  * State machine for interaction mode transitions.
  *
- * Rules (in priority order):
- * 1.  session start + dsStatus=none → bootstrap
- * 2.  session start + dsStatus=partial → socratic
- * 3.  session start + dsStatus=active → execution
- * 4.  bootstrap + user approves DS plan → socratic
- * 5.  socratic + last DS decision confirmed → execution
- * 6.  execution + value not in DS / user asks DS change → socratic
- * 7.  any + user asks audit/lint/check → review
- * 8.  review + review completed → previous mode
- * 9.  any + user opts out of DS → freeform
- * 10. freeform + user asks DS setup → bootstrap
+ * Rules (priority order):
+ * 9.  any + opt-out DS → freeform
+ * 10. freeform + DS setup request → bootstrap
+ * 7.  any + audit/lint/check → review
+ * 8.  review + approval → previous mode
+ * 1-3. session start → bootstrap | socratic | execution (by dsStatus)
+ * 4-6. prev-dependent approval/setup transitions
  */
 function resolveInteractionMode(input: ContextInput): InteractionMode {
   const msg = input.userMessage ?? '';
   const prev = input.previousMode;
 
-  // Rule 9 (opt-out to freeform) — high priority, check first
-  if (messageContains(msg, FREEFORM_KEYWORDS)) {
-    return 'freeform';
-  }
-
-  // Rule 10 (freeform → bootstrap on DS setup request)
-  if (prev === 'freeform' && messageContains(msg, DS_SETUP_KEYWORDS)) {
-    return 'bootstrap';
-  }
-
-  // Rule 7 (any → review on audit request)
-  if (messageContains(msg, REVIEW_KEYWORDS)) {
-    return 'review';
-  }
-
-  // Rule 8 (review → previous mode on completion)
-  // We interpret "review completed" as: we were in review and the message is an approval
+  if (messageContains(msg, FREEFORM_KEYWORDS)) return 'freeform';
+  if (prev === 'freeform' && messageContains(msg, DS_SETUP_KEYWORDS)) return 'bootstrap';
+  if (messageContains(msg, REVIEW_KEYWORDS)) return 'review';
   if (prev === 'review' && messageContains(msg, DS_APPROVAL_KEYWORDS)) {
     return input.modeBeforeReview ?? 'execution';
   }
-
-  // Session start transitions (no previousMode)
-  if (!prev) {
-    // Rules 1, 2, 3
-    if (input.dsStatus === 'none' || input.dsStatus === 'unknown') return 'bootstrap';
-    if (input.dsStatus === 'partial') return 'socratic';
-    if (input.dsStatus === 'active') return 'execution';
-    return 'execution';
-  }
-
-  // Rule 4 (bootstrap → socratic on approval)
-  if (prev === 'bootstrap' && messageContains(msg, DS_APPROVAL_KEYWORDS)) {
-    return 'socratic';
-  }
-
-  // Rule 5 (socratic → execution on confirmation)
-  if (prev === 'socratic' && messageContains(msg, DS_APPROVAL_KEYWORDS)) {
-    return 'execution';
-  }
-
-  // Rule 6 (execution → socratic on DS change request)
-  if (prev === 'execution' && messageContains(msg, DS_SETUP_KEYWORDS)) {
-    return 'socratic';
-  }
-
-  return prev;
+  if (!prev) return resolveInitialMode(input.dsStatus);
+  return resolvePreviousModeTransition(prev, msg);
 }
 
 function resolveGovernancePolicy(mode: InteractionMode, dsStatus: ContextInput['dsStatus']): GovernancePolicy {
