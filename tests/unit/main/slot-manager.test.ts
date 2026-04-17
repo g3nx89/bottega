@@ -233,6 +233,7 @@ describe('SlotManager', () => {
         [{ name: 'mock_tool' }],
         DEFAULT_MODEL,
         'file-abc',
+        expect.objectContaining({ fileKey: 'file-abc', slotIdRef: expect.any(Object) }),
       );
     });
 
@@ -245,6 +246,7 @@ describe('SlotManager', () => {
         [{ name: 'mock_tool' }],
         customModel,
         'file-abc',
+        expect.objectContaining({ fileKey: 'file-abc', slotIdRef: expect.any(Object) }),
       );
     });
 
@@ -359,7 +361,13 @@ describe('SlotManager', () => {
 
       await manager.recreateSession(slot.id, newConfig);
 
-      expect(createFigmaAgentRuntimeForSlot).toHaveBeenLastCalledWith(infra, expect.any(Array), newConfig, 'file-abc');
+      expect(createFigmaAgentRuntimeForSlot).toHaveBeenLastCalledWith(
+        infra,
+        expect.any(Array),
+        newConfig,
+        'file-abc',
+        expect.objectContaining({ fileKey: 'file-abc', slotIdRef: expect.any(Object) }),
+      );
     });
 
     it('updates slot session and modelConfig, reuses scopedTools', async () => {

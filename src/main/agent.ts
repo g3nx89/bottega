@@ -13,7 +13,9 @@ import {
   ModelRegistry,
   SessionManager,
 } from '@mariozechner/pi-coding-agent';
+import { BrowserWindow } from 'electron';
 import type { FigmaAPI } from '../figma/figma-api.js';
+import type { IFigmaConnector } from '../figma/figma-connector.js';
 import type { FigmaWebSocketServer } from '../figma/websocket-server.js';
 import type { AuthType } from './auth-snapshot.js';
 import type { StoredCredential } from './auth-types.js';
@@ -22,6 +24,8 @@ import type { CompactDesignSystem, DesignSystemCache } from './compression/desig
 import { createCompressionExtensionFactory } from './compression/extension-factory.js';
 import type { CompressionMetricsCollector } from './compression/metrics.js';
 import type { FigmaCore } from './figma-core.js';
+import { loadGuardrailsSettings } from './guardrails/config.js';
+import { createGuardrailsExtensionFactory } from './guardrails/extension-factory.js';
 import type { ImageGenerator } from './image-gen/image-generator.js';
 import { MetricsRegistry } from './metrics-registry.js';
 import { ModelProbe } from './model-probe.js';
@@ -311,6 +315,7 @@ export interface AgentInfra {
   /** F11: shared per-session ModelProbe with TTL cache. */
   modelProbe: ModelProbe;
   getImageGenerator?: () => ImageGenerator | null;
+  getWebContentsForSlot?: (slotId: string) => Electron.WebContents | null;
 }
 
 /**
@@ -444,6 +449,13 @@ const DEFAULT_SESSIONS_DIR = path.join(os.homedir(), '.bottega', 'sessions');
 export interface AgentInfraOptions {
   sessionsDir?: string;
   getImageGenerator?: () => ImageGenerator | null;
+  /**
+   * Resolver for the renderer webContents that should receive per-slot IPC
+   * like guardrails confirm prompts. Defaults to the first BrowserWindow,
+   * which is fine for Bottega's current single-window model. When multi-window
+   * lands, pass a resolver that maps slotId → owning window's webContents.
+   */
+  getWebContentsForSlot?: (slotId: string) => Electron.WebContents | null;
 }
 
 export async function createAgentInfra(
@@ -556,6 +568,7 @@ export async function createAgentInfra(
     // circular dep on UsageTracker.
     modelProbe: new ModelProbe(buildAuthAdapter(authStorage)),
     getImageGenerator: opts.getImageGenerator,
+    getWebContentsForSlot: opts.getWebContentsForSlot,
   };
 }
 
@@ -591,11 +604,24 @@ export function createScopedTools(
   return { tools, connector, taskStore };
 }
 
+/**
+ * Per-slot hooks consumed by the guardrails Pi SDK extension. The slot
+ * manager owns slotId (assigned after runtime creation) and the
+ * ScopedConnector, so it passes refs that the extension reads lazily
+ * at tool_call time.
+ */
+export interface SlotGuardrailsRefs {
+  slotIdRef: { current: string };
+  connector: IFigmaConnector | null;
+  fileKey: string;
+}
+
 function createSlotRuntimeFactory(
   infra: AgentInfra,
   scopedTools: ToolDefinition[],
   modelConfig: ModelConfig,
   fileKey?: string,
+  guardrailsRefs?: SlotGuardrailsRefs,
 ): CreateAgentSessionRuntimeFactory {
   return async (opts): Promise<CreateAgentSessionRuntimeResult> => {
     const sdkModelId = resolveSdkModelId(modelConfig.modelId);
@@ -611,6 +637,33 @@ function createSlotRuntimeFactory(
     const modelLabel = getModelLabel(modelConfig.provider, modelConfig.modelId);
     const dsData = fileKey ? readDesignSystemBlock(infra.designSystemCache, fileKey) : undefined;
 
+    const extensionFactories: Array<(pi: any) => void> = [
+      infra.compressionExtensionFactory,
+      infra.taskExtensionFactory,
+      infra.workflowExtensionFactory,
+    ];
+
+    if (guardrailsRefs) {
+      const resolveWebContents = (): Electron.WebContents | null => {
+        const slotId = guardrailsRefs.slotIdRef.current;
+        const resolved = infra.getWebContentsForSlot?.(slotId);
+        if (resolved && !resolved.isDestroyed()) return resolved;
+        // Fallback for single-window / pre-wiring scenarios.
+        const fallback = BrowserWindow.getAllWindows()[0]?.webContents;
+        return fallback && !fallback.isDestroyed() ? fallback : null;
+      };
+      extensionFactories.push(
+        createGuardrailsExtensionFactory({
+          isEnabled: () => loadGuardrailsSettings().enabled !== false,
+          getWebContents: resolveWebContents,
+          getConnector: () => guardrailsRefs.connector,
+          getFileKey: () => guardrailsRefs.fileKey,
+          getSlotId: () => guardrailsRefs.slotIdRef.current,
+          metrics: infra.metricsRegistry,
+        }),
+      );
+    }
+
     const services = await createAgentSessionServices({
       cwd: opts.cwd,
       agentDir: opts.agentDir,
@@ -622,11 +675,7 @@ function createSlotRuntimeFactory(
         noSkills: true,
         noPromptTemplates: true,
         noThemes: true,
-        extensionFactories: [
-          infra.compressionExtensionFactory,
-          infra.taskExtensionFactory,
-          infra.workflowExtensionFactory,
-        ],
+        extensionFactories,
       },
     });
 
@@ -649,8 +698,9 @@ export async function createFigmaAgentRuntimeForSlot(
   scopedTools: ToolDefinition[],
   modelConfig: ModelConfig = DEFAULT_MODEL,
   fileKey?: string,
+  guardrailsRefs?: SlotGuardrailsRefs,
 ): Promise<AgentSessionRuntime> {
-  const factory = createSlotRuntimeFactory(infra, scopedTools, modelConfig, fileKey);
+  const factory = createSlotRuntimeFactory(infra, scopedTools, modelConfig, fileKey, guardrailsRefs);
   return createAgentSessionRuntime(factory, {
     cwd: os.tmpdir(),
     agentDir: os.tmpdir(),

@@ -17,12 +17,16 @@
  */
 
 import type { FigmaWebSocketServer } from '../figma/websocket-server.js';
+import type { RuleId } from './guardrails/types.js';
 import type { SlotManager } from './slot-manager.js';
 
 // ─── Public types ──────────────────────────────────────────────────────
 
 export type JudgeSkipReason = 'no-connector' | 'no-mutations' | 'disabled';
 export type JudgeVerdict = 'PASS' | 'FAIL' | 'UNKNOWN';
+
+/** Known guardrails rule IDs + 'none' sentinel for non-matching evaluations. */
+export type GuardrailsRuleIdMetric = RuleId | 'none';
 
 export interface MetricsSnapshot {
   schemaVersion: 1;
@@ -66,6 +70,13 @@ export interface MetricsSnapshot {
     totalStarted: number;
     totalEnded: number;
   };
+  guardrails: {
+    evaluated: number;
+    noMatch: number;
+    /** Rule-B probe failures (WS/bridge error) — distinct from noMatch. */
+    probeFailed: number;
+    byRule: Record<string, { evaluated: number; blocked: number; allowed: number }>;
+  };
   ws: {
     activeFileKey: string | null;
     connectedFiles: Array<{ fileKey: string | null; fileName: string; isActive: boolean }>;
@@ -97,6 +108,10 @@ export class MetricsRegistry {
   private toolByName = new Map<string, ToolCounters>();
   private turnsStarted = 0;
   private turnsEnded = 0;
+  private guardrailsEvaluated = 0;
+  private guardrailsNoMatch = 0;
+  private guardrailsProbeFailed = 0;
+  private guardrailsByRule = new Map<string, { evaluated: number; blocked: number; allowed: number }>();
 
   recordJudgeTriggered(): void {
     this.judgeTriggered += 1;
@@ -136,6 +151,33 @@ export class MetricsRegistry {
     this.turnsEnded += 1;
   }
 
+  recordGuardrailsEvaluated(ruleId: GuardrailsRuleIdMetric): void {
+    this.guardrailsEvaluated += 1;
+    if (ruleId === 'none') {
+      this.guardrailsNoMatch += 1;
+      return;
+    }
+    const rec = this.guardrailsByRule.get(ruleId) ?? { evaluated: 0, blocked: 0, allowed: 0 };
+    rec.evaluated += 1;
+    this.guardrailsByRule.set(ruleId, rec);
+  }
+
+  recordGuardrailsBlocked(ruleId: Exclude<GuardrailsRuleIdMetric, 'none'>): void {
+    const rec = this.guardrailsByRule.get(ruleId) ?? { evaluated: 0, blocked: 0, allowed: 0 };
+    rec.blocked += 1;
+    this.guardrailsByRule.set(ruleId, rec);
+  }
+
+  recordGuardrailsAllowed(ruleId: Exclude<GuardrailsRuleIdMetric, 'none'>): void {
+    const rec = this.guardrailsByRule.get(ruleId) ?? { evaluated: 0, blocked: 0, allowed: 0 };
+    rec.allowed += 1;
+    this.guardrailsByRule.set(ruleId, rec);
+  }
+
+  recordGuardrailsProbeFailed(): void {
+    this.guardrailsProbeFailed += 1;
+  }
+
   reset(): void {
     this.judgeTriggered = 0;
     this.judgeSkipped = 0;
@@ -146,6 +188,10 @@ export class MetricsRegistry {
     this.toolByName.clear();
     this.turnsStarted = 0;
     this.turnsEnded = 0;
+    this.guardrailsEvaluated = 0;
+    this.guardrailsNoMatch = 0;
+    this.guardrailsProbeFailed = 0;
+    this.guardrailsByRule.clear();
   }
 
   snapshot(deps: MetricsRegistryDeps): MetricsSnapshot {
@@ -215,6 +261,12 @@ export class MetricsRegistry {
       turns: {
         totalStarted: this.turnsStarted,
         totalEnded: this.turnsEnded,
+      },
+      guardrails: {
+        evaluated: this.guardrailsEvaluated,
+        noMatch: this.guardrailsNoMatch,
+        probeFailed: this.guardrailsProbeFailed,
+        byRule: Object.fromEntries([...this.guardrailsByRule.entries()].map(([k, v]) => [k, { ...v }])),
       },
       ws: {
         activeFileKey: deps.wsServer.getActiveFileKey(),

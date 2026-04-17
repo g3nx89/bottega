@@ -276,6 +276,10 @@ if (!gotTheLock) {
         try {
           infra = await createAgentInfra(figmaCore, {
             getImageGenerator: () => imageGenState.generator,
+            // Today Bottega is single-window; this resolver lives here so
+            // future multi-window work has one place to plug in per-slot
+            // routing (slotManager.getWindowForSlot(slotId)?.webContents).
+            getWebContentsForSlot: () => mainWindow?.webContents ?? null,
           });
           log.info('Agent infrastructure created');
         } catch (err: any) {

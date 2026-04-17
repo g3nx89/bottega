@@ -98,8 +98,20 @@ describe('MetricsRegistry', () => {
       const reg = new MetricsRegistry();
       const snap = reg.snapshot(makeDeps());
       expect(Object.keys(snap).sort()).toEqual(
-        ['schemaVersion', 'capturedAt', 'captureElapsedMs', 'process', 'slots', 'judge', 'tools', 'turns', 'ws'].sort(),
+        [
+          'schemaVersion',
+          'capturedAt',
+          'captureElapsedMs',
+          'process',
+          'slots',
+          'judge',
+          'tools',
+          'turns',
+          'guardrails',
+          'ws',
+        ].sort(),
       );
+      expect(Object.keys(snap.guardrails).sort()).toEqual(['evaluated', 'noMatch', 'probeFailed', 'byRule'].sort());
       expect(Object.keys(snap.judge).sort()).toEqual(
         ['inProgressSlotIds', 'triggeredTotal', 'skippedTotal', 'skippedByReason', 'verdictCounts'].sort(),
       );
@@ -197,6 +209,75 @@ describe('MetricsRegistry', () => {
       const snap = reg.snapshot(makeDeps());
       expect(snap.turns.totalStarted).toBe(3);
       expect(snap.turns.totalEnded).toBe(2);
+    });
+  });
+
+  describe('guardrails counters', () => {
+    it('evaluated with real rule increments per-rule and total', () => {
+      const reg = new MetricsRegistry();
+      reg.recordGuardrailsEvaluated('bulk-delete');
+      reg.recordGuardrailsEvaluated('bulk-delete');
+      reg.recordGuardrailsEvaluated('detach-main-instance');
+      const snap = reg.snapshot(makeDeps());
+      expect(snap.guardrails.evaluated).toBe(3);
+      expect(snap.guardrails.noMatch).toBe(0);
+      expect(snap.guardrails.byRule['bulk-delete']).toEqual({ evaluated: 2, blocked: 0, allowed: 0 });
+      expect(snap.guardrails.byRule['detach-main-instance']).toEqual({ evaluated: 1, blocked: 0, allowed: 0 });
+    });
+
+    it("'none' increments noMatch without polluting byRule", () => {
+      const reg = new MetricsRegistry();
+      reg.recordGuardrailsEvaluated('none');
+      reg.recordGuardrailsEvaluated('none');
+      const snap = reg.snapshot(makeDeps());
+      expect(snap.guardrails.evaluated).toBe(2);
+      expect(snap.guardrails.noMatch).toBe(2);
+      expect(snap.guardrails.byRule).toEqual({});
+    });
+
+    it('blocked and allowed record on existing ruleId', () => {
+      const reg = new MetricsRegistry();
+      reg.recordGuardrailsEvaluated('bulk-delete');
+      reg.recordGuardrailsBlocked('bulk-delete');
+      reg.recordGuardrailsAllowed('bulk-delete');
+      const snap = reg.snapshot(makeDeps());
+      expect(snap.guardrails.byRule['bulk-delete']).toEqual({ evaluated: 1, blocked: 1, allowed: 1 });
+    });
+
+    it('blocked without prior evaluated still creates the record (defensive)', () => {
+      const reg = new MetricsRegistry();
+      reg.recordGuardrailsBlocked('main-ds-component');
+      const snap = reg.snapshot(makeDeps());
+      expect(snap.guardrails.byRule['main-ds-component']).toEqual({ evaluated: 0, blocked: 1, allowed: 0 });
+    });
+
+    it('byRule snapshot is a plain object (not a Map)', () => {
+      const reg = new MetricsRegistry();
+      reg.recordGuardrailsEvaluated('bulk-delete');
+      const snap = reg.snapshot(makeDeps());
+      expect(Object.prototype.toString.call(snap.guardrails.byRule)).toBe('[object Object]');
+    });
+
+    it('recordGuardrailsProbeFailed increments probeFailed counter only', () => {
+      const reg = new MetricsRegistry();
+      reg.recordGuardrailsProbeFailed();
+      reg.recordGuardrailsProbeFailed();
+      const snap = reg.snapshot(makeDeps());
+      expect(snap.guardrails.probeFailed).toBe(2);
+      expect(snap.guardrails.evaluated).toBe(0);
+      expect(snap.guardrails.noMatch).toBe(0);
+      expect(snap.guardrails.byRule).toEqual({});
+    });
+
+    it('reset() zeroes guardrails counters', () => {
+      const reg = new MetricsRegistry();
+      reg.recordGuardrailsEvaluated('bulk-delete');
+      reg.recordGuardrailsBlocked('bulk-delete');
+      reg.recordGuardrailsEvaluated('none');
+      reg.recordGuardrailsProbeFailed();
+      reg.reset();
+      const snap = reg.snapshot(makeDeps());
+      expect(snap.guardrails).toEqual({ evaluated: 0, noMatch: 0, probeFailed: 0, byRule: {} });
     });
   });
 

@@ -964,6 +964,25 @@ if (copySysinfoBtn) {
   });
 }
 
+// ── Guardrails (safety rails) toggle ──
+const guardrailsToggle = document.getElementById('guardrails-enabled-toggle');
+if (guardrailsToggle && window.api?.getGuardrailsSettings) {
+  window.api
+    .getGuardrailsSettings()
+    .then((settings) => {
+      guardrailsToggle.checked = settings?.enabled !== false;
+    })
+    .catch(() => {});
+  guardrailsToggle.addEventListener('change', async () => {
+    const prev = !guardrailsToggle.checked;
+    try {
+      await window.api.setGuardrailsSettings({ enabled: guardrailsToggle.checked });
+    } catch {
+      guardrailsToggle.checked = prev;
+    }
+  });
+}
+
 if (sendDiagnosticsToggle) {
   // Load saved state
   window.api

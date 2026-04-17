@@ -20,6 +20,8 @@ import {
   type PluginSyncResult,
   syncFigmaPlugin,
 } from './figma-plugin-sync.js';
+import { loadGuardrailsSettings, saveGuardrailsSettings } from './guardrails/config.js';
+import { registerGuardrailsIpc } from './guardrails/confirm-bus.js';
 import { effectiveApiKey, type ImageGenSettings, saveImageGenSettings } from './image-gen/config.js';
 import { DEFAULT_IMAGE_MODEL, IMAGE_GEN_MODELS, ImageGenerator } from './image-gen/image-generator.js';
 import { setupAuthHandlers } from './ipc-handlers-auth.js';
@@ -585,6 +587,27 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
     await saveSubagentSettings(config);
     log.info('Subagent config updated');
     return { success: true };
+  });
+
+  // ── Guardrails config + confirm response ──────────
+  // registerGuardrailsIpc() wires 'guardrails:confirm-response' (idempotent).
+  registerGuardrailsIpc();
+  ipcMain.handle('guardrails:get-settings', () => {
+    return loadGuardrailsSettings();
+  });
+  ipcMain.handle('guardrails:set-settings', async (_event: any, settings: any) => {
+    if (!settings || typeof settings !== 'object') return { success: false };
+    try {
+      saveGuardrailsSettings({
+        ...loadGuardrailsSettings(),
+        enabled: settings.enabled !== false,
+      });
+      log.info({ enabled: settings.enabled !== false }, 'Guardrails settings updated');
+      return { success: true };
+    } catch (err) {
+      log.warn({ err }, 'Failed to save guardrails settings');
+      return { success: false };
+    }
   });
 
   // Subagent batch IPC (scout/analyst/auditor) was removed — orphan code.

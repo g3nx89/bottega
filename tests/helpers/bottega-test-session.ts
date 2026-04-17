@@ -58,6 +58,8 @@ export interface BottegaTestSessionOptions {
   propagateErrors?: boolean;
   /** Pre-built TaskStore (default: new TaskStore()) */
   taskStore?: TaskStore;
+  /** Extra extension factories appended after compression+tasks (e.g. guardrails). */
+  extraExtensionFactories?: Array<(pi: any) => void>;
 }
 
 export interface BottegaTestSession {
@@ -137,7 +139,11 @@ export async function createBottegaTestSession(options: BottegaTestSessionOption
     noSkills: true,
     noPromptTemplates: true,
     noThemes: true,
-    extensionFactories: [compressionExtensionFactory, createTaskExtensionFactory(() => taskStore) as any],
+    extensionFactories: [
+      compressionExtensionFactory,
+      createTaskExtensionFactory(() => taskStore) as any,
+      ...(options.extraExtensionFactories ?? []),
+    ],
   });
   await resourceLoader.reload();
 
@@ -333,7 +339,8 @@ export async function createBottegaTestSession(options: BottegaTestSessionOption
           },
         } as ToolDefinition;
       });
-      agent.setTools(wrappedTools);
+      // Pi SDK 0.67.6+ replaced agent.setTools() with an `agent.state.tools` setter.
+      agent.state.tools = wrappedTools;
 
       // Run each turn
       for (const turn of turns) {

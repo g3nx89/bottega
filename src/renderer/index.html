@@ -317,6 +317,15 @@
           </div>
           <div class="setting-divider"></div>
           <div class="setting-group">
+            <label class="setting-label">Safety Rails</label>
+            <label class="setting-sublabel diagnostics-toggle-label">
+              <input type="checkbox" id="guardrails-enabled-toggle">
+              Confirm destructive actions
+            </label>
+            <span class="setting-hint">Prompt before the agent deletes many nodes, mutates Design System components, or calls <code>detachInstance()</code> / variable deletion via <code>figma_execute</code>. Leave on unless you are sure.</span>
+          </div>
+          <div class="setting-divider"></div>
+          <div class="setting-group">
             <label class="setting-label">Updates</label>
             <div class="update-row">
               <span id="update-status" class="setting-hint">Checking…</span>
@@ -407,6 +416,7 @@
     </div>
 
   <script src="status-strip.js"></script>
+  <div id="guardrails-modal-root" class="gr-modal-hidden" role="dialog" aria-modal="true" aria-hidden="true"></div>
   <script src="app.js"></script>
   <script src="app-update.js"></script>
   <script src="app-feedback.js"></script>
@@ -417,5 +427,6 @@
   <script src="slash-commands.js"></script>
   <script src="settings.js"></script>
   <script src="settings-subagent.js"></script>
+  <script src="guardrails-modal.js"></script>
 </body>
 </html>

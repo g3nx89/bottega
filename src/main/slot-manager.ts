@@ -17,6 +17,7 @@ import { type AppState, AppStatePersistence } from './app-state-persistence.js';
 import type { AgentSessionLike } from './ipc-handlers.js';
 import { PromptQueue } from './prompt-queue.js';
 import { PromptSuggester } from './prompt-suggester.js';
+import type { ScopedConnector } from './scoped-connector.js';
 import type { SessionStore } from './session-store.js';
 import { abortActiveJudge } from './subagent/judge-harness.js';
 import type { TaskStore } from './tasks/store.js';
@@ -49,6 +50,7 @@ export interface SessionSlot extends TurnTracking {
   suggester: PromptSuggester;
   promptQueue: PromptQueue;
   scopedTools: ToolDefinition[];
+  scopedConnector: ScopedConnector;
   taskStore: TaskStore;
   createdAt: number;
   /** Mutable ref for the current provider — tools capture a closure over this for model-aware screenshot optimization. */
@@ -149,15 +151,28 @@ export class SlotManager {
     const effectiveModel = modelConfig || DEFAULT_MODEL;
     // Mutable ref: tools capture a closure over this; slot manager updates it on model switch
     const providerRef = { current: effectiveModel.provider };
-    const { tools, taskStore } = createScopedTools(this.infra, fileKey || UNBOUND_FILE_KEY, () => providerRef.current);
-    const runtime = await createFigmaAgentRuntimeForSlot(this.infra, tools, effectiveModel, fileKey);
+    const { tools, taskStore, connector } = createScopedTools(
+      this.infra,
+      fileKey || UNBOUND_FILE_KEY,
+      () => providerRef.current,
+    );
+    // Guardrails reads slotId lazily from this ref; we patch .current below
+    // once the slot's randomUUID has been generated.
+    const slotIdRef = { current: '' };
+    const runtime = await createFigmaAgentRuntimeForSlot(this.infra, tools, effectiveModel, fileKey, {
+      slotIdRef,
+      connector,
+      fileKey: fileKey || UNBOUND_FILE_KEY,
+    });
 
     await this.initSession(runtime, fileKey ?? null, effectiveModel);
 
     const suggester = new PromptSuggester(this.infra.authStorage);
 
+    const slotId = randomUUID();
+    slotIdRef.current = slotId;
     const slot = {
-      id: randomUUID(),
+      id: slotId,
       fileKey: fileKey ?? null,
       fileName: fileName ?? null,
       runtime,
@@ -168,6 +183,7 @@ export class SlotManager {
       suggester,
       promptQueue: new PromptQueue(),
       scopedTools: tools,
+      scopedConnector: connector,
       taskStore,
       createdAt: Date.now(),
       turnIndex: 0,
@@ -283,11 +299,18 @@ export class SlotManager {
       // Build + init the replacement BEFORE disposing the old runtime. If
       // construction throws (auth failure, missing model), the slot keeps
       // pointing at the working old runtime instead of a disposed one.
+      // Reuse the scoped connector captured at slot creation — recreating it
+      // would be cheap but would desync any future stateful additions.
       const runtime = await createFigmaAgentRuntimeForSlot(
         this.infra,
         slot.scopedTools,
         modelConfig,
         slot.fileKey ?? undefined,
+        {
+          slotIdRef: { current: slot.id },
+          connector: slot.scopedConnector,
+          fileKey: slot.fileKey || UNBOUND_FILE_KEY,
+        },
       );
 
       await this.initSession(runtime, slot.fileKey, modelConfig);

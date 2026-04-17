@@ -57,6 +57,7 @@
     "electron": "^33.0.0",
     "electron-builder": "^26.0.0",
     "eslint": "^10.1.0",
+    "happy-dom": "^20.9.0",
     "husky": "^9.1.7",
     "knip": "^6.0.6",
     "lint-staged": "^16.4.0",

@@ -9,6 +9,7 @@ import { categorizeToolName } from './compression/metrics.js';
 import type { AgentSessionLike } from './ipc-handlers.js';
 import { recordLastGood } from './last-known-good.js';
 import { MSG_EMPTY_TURN_WARNING, MSG_REQUEST_FAILED_FALLBACK } from './messages.js';
+import { extractCreatedNodeIds, extractTargetNodeIds } from './mutation-tracker.js';
 import type { UsageTracker } from './remote-logger.js';
 import { safeSend } from './safe-send.js';
 import type { SessionSlot, SlotManager } from './slot-manager.js';
@@ -163,55 +164,8 @@ export function createEventRouter(deps: EventRouterDeps) {
   // Store tool inputs for screenshot metadata (captured at start, used at end)
   const toolInputs = new Map<string, any>();
 
-  /**
-   * UX-003: Extract a node ID from a mutation tool's input shape. Mutation tools
-   * in Bottega take one of: `nodeId` (string), `nodeIds` (string[]), or `parentId`
-   * (string, for create-type tools like figma_render_jsx / figma_create_child /
-   * figma_create_icon). Read-only tools like figma_screenshot are skipped by caller.
-   *
-   * For figma_execute: also scan the `code` string for getNodeByIdAsync("N:M")
-   * patterns since execute has no structured nodeId field.
-   */
-  const NODE_ID_IN_CODE = /getNodeByIdAsync\s*\(\s*["'](\d+:\d+)["']\s*\)/g;
-  function extractNodeIdsFromInput(input: any): string[] {
-    if (!input || typeof input !== 'object') return [];
-    const out: string[] = [];
-    if (typeof input.nodeId === 'string' && input.nodeId) out.push(input.nodeId);
-    if (Array.isArray(input.nodeIds)) {
-      for (const id of input.nodeIds) if (typeof id === 'string' && id) out.push(id);
-    }
-    // parentId is a good fallback for create-* tools: scoping to the parent frame
-    // shows the newly created child in context.
-    if (typeof input.parentId === 'string' && input.parentId) out.push(input.parentId);
-    // figma_execute: scan code string for node ID references
-    if (typeof input.code === 'string' && input.code) {
-      for (const match of input.code.matchAll(NODE_ID_IN_CODE)) {
-        if (match[1]) out.push(match[1]);
-      }
-    }
-    return out;
-  }
-
-  /**
-   * UX-003: Extract created node IDs from a tool result's text content.
-   * Bottega wraps results via `textResult(...)` which JSON-serializes plugin
-   * responses. Create/clone/instantiate tools return `{ id: "N:M", ... }` or
-   * `{ nodeId: "N:M", ... }` in their payload — match both.
-   */
-  const NODE_ID_IN_RESULT = /"(?:id|nodeId)"\s*:\s*"(\d+:\d+)"|(?:^|\s)node[=:](\d+:\d+)/gm;
-  function extractNodeIdsFromResult(result: any): string[] {
-    const content = result?.content;
-    if (!Array.isArray(content)) return [];
-    const out: string[] = [];
-    for (const c of content) {
-      if (c?.type !== 'text' || typeof c.text !== 'string') continue;
-      for (const match of c.text.matchAll(NODE_ID_IN_RESULT)) {
-        const id = match[1] ?? match[2]; // group 1 = JSON format, group 2 = text format (node=N:M)
-        if (id && !out.includes(id)) out.push(id);
-      }
-    }
-    return out;
-  }
+  // UX-003 node ID extraction moved to ../mutation-tracker.js so guardrails,
+  // rewind, and judge harness share one code path.
 
   function handleToolStart(wc: Electron.WebContents, slot: SessionSlot, event: any) {
     if (judgeInProgress.has(slot.id)) return;
@@ -229,7 +183,7 @@ export function createEventRouter(deps: EventRouterDeps) {
     // UX-003: capture nodeIds from mutation tool inputs (non read-only tools only)
     // so the judge harness can scope its screenshot to the affected nodes.
     if (!READ_ONLY_CATEGORIES.has(categorizeToolName(event.toolName))) {
-      const ids = extractNodeIdsFromInput(event.toolInput);
+      const ids = extractTargetNodeIds(event.toolName, event.toolInput);
       if (ids.length > 0) {
         const existing = turnMutatedNodeIds.get(slot.id) ?? [];
         existing.push(...ids);
@@ -324,7 +278,7 @@ export function createEventRouter(deps: EventRouterDeps) {
     // figma_render_jsx, figma_instantiate, figma_clone, figma_create_icon), which only
     // appear in the result payload, not the input.
     if (!event.isError && !READ_ONLY_CATEGORIES.has(category)) {
-      const createdIds = extractNodeIdsFromResult(event.result);
+      const createdIds = extractCreatedNodeIds(event.result);
       // (UX-003 diagnostic logging removed — nodeId extraction regex now handles both
       // JSON format {"nodeId":"N:M"} and text format "node=N:M")
       if (createdIds.length > 0) {

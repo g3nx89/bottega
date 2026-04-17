@@ -305,6 +305,23 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('app:post-upgrade', (_event, data) => cb(data));
   },
 
+  // ── Guardrails (safety rails) ─────────────
+  guardrailsRespond: (response: { requestId: string; decision: 'allow-once' | 'block' }) =>
+    ipcRenderer.invoke('guardrails:confirm-response', response),
+  onGuardrailsConfirmRequest: (
+    cb: (req: {
+      requestId: string;
+      slotId: string;
+      timestamp: number;
+      match: { ruleId: string; description: string; toolName: string; affectedLabel: string };
+    }) => void,
+  ) => {
+    ipcRenderer.on('guardrails:confirm-request', (_event, req) => cb(req));
+  },
+  getGuardrailsSettings: () => ipcRenderer.invoke('guardrails:get-settings') as Promise<{ enabled: boolean }>,
+  setGuardrailsSettings: (settings: { enabled: boolean }) =>
+    ipcRenderer.invoke('guardrails:set-settings', settings) as Promise<{ success: boolean }>,
+
   // ── Usage tracking ────────────────────────
   trackSuggestionClicked: (index: number) => ipcRenderer.invoke('usage:suggestion-clicked', index),
 
