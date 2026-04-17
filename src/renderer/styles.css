@@ -1499,34 +1499,101 @@ body {
 }
 
 /* ──────────────────────────────────────────
-   Thinking indicator
+   Agent status strip — live phase indicator
 ────────────────────────────────────────── */
-.thinking-bubble {
+.agent-status-strip {
   align-self: flex-start;
-  background: var(--assistant-bubble-bg);
-  border: 1px solid var(--assistant-bubble-border);
-  padding: 10px 14px;
-  border-radius: var(--radius-sm) var(--radius-xl) var(--radius-xl) var(--radius-xl);
-  box-shadow: var(--shadow-sm);
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
+  padding: 6px 12px;
+  margin-top: 4px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary, #666);
   animation: fadeSlideIn 0.2s ease-out;
 }
 
-.thinking-dot {
-  width: 6px;
-  height: 6px;
+.agent-status-dot {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--text-secondary);
+  background: var(--accent, #a259ff);
   animation: thinkPulse 1.4s ease-in-out infinite;
+  flex: 0 0 auto;
 }
 
-.thinking-dot:nth-child(2) {
-  animation-delay: 0.2s;
+.agent-status-label {
+  font-weight: 500;
+  color: var(--text-primary, inherit);
 }
-.thinking-dot:nth-child(3) {
-  animation-delay: 0.4s;
+
+.agent-status-elapsed {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary, var(--text-secondary, #888));
+  margin-left: 4px;
+}
+
+.agent-status-strip[data-kind="judging"] .agent-status-dot,
+.agent-status-strip[data-kind="retrying"] .agent-status-dot {
+  background: var(--warning, #ff9500);
+}
+
+.agent-status-strip.agent-status-stall {
+  border-color: var(--warning, #ff9500);
+  box-shadow: 0 0 0 1px var(--warning, #ff9500);
+}
+
+.agent-status-strip.agent-status-stall .agent-status-elapsed {
+  color: var(--warning, #ff9500);
+  font-weight: 500;
+}
+
+.tool-elapsed.tool-elapsed-stall {
+  color: var(--warning, #ff9500);
+  font-weight: 500;
+}
+
+/* ──────────────────────────────────────────
+   Thinking transcript — collapsible reasoning
+────────────────────────────────────────── */
+.thinking-transcript {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+}
+
+.thinking-transcript-summary {
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  color: var(--text-secondary, #666);
+  outline: none;
+}
+
+.thinking-transcript-summary:hover {
+  color: var(--text-primary, inherit);
+}
+
+.thinking-transcript[open] .thinking-transcript-summary {
+  margin-bottom: 6px;
+}
+
+.thinking-transcript-content {
+  font-family: var(--font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+  color: var(--text-tertiary, var(--text-secondary, #888));
 }
 
 @keyframes thinkPulse {

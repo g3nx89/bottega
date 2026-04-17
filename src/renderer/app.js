@@ -7,7 +7,9 @@ var availableModels = {}; // intentionally `var` — shared with settings.js via
   TabState: {
     id, fileKey, fileName, isStreaming, isConnected, modelConfig,
     chatContainer (DOM element — detached when inactive),
-    currentAssistantBubble, thinkingBubble,
+    currentAssistantBubble,
+    status, // {el, labelEl, elapsedEl, state, kind, startedAt, stalled, timer} | null
+    thinking, // {el, contentEl, buffer} | null
     queuedPrompts: [] // mirrors server queue for UI display
   }
 */
@@ -314,7 +316,8 @@ function createTabState(slotInfo) {
     modelConfig: slotInfo.modelConfig || { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
     chatContainer: container,
     currentAssistantBubble: null,
-    thinkingBubble: null,
+    status: null,
+    thinking: null,
     queuedPrompts: [],
     judgeOverride: null,
     // B-026: restore last known token count from the server so the context bar
@@ -465,10 +468,10 @@ function appendToAssistant(tab, text) {
   scrollToBottom();
 }
 
-// UX-007: Judge running indicator timeout before auto-dismiss
-const JUDGE_TIMEOUT_MS = 60_000;
-
-/** Clear judge running indicator and its associated timeout from a tab. */
+// Defensive cleanup for legacy _judgeRunning* fields: the inline "running"
+// indicator moved onto the status strip (app.js), but existing call sites
+// still invoke this on teardown paths (agent:end, tab close, verdict card
+// creation) in case a stray indicator was ever set.
 function clearJudgeIndicator(tab) {
   if (tab._judgeRunningTimeout) {
     clearTimeout(tab._judgeRunningTimeout);
@@ -526,22 +529,12 @@ function addToolCard(tab, toolName, toolCallId) {
     badge.title = `${retryCount} previous attempt(s) failed and were collapsed`;
     card.appendChild(badge);
   }
-  // Screenshot progress indicator — show elapsed time after 3s
-  if (toolName === 'figma_screenshot') {
-    const startTime = Date.now();
-    const elapsed = document.createElement('span');
-    elapsed.className = 'tool-elapsed';
-    card.appendChild(elapsed);
-    const timer = setInterval(() => {
-      const sec = ((Date.now() - startTime) / 1000).toFixed(0);
-      elapsed.textContent = sec + 's';
-    }, 1000);
-    // Show after 3s delay
-    elapsed.style.display = 'none';
-    card._elapsedShowTimeout = setTimeout(() => {
-      elapsed.style.display = '';
-    }, 3000);
-    card._elapsedTimer = timer;
+  // Tool progress indicator — elapsed counter materializes after 3s so
+  // quick tools stay visually compact while long-running ones (execute,
+  // generate_image, etc.) signal that work is still in flight. Applied to
+  // every tool — previous gate on `figma_screenshot` is removed.
+  if (typeof StatusStrip !== 'undefined' && StatusStrip.attachElapsedTimer) {
+    StatusStrip.attachElapsedTimer(card);
   }
   tab.currentAssistantBubble.appendChild(card);
   scrollToBottom();
@@ -557,7 +550,7 @@ function completeToolCard(tab, toolCallId, success) {
     spinner.dataset.testid = 'tool-status';
     spinner.textContent = success ? '\u2713' : '\u2717'; // ✓ / ✗ via textContent
   }
-  // Clear screenshot elapsed timer
+  // Clear elapsed timer (applied to every tool card)
   if (card._elapsedTimer) {
     clearInterval(card._elapsedTimer);
     card._elapsedTimer = null;
@@ -796,6 +789,23 @@ if (typeof window.api?.__testFigmaExecute === 'function') {
   };
 }
 
+// Read-only test introspection hooks used by tests/e2e/* specs to reach
+// the renderer-internal tabs Map. No writer API surface — getters only.
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, '__bottegaTabs', {
+    get() {
+      return tabs;
+    },
+    configurable: true,
+  });
+  Object.defineProperty(window, '__bottegaActiveTabId', {
+    get() {
+      return activeTabId;
+    },
+    configurable: true,
+  });
+}
+
 // Listen for reset-with-clear IPC to clear chat on session reset
 window.api.onChatCleared?.((slotId) => {
   const tab = tabs.get(slotId);
@@ -948,36 +958,172 @@ inputField.addEventListener('input', () => {
 
 // ── API event handlers ───────────────────
 
-// ── Thinking indicator ────────────────────
+// ── Status strip ──────────────────────────
+// tab.status holds every field tied to the live status indicator so the
+// whole thing tears down in one step. Lifecycle ends on agent:end or tab
+// close. Stuck-bubble guards in session-events.ts + the isStreaming check
+// below keep stale events from re-creating the strip.
 
-function showThinkingIndicator(tab) {
-  if (tab.thinkingBubble) return;
-  tab.thinkingBubble = document.createElement('div');
-  tab.thinkingBubble.className = 'thinking-bubble';
-  for (let i = 0; i < 3; i++) {
-    const dot = document.createElement('span');
-    dot.className = 'thinking-dot';
-    tab.thinkingBubble.appendChild(dot);
-  }
-  tab.chatContainer.appendChild(tab.thinkingBubble);
+function ensureStatusStrip(tab) {
+  if (tab.status) return tab.status.el;
+  const el = document.createElement('div');
+  el.className = 'agent-status-strip';
+  el.dataset.testid = 'agent-status-strip';
+  el.dataset.kind = 'working';
+  const dot = document.createElement('span');
+  dot.className = 'agent-status-dot';
+  const labelEl = document.createElement('span');
+  labelEl.className = 'agent-status-label';
+  labelEl.dataset.testid = 'agent-status-label';
+  labelEl.textContent = 'Working';
+  const elapsedEl = document.createElement('span');
+  elapsedEl.className = 'agent-status-elapsed';
+  elapsedEl.dataset.testid = 'agent-status-elapsed';
+  elapsedEl.textContent = '0s';
+  el.appendChild(dot);
+  el.appendChild(labelEl);
+  el.appendChild(elapsedEl);
+  tab.chatContainer.appendChild(el);
+  const status = {
+    el,
+    labelEl,
+    elapsedEl,
+    state: {},
+    kind: 'working',
+    startedAt: Date.now(),
+    stalled: false,
+    timer: null,
+  };
+  status.timer = setInterval(() => {
+    if (!tab.status) return;
+    const ms = Date.now() - tab.status.startedAt;
+    tab.status.elapsedEl.textContent = StatusStrip.formatElapsedSec(tab.status.startedAt);
+    const shouldStall = !!StatusStrip.computeStallClass(tab.status.kind, ms);
+    if (shouldStall !== tab.status.stalled) {
+      tab.status.el.classList.toggle('agent-status-stall', shouldStall);
+      tab.status.stalled = shouldStall;
+    }
+  }, 1000);
+  tab.status = status;
   scrollToBottom();
+  return el;
 }
 
-function removeThinkingIndicator(tab) {
-  if (tab.thinkingBubble) {
-    tab.thinkingBubble.remove();
-    tab.thinkingBubble = null;
+function setStatusPhase(tab, patch) {
+  if (!tab.isStreaming) return;
+  ensureStatusStrip(tab);
+  const s = tab.status;
+  Object.assign(s.state, patch || {});
+  const { label, kind } = StatusStrip.pickLabel(s.state);
+  if (s.labelEl.textContent !== label) s.labelEl.textContent = label;
+  if (kind !== s.kind) {
+    s.kind = kind;
+    s.startedAt = Date.now();
+    if (s.stalled) {
+      s.el.classList.remove('agent-status-stall');
+      s.stalled = false;
+    }
+    s.elapsedEl.textContent = '0s';
+    s.el.dataset.kind = kind;
   }
+}
+
+function teardownStatusStrip(tab) {
+  if (!tab.status) return;
+  clearInterval(tab.status.timer);
+  tab.status.el.remove();
+  tab.status = null;
+}
+
+// ── Thinking transcript ───────────────────
+// Collapsible <details> pinned above .message-content (renderMarkdown on
+// agent:end rewrites that child's innerHTML and would wipe us otherwise).
+// Debounced 50ms to absorb ~100 tok/s bursts; capped at MAX_CHARS → tail
+// slice of KEEP_CHARS to bound DOM size on long sessions.
+
+const THINKING_TRANSCRIPT_MAX_CHARS = 512 * 1024;
+const THINKING_TRANSCRIPT_KEEP_CHARS = 256 * 1024;
+
+function ensureThinkingTranscript(tab) {
+  if (tab.thinking) return tab.thinking.el;
+  if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
+  const el = document.createElement('details');
+  el.className = 'thinking-transcript';
+  el.dataset.testid = 'thinking-transcript';
+  const summary = document.createElement('summary');
+  summary.className = 'thinking-transcript-summary';
+  summary.textContent = 'Show thinking';
+  const contentEl = document.createElement('div');
+  contentEl.className = 'thinking-transcript-content';
+  contentEl.dataset.testid = 'thinking-transcript-content';
+  el.appendChild(summary);
+  el.appendChild(contentEl);
+  tab.currentAssistantBubble.insertBefore(el, tab.currentAssistantBubble.firstChild);
+  const buffer = StatusStrip.createThinkingBuffer({
+    flushMs: 50,
+    onFlush: (payload) => {
+      if (!tab.thinking) return;
+      tab.thinking.contentEl.textContent = StatusStrip.capAppendText(
+        tab.thinking.contentEl.textContent,
+        payload,
+        THINKING_TRANSCRIPT_MAX_CHARS,
+        THINKING_TRANSCRIPT_KEEP_CHARS,
+      );
+    },
+  });
+  tab.thinking = { el, contentEl, buffer };
+  scrollToBottom();
+  return el;
+}
+
+function appendThinkingDelta(tab, text) {
+  if (text == null || text === '') return;
+  ensureThinkingTranscript(tab);
+  tab.thinking.buffer.append(text);
+}
+
+function teardownThinking(tab) {
+  if (!tab.thinking) return;
+  tab.thinking.buffer.flushNow();
+  tab.thinking.buffer.dispose();
+  tab.thinking = null;
 }
 
 window.api.onTextDelta((slotId, text) => withTab(slotId, (tab) => appendToAssistant(tab, text)));
-window.api.onThinking((slotId, _text) =>
+window.api.onThinking((slotId, text) =>
   withTab(slotId, (tab) => {
     // Defense in depth: drop late thinking events that arrive after the turn
     // completed. Pi SDK post-judge stragglers would otherwise re-create the
     // bubble with no subsequent agent:end to clear it (stuck-bubble regression).
     if (!tab.isStreaming) return;
-    showThinkingIndicator(tab);
+    setStatusPhase(tab, { thinking: true });
+    appendThinkingDelta(tab, text);
+  }),
+);
+
+// Status strip signals for judge phases. Complements the inline judge card
+// (app-subagent-cards.js) — the strip is the global activity indicator
+// while the inline card records verdicts in the message history.
+window.api.onJudgeRunning((slotId) =>
+  withTab(slotId, (tab) => {
+    if (!tab.isStreaming) return;
+    setStatusPhase(tab, { judging: true, thinking: false });
+  }),
+);
+window.api.onJudgeRetryStart((slotId, attempt, max) =>
+  withTab(slotId, (tab) => {
+    if (!tab.isStreaming) return;
+    setStatusPhase(tab, { retrying: { attempt, max }, judging: false });
+  }),
+);
+window.api.onJudgeVerdict((slotId, verdict /* , attempt, max */) =>
+  withTab(slotId, (tab) => {
+    if (!tab.isStreaming) return;
+    // PASS ends judging; FAIL may trigger another round — defer to
+    // onJudgeRetryStart for label change, just drop the judging flag.
+    if (verdict?.verdict === 'PASS') {
+      setStatusPhase(tab, { judging: false });
+    }
   }),
 );
 window.api.onToolStart((slotId, toolName, toolCallId) =>
@@ -1037,7 +1183,8 @@ window.api.onImageGenError?.((slotId, toolName, error) => {
 window.api.onAgentEnd((slotId) => {
   const tab = tabs.get(slotId);
   if (!tab) return;
-  removeThinkingIndicator(tab);
+  teardownStatusStrip(tab);
+  teardownThinking(tab);
   // UX-007: Clear judge timeout + running indicator if no verdict arrived
   clearJudgeIndicator(tab);
   // Sweep stuck tool-card spinners: any tool card still showing a spinner
@@ -1301,8 +1448,28 @@ window.api.onTabRemoved((slotId) => {
     else activeTabId = null;
   }
   const removed = tabs.get(slotId);
-  if (removed?.chatContainer.parentNode) {
-    removed.chatContainer.parentNode.removeChild(removed.chatContainer);
+  if (removed) {
+    // Tear down per-tab timers so closing a tab mid-turn doesn't leak the
+    // 1Hz status interval, the thinking debounce timeout, or tool-card
+    // elapsed intervals that normally clear only on agent:end.
+    teardownStatusStrip(removed);
+    teardownThinking(removed);
+    clearJudgeIndicator(removed);
+    if (removed.chatContainer) {
+      for (const card of removed.chatContainer.querySelectorAll('.tool-card')) {
+        if (card._elapsedTimer) {
+          clearInterval(card._elapsedTimer);
+          card._elapsedTimer = null;
+        }
+        if (card._elapsedShowTimeout) {
+          clearTimeout(card._elapsedShowTimeout);
+          card._elapsedShowTimeout = null;
+        }
+      }
+    }
+    if (removed.chatContainer?.parentNode) {
+      removed.chatContainer.parentNode.removeChild(removed.chatContainer);
+    }
   }
   tabs.delete(slotId);
   renderTabBar();

@@ -108,35 +108,11 @@ function createJudgeVerdictCard(tab, verdict, attempt, maxAttempts) {
 }
 
 window.api.onSubagentStatus((slotId, data) => withTab(slotId, (tab) => updateBatchRow(tab, data)));
-window.api.onJudgeRunning((slotId) =>
-  withTab(slotId, (tab) => {
-    // Guard: clear any existing indicator before creating a new one (prevents stacking)
-    clearJudgeIndicator(tab);
-    if (!tab.currentAssistantBubble) tab.currentAssistantBubble = createAssistantBubble(tab);
-    const indicator = document.createElement('div');
-    indicator.className = 'judge-running-indicator';
-    const spinner = document.createElement('span');
-    spinner.className = 'judge-spinner';
-    indicator.appendChild(spinner);
-    indicator.appendChild(document.createTextNode(' Quality check running\u2026'));
-    tab.currentAssistantBubble.appendChild(indicator);
-    tab._judgeRunningIndicator = indicator;
-    // UX-007: Auto-dismiss spinner after timeout to avoid indefinite "running" state
-    tab._judgeRunningTimeout = setTimeout(() => {
-      if (tab._judgeRunningIndicator) {
-        tab._judgeRunningIndicator.textContent = 'Quality check timed out';
-        tab._judgeRunningIndicator.classList.add('judge-timeout');
-        tab._judgeRunningIndicator = null;
-      }
-    }, JUDGE_TIMEOUT_MS);
-  }),
-);
+// Live "quality check" signal now lives on the status strip in app.js. The
+// verdict card below still records each attempt in message history; its
+// retry-start event stays unhandled here because the previous verdict card
+// already shows the FAIL result and overwriting its footer would erase the
+// attempt number.
 window.api.onJudgeVerdict((slotId, verdict, attempt, max) =>
   withTab(slotId, (tab) => createJudgeVerdictCard(tab, verdict, attempt, max)),
-);
-window.api.onJudgeRetryStart((slotId, _attempt, _max) =>
-  withTab(slotId, (_tab) => {
-    // No-op: the previous verdict card already shows the FAIL result.
-    // Overwriting its footer would erase the historical attempt number.
-  }),
 );
