@@ -40,6 +40,7 @@ const WS_CLOSE_VERSION_MISMATCH = 4001;
  * The bridge (figma-desktop-bridge/ui.html) hardcodes the same values —
  * keep them aligned or the server and client disagree on stall detection.
  */
+export const WS_FAST_RPC_TIMEOUT_MS = 5_000;
 export const WS_COMMAND_DEFAULT_TIMEOUT_MS = 15_000;
 export const WS_STALL_DETECTION_MS = 30_000;
 export const WS_REFRESH_VARIABLES_TIMEOUT_MS = 300_000;

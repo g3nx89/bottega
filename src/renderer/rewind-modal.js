@@ -120,7 +120,26 @@
       undoTimerId: null,
       toastTimerId: null,
       apiOverrides: null,
-      bindGuard: (window.createGenerationGuard || (() => ({ advance: () => 0, isCurrent: () => true })))(),
+      bindGuard: (() => {
+        if (window.createGenerationGuard) return window.createGenerationGuard();
+        // Fallback: preserve supersede semantics so stale writes are still
+        // dropped even if generation-guard.js failed to load. Returning
+        // `isCurrent: () => true` here would silently defeat the race guard
+        // — the very bug this module was refactored to prevent.
+        let n = 0;
+        return {
+          advance() {
+            n += 1;
+            return n;
+          },
+          isCurrent(gen) {
+            return gen === n;
+          },
+          value() {
+            return n;
+          },
+        };
+      })(),
       /** Pruning notices queued for files the user wasn't viewing when they fired. */
       pendingPruneByFile: new Map(),
     };

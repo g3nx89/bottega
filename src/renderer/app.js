@@ -1456,6 +1456,10 @@ document.getElementById('plugin-setup-dismiss')?.addEventListener('click', () =>
 window.api.onTabCreated((slotInfo) => {
   const tab = createTabState(slotInfo);
   tabs.set(tab.id, tab);
+  // Advance this tab's generation guard so any stale callback targeting the
+  // same slotId (e.g. from a reused slot id after a slot recycle) is
+  // superseded before switchToTab fires off its async chain.
+  getTabGuard(tab.id).advance();
   switchToTab(tab.id);
   renderTabBar();
 });
@@ -1502,6 +1506,13 @@ window.api.onTabRemoved((slotId) => {
 window.api.onTabUpdated((slotInfo) => {
   const tab = tabs.get(slotInfo.id);
   if (tab) {
+    // Advance the tab's generation so any in-flight async callback bound to
+    // the previous state (model caps, rewind summaries) is dropped before we
+    // mutate tab.fileKey/tab.modelConfig. syncEffortToTab and
+    // rewindController.bindActiveFileKey already advance guards internally,
+    // but the direct property writes here (tab.fileKey/fileName/isConnected)
+    // were otherwise observable from older async chains.
+    getTabGuard(slotInfo.id).advance();
     tab.isConnected = slotInfo.isConnected;
     tab.fileKey = slotInfo.fileKey;
     tab.fileName = slotInfo.fileName;

@@ -13,6 +13,7 @@ import { createChildLogger } from './logger.js';
 import type { TreeNode } from './types.js';
 import {
   type FigmaWebSocketServer,
+  WS_FAST_RPC_TIMEOUT_MS,
   WS_REFRESH_VARIABLES_TIMEOUT_MS,
   WS_STALL_DETECTION_MS,
 } from './websocket-server.js';
@@ -221,7 +222,7 @@ export class WebSocketConnector implements IFigmaConnector {
     return this.wsServer.sendCommand(
       'SET_LAYOUT_SIZING',
       { nodeId, layoutSizingHorizontal: horizontal, layoutSizingVertical: vertical },
-      5000,
+      WS_FAST_RPC_TIMEOUT_MS,
     );
   }
 
@@ -282,7 +283,7 @@ export class WebSocketConnector implements IFigmaConnector {
   async getNodeData(nodeId: string, fields?: NodeDataField[]): Promise<Record<string, unknown>> {
     const params: Record<string, unknown> = { nodeId };
     if (fields) params.fields = fields;
-    const result = await this.wsServer.sendCommand('GET_NODE_DATA', params, 5000);
+    const result = await this.wsServer.sendCommand('GET_NODE_DATA', params, WS_FAST_RPC_TIMEOUT_MS);
     return result && typeof result === 'object' ? (result as Record<string, unknown>) : {};
   }
 
@@ -382,7 +383,7 @@ export class WebSocketConnector implements IFigmaConnector {
   }
 
   async getAnnotationCategories(): Promise<any> {
-    return this.wsServer.sendCommand('GET_ANNOTATION_CATEGORIES', {}, 5000);
+    return this.wsServer.sendCommand('GET_ANNOTATION_CATEGORIES', {}, WS_FAST_RPC_TIMEOUT_MS);
   }
 
   // Batch operations (60s timeout — progress streaming resets if needed)
@@ -436,10 +437,10 @@ export class WebSocketConnector implements IFigmaConnector {
   }
 
   async setOpacity(nodeId: string, opacity: number): Promise<any> {
-    return this.wsServer.sendCommand('SET_OPACITY', { nodeId, opacity }, 5000);
+    return this.wsServer.sendCommand('SET_OPACITY', { nodeId, opacity }, WS_FAST_RPC_TIMEOUT_MS);
   }
 
   async setCornerRadius(nodeId: string, params: any): Promise<any> {
-    return this.wsServer.sendCommand('SET_CORNER_RADIUS', { nodeId, ...params }, 5000);
+    return this.wsServer.sendCommand('SET_CORNER_RADIUS', { nodeId, ...params }, WS_FAST_RPC_TIMEOUT_MS);
   }
 }
