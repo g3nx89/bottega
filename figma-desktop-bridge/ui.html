@@ -113,6 +113,17 @@
 
   <script>
     // ============================================================================
+    // TIMEOUT CONSTANTS
+    // MUST stay aligned with src/figma/websocket-server.ts exports
+    // (WS_COMMAND_DEFAULT_TIMEOUT_MS, WS_STALL_DETECTION_MS,
+    // WS_REFRESH_VARIABLES_TIMEOUT_MS). Drift causes asymmetric stall
+    // detection between the server and this bridge.
+    // ============================================================================
+    var WS_COMMAND_DEFAULT_TIMEOUT_MS = 15000;
+    var WS_STALL_DETECTION_MS = 30000;
+    var WS_REFRESH_VARIABLES_TIMEOUT_MS = 300000;
+
+    // ============================================================================
     // GLOBAL STATE - Data storage accessible by the WebSocket bridge
     // ============================================================================
     window.__figmaVariablesData = null;
@@ -138,7 +149,7 @@
     // COMMAND INFRASTRUCTURE - Generic plugin command sender
     // ============================================================================
     window.sendPluginCommand = (type, params, timeoutMs) => {
-      timeoutMs = timeoutMs || 15000;
+      timeoutMs = timeoutMs || WS_COMMAND_DEFAULT_TIMEOUT_MS;
       var wsId = window.__currentWsId; // Capture WS-side ID if called from WS handler
       return new Promise((resolve, reject) => {
         const requestId = type.toLowerCase() + '_' + (++requestIdCounter) + '_' + Date.now();
@@ -232,7 +243,7 @@
     };
 
     window.refreshVariables = () => {
-      return window.sendPluginCommand('REFRESH_VARIABLES', {}, 300000)
+      return window.sendPluginCommand('REFRESH_VARIABLES', {}, WS_REFRESH_VARIABLES_TIMEOUT_MS)
         .catch(function(err) { return { success: false, error: err.message || String(err) }; });
     };
 
@@ -241,7 +252,7 @@
     // ============================================================================
 
     window.getLocalComponents = () => {
-      return window.sendPluginCommand('GET_LOCAL_COMPONENTS', {}, 300000)
+      return window.sendPluginCommand('GET_LOCAL_COMPONENTS', {}, WS_REFRESH_VARIABLES_TIMEOUT_MS)
         .catch(function(err) { return { success: false, error: err.message || String(err) }; });
     };
 
@@ -411,7 +422,7 @@
         if (options.format) params.format = options.format;  // PNG, JPG, SVG
         if (options.scale) params.scale = options.scale;      // 1, 2, 4, etc.
       }
-      return window.sendPluginCommand('CAPTURE_SCREENSHOT', params, 30000)
+      return window.sendPluginCommand('CAPTURE_SCREENSHOT', params, WS_STALL_DETECTION_MS)
         .catch(function(err) { return { success: false, error: err.message || String(err) }; });
     };
 
@@ -464,7 +475,7 @@
         if (options.y !== undefined) params.y = options.y;
         if (options.parentId) params.parentId = options.parentId;
       }
-      return window.sendPluginCommand('CREATE_FROM_JSX', params, 30000)
+      return window.sendPluginCommand('CREATE_FROM_JSX', params, WS_STALL_DETECTION_MS)
         .catch(function(err) { return { success: false, error: err.message || String(err) }; });
     };
 
@@ -486,12 +497,12 @@
 
     // Deep component extraction & analysis
     window.deepGetComponent = (nodeId, depth) => {
-      return window.sendPluginCommand('DEEP_GET_COMPONENT', { nodeId: nodeId, depth: depth || 10 }, 30000)
+      return window.sendPluginCommand('DEEP_GET_COMPONENT', { nodeId: nodeId, depth: depth || 10 }, WS_STALL_DETECTION_MS)
         .catch(function(err) { return { success: false, error: err.message || String(err) }; });
     };
 
     window.analyzeComponentSet = (nodeId) => {
-      return window.sendPluginCommand('ANALYZE_COMPONENT_SET', { nodeId: nodeId }, 30000)
+      return window.sendPluginCommand('ANALYZE_COMPONENT_SET', { nodeId: nodeId }, WS_STALL_DETECTION_MS)
         .catch(function(err) { return { success: false, error: err.message || String(err) }; });
     };
 

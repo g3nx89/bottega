@@ -6,6 +6,30 @@
 
 import type { TreeNode } from './types.js';
 
+export interface SetTextOptions {
+  fontFamily?: string;
+  fontStyle?: string;
+  fontSize?: number;
+  fontWeight?: string;
+  fontsToLoad?: Array<{ family: string; style: string }>;
+}
+
+export type NodeDataField =
+  | 'id'
+  | 'type'
+  | 'name'
+  | 'fills'
+  | 'strokes'
+  | 'text'
+  | 'position'
+  | 'parent'
+  | 'size'
+  | 'layoutSizing'
+  | 'constraints'
+  | 'opacity'
+  | 'cornerRadius'
+  | 'children';
+
 export interface IFigmaConnector {
   // Lifecycle
   initialize(): Promise<void>;
@@ -51,7 +75,8 @@ export interface IFigmaConnector {
   // Node manipulation
   resizeNode(nodeId: string, width: number, height: number, withConstraints?: boolean): Promise<any>;
   moveNode(nodeId: string, x: number, y: number): Promise<any>;
-  setNodeFills(nodeId: string, fills: any[]): Promise<any>;
+  setNodeFills(nodeId: string, fills: any[], preserveRaw?: boolean): Promise<any>;
+  setLayoutSizing(nodeId: string, horizontal: string | null, vertical: string | null): Promise<any>;
   setNodeStrokes(nodeId: string, strokes: any[], strokeWeight?: number): Promise<any>;
   setNodeOpacity(nodeId: string, opacity: number): Promise<any>;
   setNodeCornerRadius(nodeId: string, radius: number): Promise<any>;
@@ -59,8 +84,9 @@ export interface IFigmaConnector {
   deleteNode(nodeId: string): Promise<any>;
   renameNode(nodeId: string, newName: string): Promise<any>;
   flattenLayers(nodeId: string, maxDepth?: number): Promise<any>;
-  setTextContent(nodeId: string, characters: string, options?: any): Promise<any>;
+  setTextContent(nodeId: string, characters: string, options?: SetTextOptions): Promise<any>;
   createChildNode(parentId: string, nodeType: string, properties?: any): Promise<any>;
+  getNodeData(nodeId: string, fields?: NodeDataField[]): Promise<Record<string, unknown>>;
 
   // Screenshot & instance
   captureScreenshot(nodeId: string, options?: any): Promise<any>;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FigmaWebSocketServer } from '../../../src/figma/websocket-server.js';
+import { FigmaWebSocketServer, WS_STALL_DETECTION_MS } from '../../../src/figma/websocket-server.js';
 import { WsTestClient } from '../../helpers/ws-test-client.js';
 
 // Mock logger to suppress output
@@ -358,7 +358,7 @@ describe('FigmaWebSocketServer', () => {
     it('stop() cleans up all clients and rejects pending requests', async () => {
       await client.connect(port, 'abc123', 'Test File');
       // Don't register handler — command will be pending
-      const pendingPromise = server.sendCommand('SLOW_CMD', {}, 30000);
+      const pendingPromise = server.sendCommand('SLOW_CMD', {}, WS_STALL_DETECTION_MS);
 
       await server.stop();
 
@@ -618,10 +618,10 @@ describe('FigmaWebSocketServer', () => {
     }
 
     it('accepts client with matching pluginVersion', async () => {
-      await client.connect(port, 'abc123', 'Test File', 1);
+      await client.connect(port, 'abc123', 'Test File', 2);
       expect(server.isClientConnected()).toBe(true);
       const info = server.getConnectedFileInfo();
-      expect(info!.pluginVersion).toBe(1);
+      expect(info!.pluginVersion).toBe(2);
     });
 
     it('accepts client with newer pluginVersion', async () => {
@@ -720,7 +720,7 @@ describe('FigmaWebSocketServer', () => {
         await client.connect(port, 'file-G', 'Grace File');
         // Don't register a command handler — the command will stay pending
 
-        const cmdPromise = server.sendCommand('STUCK_CMD', {}, 30000);
+        const cmdPromise = server.sendCommand('STUCK_CMD', {}, WS_STALL_DETECTION_MS);
         // Attach catch immediately so the rejection is handled
         const rejectionResult = cmdPromise.catch((err: Error) => err.message);
 

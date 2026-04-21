@@ -33,6 +33,17 @@ export const REQUIRED_PLUGIN_VERSION = PLUGIN_PROTOCOL_VERSION;
 /** WebSocket close code for version-incompatible plugins (RFC 6455 private-use range 4000-4999). */
 const WS_CLOSE_VERSION_MISMATCH = 4001;
 
+/**
+ * Timeout constants for WebSocket command/response correlation.
+ *
+ * Invariant: COMMAND_DEFAULT < STALL_DETECTION < REFRESH_VARIABLES.
+ * The bridge (figma-desktop-bridge/ui.html) hardcodes the same values —
+ * keep them aligned or the server and client disagree on stall detection.
+ */
+export const WS_COMMAND_DEFAULT_TIMEOUT_MS = 15_000;
+export const WS_STALL_DETECTION_MS = 30_000;
+export const WS_REFRESH_VARIABLES_TIMEOUT_MS = 300_000;
+
 export interface WebSocketServerOptions {
   port: number;
   host?: string;
@@ -172,7 +183,7 @@ export class FigmaWebSocketServer extends EventEmitter {
               logger.warn('Pending WebSocket client timed out without sending FILE_INFO');
               ws.close(1000, 'File identification timeout');
             }
-          }, 30000);
+          }, WS_STALL_DETECTION_MS);
           this._pendingClients.set(ws, pendingTimeout);
 
           logger.info(
@@ -254,7 +265,7 @@ export class FigmaWebSocketServer extends EventEmitter {
               this.pendingRequests.delete(operationId);
               pending.reject(new Error(`Operation ${pending.method} timed out (no progress for 30s)`));
             }
-          }, 30000);
+          }, WS_STALL_DETECTION_MS);
           this.emit('operationProgress', message.data);
         }
         return;
@@ -514,7 +525,7 @@ export class FigmaWebSocketServer extends EventEmitter {
   sendCommand(
     method: string,
     params: Record<string, any> = {},
-    timeoutMs = 15000,
+    timeoutMs: number = WS_COMMAND_DEFAULT_TIMEOUT_MS,
     targetFileKey?: string,
   ): Promise<any> {
     return new Promise((resolve, reject) => {

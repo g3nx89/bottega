@@ -8,10 +8,14 @@
  * Data flow: Main Process ←WebSocket→ ui.html ←postMessage→ code.js ←figma.*→ Figma
  */
 
-import type { IFigmaConnector } from './figma-connector.js';
+import type { IFigmaConnector, NodeDataField, SetTextOptions } from './figma-connector.js';
 import { createChildLogger } from './logger.js';
 import type { TreeNode } from './types.js';
-import type { FigmaWebSocketServer } from './websocket-server.js';
+import {
+  type FigmaWebSocketServer,
+  WS_REFRESH_VARIABLES_TIMEOUT_MS,
+  WS_STALL_DETECTION_MS,
+} from './websocket-server.js';
 
 const logger = createChildLogger({ component: 'websocket-connector' });
 
@@ -67,7 +71,12 @@ export class WebSocketConnector implements IFigmaConnector {
         }
       })()
     `;
-    return this.wsServer.sendCommand('EXECUTE_CODE', { code, timeout: 30000 }, 32000, fileKey);
+    return this.wsServer.sendCommand(
+      'EXECUTE_CODE',
+      { code, timeout: WS_STALL_DETECTION_MS },
+      WS_STALL_DETECTION_MS + 2_000,
+      fileKey,
+    );
   }
 
   async executeCodeViaUI(code: string, timeoutMs = 5000): Promise<any> {
@@ -99,7 +108,7 @@ export class WebSocketConnector implements IFigmaConnector {
   }
 
   async refreshVariables(): Promise<any> {
-    return this.wsServer.sendCommand('REFRESH_VARIABLES', {}, 300000);
+    return this.wsServer.sendCommand('REFRESH_VARIABLES', {}, WS_REFRESH_VARIABLES_TIMEOUT_MS);
   }
 
   async renameVariable(variableId: string, newName: string): Promise<any> {
@@ -204,8 +213,16 @@ export class WebSocketConnector implements IFigmaConnector {
     return this.wsServer.sendCommand('MOVE_NODE', { nodeId, x, y });
   }
 
-  async setNodeFills(nodeId: string, fills: any[]): Promise<any> {
-    return this.wsServer.sendCommand('SET_NODE_FILLS', { nodeId, fills });
+  async setNodeFills(nodeId: string, fills: any[], preserveRaw = false): Promise<any> {
+    return this.wsServer.sendCommand('SET_NODE_FILLS', { nodeId, fills, preserveRaw });
+  }
+
+  async setLayoutSizing(nodeId: string, horizontal: string | null, vertical: string | null): Promise<any> {
+    return this.wsServer.sendCommand(
+      'SET_LAYOUT_SIZING',
+      { nodeId, layoutSizingHorizontal: horizontal, layoutSizingVertical: vertical },
+      5000,
+    );
   }
 
   async setNodeStrokes(nodeId: string, strokes: any[], strokeWeight?: number): Promise<any> {
@@ -238,18 +255,35 @@ export class WebSocketConnector implements IFigmaConnector {
     return this.wsServer.sendCommand('FLATTEN_LAYERS', { nodeId, maxDepth });
   }
 
-  async setTextContent(nodeId: string, characters: string, options?: any): Promise<any> {
-    const params: any = { nodeId, text: characters };
+  async setTextContent(nodeId: string, characters: string, options?: SetTextOptions): Promise<any> {
+    const params: {
+      nodeId: string;
+      text: string;
+      fontSize?: number;
+      fontWeight?: string;
+      fontFamily?: string;
+      fontStyle?: string;
+      fontsToLoad?: Array<{ family: string; style: string }>;
+    } = { nodeId, text: characters };
     if (options) {
       if (options.fontSize) params.fontSize = options.fontSize;
       if (options.fontWeight) params.fontWeight = options.fontWeight;
       if (options.fontFamily) params.fontFamily = options.fontFamily;
+      if (options.fontStyle) params.fontStyle = options.fontStyle;
+      if (options.fontsToLoad) params.fontsToLoad = options.fontsToLoad;
     }
     return this.wsServer.sendCommand('SET_TEXT_CONTENT', params);
   }
 
   async createChildNode(parentId: string, nodeType: string, properties?: any): Promise<any> {
     return this.wsServer.sendCommand('CREATE_CHILD_NODE', { parentId, nodeType, properties: properties || {} });
+  }
+
+  async getNodeData(nodeId: string, fields?: NodeDataField[]): Promise<Record<string, unknown>> {
+    const params: Record<string, unknown> = { nodeId };
+    if (fields) params.fields = fields;
+    const result = await this.wsServer.sendCommand('GET_NODE_DATA', params, 5000);
+    return result && typeof result === 'object' ? (result as Record<string, unknown>) : {};
   }
 
   // ============================================================================
@@ -275,7 +309,7 @@ export class WebSocketConnector implements IFigmaConnector {
   async setImageFill(nodeIds: string[], imageData: string, scaleMode = 'FILL'): Promise<any> {
     // 30s leaves enough turn budget for the agent to generate a user-facing response
     // when the image upload is slow (UX-005 / P-006). Was 60s.
-    return this.wsServer.sendCommand('SET_IMAGE_FILL', { nodeIds, imageData, scaleMode }, 30000);
+    return this.wsServer.sendCommand('SET_IMAGE_FILL', { nodeIds, imageData, scaleMode }, WS_STALL_DETECTION_MS);
   }
 
   // ============================================================================
@@ -316,7 +350,7 @@ export class WebSocketConnector implements IFigmaConnector {
     color: string,
     opts?: { x?: number; y?: number; parentId?: string },
   ): Promise<{ nodeId: string }> {
-    return this.wsServer.sendCommand('CREATE_ICON', { svg, size, color, ...opts }, 30000);
+    return this.wsServer.sendCommand('CREATE_ICON', { svg, size, color, ...opts }, WS_STALL_DETECTION_MS);
   }
 
   async bindVariable(nodeId: string, variableName: string, property: 'fill' | 'stroke'): Promise<void> {
@@ -328,11 +362,11 @@ export class WebSocketConnector implements IFigmaConnector {
   // ============================================================================
 
   async deepGetComponent(nodeId: string, depth?: number): Promise<any> {
-    return this.wsServer.sendCommand('DEEP_GET_COMPONENT', { nodeId, depth }, 30000);
+    return this.wsServer.sendCommand('DEEP_GET_COMPONENT', { nodeId, depth }, WS_STALL_DETECTION_MS);
   }
 
   async analyzeComponentSet(nodeId: string): Promise<any> {
-    return this.wsServer.sendCommand('ANALYZE_COMPONENT_SET', { nodeId }, 30000);
+    return this.wsServer.sendCommand('ANALYZE_COMPONENT_SET', { nodeId }, WS_STALL_DETECTION_MS);
   }
 
   // ============================================================================
