@@ -114,6 +114,10 @@
             <span id="bar-judge-icon" aria-hidden="true">&#x1F6E1;</span>
             <span id="bar-judge-label">Judge</span>
           </button>
+          <button id="rewind-chip" class="rewind-chip hidden" title="Checkpoints" aria-label="Open checkpoints">
+            <span class="rewind-icon" aria-hidden="true">&#9670;</span>
+            <span id="rewind-count">0</span>
+          </button>
         </div>
         <button id="reset-session-btn" class="toolbar-chip reset-chip" title="New chat — reset session">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -353,6 +357,20 @@
       </div>
     </div>
 
+    <div id="rewind-overlay" class="rewind-overlay hidden" role="dialog" aria-labelledby="rewind-title" aria-hidden="true">
+      <div class="rewind-panel">
+        <header class="rewind-header">
+          <h2 id="rewind-title">Checkpoints</h2>
+          <button class="rewind-close" aria-label="Close">&times;</button>
+        </header>
+        <div class="rewind-banner hidden" id="rewind-banner" role="status"></div>
+        <ul id="rewind-list" class="rewind-list"></ul>
+        <footer class="rewind-footer">
+          <button id="rewind-undo-btn" class="rewind-undo hidden">&#x21A9; Undo last rewind</button>
+        </footer>
+      </div>
+    </div>
+
     <!-- Update available modal -->
     <div id="update-modal" class="modal-overlay hidden">
       <div class="modal-panel">
@@ -415,8 +433,10 @@
       </div>
     </div>
 
+  <script src="generation-guard.js"></script>
   <script src="status-strip.js"></script>
   <div id="guardrails-modal-root" class="gr-modal-hidden" role="dialog" aria-modal="true" aria-hidden="true"></div>
+  <script src="rewind-modal.js"></script>
   <script src="app.js"></script>
   <script src="app-update.js"></script>
   <script src="app-feedback.js"></script>

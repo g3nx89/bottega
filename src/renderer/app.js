@@ -34,6 +34,21 @@ const appVersion = document.getElementById('app-version');
 const tabList = document.getElementById('tab-list');
 const tabAddBtn = document.getElementById('tab-add-btn');
 const promptQueueEl = document.getElementById('prompt-queue');
+const rewindController = window.rewindController || null;
+
+// Per-tab generation guards for fire-and-forget async writes. Each tab event
+// (create/update/switch) advances the tab's generation; async callbacks that
+// resolve after a newer event fired check isCurrent(gen) and bail instead of
+// overwriting fresher state. Modeled on captureTurnGuard() in session-events.ts.
+const _tabGuards = new Map(); // Map<slotId, GenerationGuard>
+function getTabGuard(slotId) {
+  let guard = _tabGuards.get(slotId);
+  if (!guard) {
+    guard = window.createGenerationGuard();
+    _tabGuards.set(slotId, guard);
+  }
+  return guard;
+}
 
 // Show app version in titlebar + check for post-update "What's New"
 window.api.getAppVersion().then((v) => {
@@ -192,6 +207,7 @@ function switchToTab(slotId) {
     renderTaskPanel(newTab);
     syncBarToTab(newTab);
     updateContextBar(newTab.lastContextTokens);
+    void rewindController?.bindActiveFileKey(newTab.fileKey || null);
     scrollToBottom();
   }
 }
@@ -278,11 +294,15 @@ function syncEffortToTab(tab) {
   if (level && barEffortLabel) barEffortLabel.textContent = level.label;
   if (!tab?.id || typeof window.api.getThinkingCapabilities !== 'function') return;
 
+  const guard = getTabGuard(tab.id);
+  const gen = guard.advance();
   window.api
     .getThinkingCapabilities(tab.id)
     .then(async (caps) => {
+      // Discard stale caps: a newer syncEffortToTab for this tab (e.g. rapid
+      // model switch) or a tab switch away should skip the chip/caps write.
+      if (!guard.isCurrent(gen) || tab.id !== activeTabId) return;
       _effortCapsCache.set(tab.id, caps);
-      if (tab.id !== activeTabId) return;
       applyEffortCapsToChip(caps);
       await reconcileEffortCaps(tab, caps);
     })
@@ -1445,7 +1465,10 @@ window.api.onTabRemoved((slotId) => {
   if (activeTabId === slotId) {
     const remaining = [...tabs.keys()].filter((id) => id !== slotId);
     if (remaining.length > 0) switchToTab(remaining[0]);
-    else activeTabId = null;
+    else {
+      activeTabId = null;
+      void rewindController?.bindActiveFileKey(null);
+    }
   }
   const removed = tabs.get(slotId);
   if (removed) {
@@ -1472,6 +1495,7 @@ window.api.onTabRemoved((slotId) => {
     }
   }
   tabs.delete(slotId);
+  _tabGuards.delete(slotId);
   renderTabBar();
 });
 
@@ -1479,6 +1503,7 @@ window.api.onTabUpdated((slotInfo) => {
   const tab = tabs.get(slotInfo.id);
   if (tab) {
     tab.isConnected = slotInfo.isConnected;
+    tab.fileKey = slotInfo.fileKey;
     tab.fileName = slotInfo.fileName;
     // Keep the renderer's modelConfig in sync with the main process. Without
     // this, the toolbar picker reads stale values and the dropdown checkmark
@@ -1490,8 +1515,25 @@ window.api.onTabUpdated((slotInfo) => {
       // Model switch recreates the session — effort capabilities may have
       // changed (different xhigh support, different default). Re-reconcile.
       syncEffortToTab(tab);
+      void rewindController?.bindActiveFileKey(tab.fileKey || null);
     }
   }
+});
+
+window.api.onRewindCheckpointAdded?.((fileKey) => {
+  rewindController?.handleCheckpointAdded(fileKey);
+});
+
+window.api.onRewindPluginOutdated?.((fileKey) => {
+  rewindController?.handlePluginOutdated(fileKey);
+});
+
+window.api.onRewindRestored?.((fileKey, result) => {
+  rewindController?.handleRestored(fileKey, result);
+});
+
+window.api.onRewindCheckpointPruned?.((fileKey, payload) => {
+  rewindController?.handleCheckpointPruned(fileKey, payload);
 });
 
 // Queue updates
@@ -1541,6 +1583,8 @@ tabAddBtn.addEventListener('click', () => {
         if (messages?.length > 0) restoreChat(tab, messages);
       }),
     );
+  } else {
+    void rewindController?.bindActiveFileKey(null);
   }
   renderTabBar();
 })();

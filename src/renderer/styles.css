@@ -1837,6 +1837,44 @@ body {
   color: var(--accent);
 }
 
+.rewind-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.rewind-chip:hover {
+  background: rgba(162, 89, 255, 0.18);
+  color: var(--text);
+}
+
+.rewind-chip.hidden {
+  display: none;
+}
+
+.rewind-chip.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.rewind-icon {
+  font-size: 10px;
+}
+
 /* Judge toggle chip */
 #bar-judge-btn.active {
   color: var(--accent);
@@ -2391,6 +2429,274 @@ body {
 .modal-btn.secondary {
   background: var(--surface-secondary);
   color: var(--text-secondary);
+}
+
+.rewind-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.rewind-overlay.hidden {
+  display: none;
+}
+
+.rewind-panel {
+  width: min(520px, calc(100vw - 32px));
+  min-width: min(420px, calc(100vw - 32px));
+  max-height: 70vh;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.rewind-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rewind-header h2 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.rewind-close,
+.rewind-undo,
+.rewind-restore {
+  font-family: var(--font);
+  -webkit-app-region: no-drag;
+}
+
+.rewind-close {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rewind-banner {
+  margin: 12px 16px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.rewind-banner.hidden {
+  display: none;
+}
+
+.rewind-banner.warning {
+  background: rgba(255, 69, 58, 0.12);
+  color: #ff9f94;
+}
+
+.rewind-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px 16px;
+  overflow-y: auto;
+}
+
+.rewind-item,
+.rewind-empty {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 82%, var(--surface-secondary));
+}
+
+.rewind-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 12px 14px;
+  transition:
+    border-color 0.12s ease,
+    transform 0.12s ease,
+    background 0.12s ease;
+}
+
+.rewind-item:hover,
+.rewind-item:focus {
+  outline: none;
+  border-color: rgba(162, 89, 255, 0.45);
+  background: rgba(162, 89, 255, 0.08);
+  transform: translateY(-1px);
+}
+
+.rewind-item.non-restorable {
+  opacity: 0.78;
+}
+
+.rewind-item-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.rewind-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.rewind-prompt {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rewind-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.rewind-badges span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.badge-non-restorable {
+  background: #ff453a;
+  color: #fff;
+}
+
+.badge-partial {
+  background: rgba(255, 159, 10, 0.16);
+  color: #ffb340;
+}
+
+.badge-restorable {
+  background: rgba(162, 89, 255, 0.14);
+  color: var(--accent);
+}
+
+.rewind-restore,
+.rewind-undo {
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.rewind-restore {
+  padding: 8px 12px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.rewind-restore:hover:not(:disabled),
+.rewind-undo:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.rewind-restore:disabled,
+.rewind-undo:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.rewind-empty {
+  padding: 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.rewind-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 16px 16px;
+}
+
+.rewind-undo {
+  padding: 7px 12px;
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.rewind-undo.hidden {
+  display: none;
+}
+
+.rewind-toast-host {
+  position: fixed;
+  right: 18px;
+  bottom: 88px;
+  z-index: 120;
+  pointer-events: none;
+}
+
+.rewind-toast {
+  min-width: 220px;
+  max-width: 320px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(28, 28, 30, 0.9);
+  color: #fff;
+  box-shadow: var(--shadow-md);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rewind-toast.success {
+  background: rgba(28, 118, 74, 0.92);
+}
+
+.rewind-toast.error {
+  background: rgba(176, 45, 31, 0.94);
+}
+
+.rewind-toast.info {
+  background: rgba(52, 96, 176, 0.92);
+}
+
+.rewind-toast.hidden {
+  display: none;
+}
+
+@media (max-width: 560px) {
+  .rewind-panel {
+    min-width: 0;
+    width: calc(100vw - 20px);
+  }
+
+  .rewind-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rewind-badges,
+  .rewind-footer {
+    justify-content: flex-start;
+  }
 }
 
 .modal-btn.secondary:hover {
