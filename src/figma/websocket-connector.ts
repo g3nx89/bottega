@@ -13,7 +13,10 @@ import { createChildLogger } from './logger.js';
 import type { TreeNode } from './types.js';
 import {
   type FigmaWebSocketServer,
+  WS_BATCH_TIMEOUT_MS,
   WS_FAST_RPC_TIMEOUT_MS,
+  WS_HEAVY_RPC_TIMEOUT_MS,
+  WS_MEDIUM_RPC_TIMEOUT_MS,
   WS_REFRESH_VARIABLES_TIMEOUT_MS,
   WS_STALL_DETECTION_MS,
 } from './websocket-server.js';
@@ -43,11 +46,15 @@ export class WebSocketConnector implements IFigmaConnector {
   // ============================================================================
 
   async executeInPluginContext<T = any>(code: string): Promise<T> {
-    return this.wsServer.sendCommand('EXECUTE_CODE', { code, timeout: 5000 }, 7000);
+    return this.wsServer.sendCommand(
+      'EXECUTE_CODE',
+      { code, timeout: WS_FAST_RPC_TIMEOUT_MS },
+      WS_FAST_RPC_TIMEOUT_MS + 2_000,
+    );
   }
 
   async getVariablesFromPluginUI(fileKey?: string): Promise<any> {
-    return this.wsServer.sendCommand('GET_VARIABLES_DATA', {}, 10000, fileKey);
+    return this.wsServer.sendCommand('GET_VARIABLES_DATA', {}, WS_MEDIUM_RPC_TIMEOUT_MS, fileKey);
   }
 
   async getVariables(fileKey?: string): Promise<any> {
@@ -80,8 +87,8 @@ export class WebSocketConnector implements IFigmaConnector {
     );
   }
 
-  async executeCodeViaUI(code: string, timeoutMs = 5000): Promise<any> {
-    const raw = await this.wsServer.sendCommand('EXECUTE_CODE', { code, timeout: timeoutMs }, timeoutMs + 2000);
+  async executeCodeViaUI(code: string, timeoutMs: number = WS_FAST_RPC_TIMEOUT_MS): Promise<any> {
+    const raw = await this.wsServer.sendCommand('EXECUTE_CODE', { code, timeout: timeoutMs }, timeoutMs + 2_000);
     // WS relay wraps responses in { success, result } — unwrap to return the actual plugin output
     return raw?.result !== undefined ? raw.result : raw;
   }
@@ -158,11 +165,11 @@ export class WebSocketConnector implements IFigmaConnector {
   // ============================================================================
 
   async getComponentFromPluginUI(nodeId: string): Promise<any> {
-    return this.wsServer.sendCommand('GET_COMPONENT', { nodeId }, 10000);
+    return this.wsServer.sendCommand('GET_COMPONENT', { nodeId }, WS_MEDIUM_RPC_TIMEOUT_MS);
   }
 
   async getLocalComponents(): Promise<any> {
-    return this.wsServer.sendCommand('GET_LOCAL_COMPONENTS', {}, 45000);
+    return this.wsServer.sendCommand('GET_LOCAL_COMPONENTS', {}, WS_HEAVY_RPC_TIMEOUT_MS);
   }
 
   async setNodeDescription(nodeId: string, description: string, descriptionMarkdown?: string): Promise<any> {
@@ -296,7 +303,7 @@ export class WebSocketConnector implements IFigmaConnector {
     if (options?.format) params.format = options.format;
     if (options?.scale) params.scale = options.scale;
     if (options?.maxDimension) params.maxDimension = options.maxDimension;
-    return this.wsServer.sendCommand('CAPTURE_SCREENSHOT', params, 45000);
+    return this.wsServer.sendCommand('CAPTURE_SCREENSHOT', params, WS_HEAVY_RPC_TIMEOUT_MS);
   }
 
   async setInstanceProperties(nodeId: string, properties: any): Promise<any> {
@@ -323,7 +330,7 @@ export class WebSocketConnector implements IFigmaConnector {
     if (rules) params.rules = rules;
     if (maxDepth !== undefined) params.maxDepth = maxDepth;
     if (maxFindings !== undefined) params.maxFindings = maxFindings;
-    return this.wsServer.sendCommand('LINT_DESIGN', params, 45000);
+    return this.wsServer.sendCommand('LINT_DESIGN', params, WS_HEAVY_RPC_TIMEOUT_MS);
   }
 
   // ============================================================================
@@ -342,7 +349,7 @@ export class WebSocketConnector implements IFigmaConnector {
     tree: TreeNode,
     opts?: { x?: number; y?: number; parentId?: string },
   ): Promise<{ nodeId: string; childIds: string[] }> {
-    return this.wsServer.sendCommand('CREATE_FROM_JSX', { tree, ...opts }, 60000);
+    return this.wsServer.sendCommand('CREATE_FROM_JSX', { tree, ...opts }, WS_BATCH_TIMEOUT_MS);
   }
 
   async createIcon(
@@ -355,7 +362,7 @@ export class WebSocketConnector implements IFigmaConnector {
   }
 
   async bindVariable(nodeId: string, variableName: string, property: 'fill' | 'stroke'): Promise<void> {
-    return this.wsServer.sendCommand('BIND_VARIABLE', { nodeId, variableName, property }, 10000);
+    return this.wsServer.sendCommand('BIND_VARIABLE', { nodeId, variableName, property }, WS_MEDIUM_RPC_TIMEOUT_MS);
   }
 
   // ============================================================================
@@ -375,11 +382,11 @@ export class WebSocketConnector implements IFigmaConnector {
   // ============================================================================
 
   async getAnnotations(nodeId: string, includeChildren?: boolean, depth?: number): Promise<any> {
-    return this.wsServer.sendCommand('GET_ANNOTATIONS', { nodeId, includeChildren, depth }, 10000);
+    return this.wsServer.sendCommand('GET_ANNOTATIONS', { nodeId, includeChildren, depth }, WS_MEDIUM_RPC_TIMEOUT_MS);
   }
 
   async setAnnotations(nodeId: string, annotations: any[], mode?: 'replace' | 'append'): Promise<any> {
-    return this.wsServer.sendCommand('SET_ANNOTATIONS', { nodeId, annotations, mode }, 10000);
+    return this.wsServer.sendCommand('SET_ANNOTATIONS', { nodeId, annotations, mode }, WS_MEDIUM_RPC_TIMEOUT_MS);
   }
 
   async getAnnotationCategories(): Promise<any> {
@@ -391,17 +398,17 @@ export class WebSocketConnector implements IFigmaConnector {
   async batchSetText(
     updates: Array<{ nodeId: string; text: string; fontFamily?: string; fontSize?: number }>,
   ): Promise<any> {
-    return this.wsServer.sendCommand('BATCH_SET_TEXT', { updates }, 60000);
+    return this.wsServer.sendCommand('BATCH_SET_TEXT', { updates }, WS_BATCH_TIMEOUT_MS);
   }
 
   async batchSetFills(updates: Array<{ nodeId: string; fills: any[] }>): Promise<any> {
-    return this.wsServer.sendCommand('BATCH_SET_FILLS', { updates }, 60000);
+    return this.wsServer.sendCommand('BATCH_SET_FILLS', { updates }, WS_BATCH_TIMEOUT_MS);
   }
 
   async batchTransform(
     updates: Array<{ nodeId: string; x?: number; y?: number; width?: number; height?: number }>,
   ): Promise<any> {
-    return this.wsServer.sendCommand('BATCH_TRANSFORM', { updates }, 60000);
+    return this.wsServer.sendCommand('BATCH_TRANSFORM', { updates }, WS_BATCH_TIMEOUT_MS);
   }
 
   // Scan/discovery (60s — progress streaming resets if needed)
@@ -411,29 +418,29 @@ export class WebSocketConnector implements IFigmaConnector {
     if (nodeId !== undefined) params.nodeId = nodeId;
     if (maxDepth !== undefined) params.maxDepth = maxDepth;
     if (maxResults !== undefined) params.maxResults = maxResults;
-    return this.wsServer.sendCommand('SCAN_TEXT_NODES', params, 60000);
+    return this.wsServer.sendCommand('SCAN_TEXT_NODES', params, WS_BATCH_TIMEOUT_MS);
   }
 
   // Layout
 
   async setAutoLayout(nodeId: string, params: any): Promise<any> {
-    return this.wsServer.sendCommand('SET_AUTO_LAYOUT', { nodeId, ...params }, 10000);
+    return this.wsServer.sendCommand('SET_AUTO_LAYOUT', { nodeId, ...params }, WS_MEDIUM_RPC_TIMEOUT_MS);
   }
 
   // Variant switching
 
   async setVariant(nodeId: string, variant: Record<string, string>): Promise<any> {
-    return this.wsServer.sendCommand('SET_VARIANT', { nodeId, variant }, 10000);
+    return this.wsServer.sendCommand('SET_VARIANT', { nodeId, variant }, WS_MEDIUM_RPC_TIMEOUT_MS);
   }
 
   // Granular styles
 
   async setTextStyle(nodeId: string, params: any): Promise<any> {
-    return this.wsServer.sendCommand('SET_TEXT_STYLE', { nodeId, ...params }, 10000);
+    return this.wsServer.sendCommand('SET_TEXT_STYLE', { nodeId, ...params }, WS_MEDIUM_RPC_TIMEOUT_MS);
   }
 
   async setEffects(nodeId: string, effects: any[]): Promise<any> {
-    return this.wsServer.sendCommand('SET_EFFECTS', { nodeId, effects }, 10000);
+    return this.wsServer.sendCommand('SET_EFFECTS', { nodeId, effects }, WS_MEDIUM_RPC_TIMEOUT_MS);
   }
 
   async setOpacity(nodeId: string, opacity: number): Promise<any> {

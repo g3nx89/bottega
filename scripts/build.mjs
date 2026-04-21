@@ -1,7 +1,16 @@
+import { spawnSync } from 'node:child_process'
 import { build } from 'esbuild'
 import { cpSync, mkdirSync, readFileSync } from 'fs'
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
+
+// Keep figma-desktop-bridge/ui.html constants in sync with the TS source of
+// truth (src/shared/plugin-protocol.ts + src/figma/websocket-server.ts). The
+// Figma plugin loads ui.html directly — no bundler — so literal numbers must
+// physically live in the HTML. We enforce alignment with a codegen step
+// rather than relying on drift tests alone.
+const sync = spawnSync('node', ['scripts/sync-bridge-constants.mjs'], { stdio: 'inherit' })
+if (sync.status !== 0) process.exit(sync.status ?? 1)
 
 const common = {
   bundle: true,

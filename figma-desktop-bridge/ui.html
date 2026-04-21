@@ -113,16 +113,21 @@
 
   <script>
     // ============================================================================
-    // TIMEOUT CONSTANTS
-    // MUST stay aligned with src/figma/websocket-server.ts exports
-    // (WS_COMMAND_DEFAULT_TIMEOUT_MS, WS_STALL_DETECTION_MS,
-    // WS_REFRESH_VARIABLES_TIMEOUT_MS). Drift causes asymmetric stall
-    // detection between the server and this bridge.
+    // PROTOCOL CONSTANTS — codegen block
+    // Authoritative source: src/shared/plugin-protocol.ts + src/figma/websocket-server.ts
+    // Regenerate with: `node scripts/sync-bridge-constants.mjs`
+    // CI fails if this block drifts (scripts/sync-bridge-constants.mjs --check).
+    // Do NOT edit by hand — changes inside the sentinel block are overwritten.
     // ============================================================================
+    /* SYNC:BEGIN protocol-constants */
     var WS_FAST_RPC_TIMEOUT_MS = 5000;
+    var WS_MEDIUM_RPC_TIMEOUT_MS = 10000;
     var WS_COMMAND_DEFAULT_TIMEOUT_MS = 15000;
     var WS_STALL_DETECTION_MS = 30000;
+    var WS_HEAVY_RPC_TIMEOUT_MS = 45000;
+    var WS_BATCH_TIMEOUT_MS = 60000;
     var WS_REFRESH_VARIABLES_TIMEOUT_MS = 300000;
+    /* SYNC:END protocol-constants */
 
     // ============================================================================
     // GLOBAL STATE - Data storage accessible by the WebSocket bridge
@@ -529,10 +534,11 @@
     (function() {
       // Fixed port for Bottega Bridge (distinct from figma-console-mcp 9223-9232)
       var WS_PORT = 9280;
-      // MUST match PLUGIN_PROTOCOL_VERSION in src/shared/plugin-protocol.ts.
-      // The build-time drift check in tests/unit/shared/plugin-protocol.test.ts
-      // fails the suite if these get out of sync.
+      // Codegen block — do NOT edit by hand.
+      // Regenerate with: `node scripts/sync-bridge-constants.mjs`.
+      /* SYNC:BEGIN plugin-version */
       var PLUGIN_VERSION = 2;
+    /* SYNC:END plugin-version */
 
       // Single-connection state: Bottega is a single-instance app on a fixed port.
       var activeConnections = []; // Array of { port, ws } (max 1 for Bottega)

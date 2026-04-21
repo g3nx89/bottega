@@ -41,8 +41,11 @@ const WS_CLOSE_VERSION_MISMATCH = 4001;
  * keep them aligned or the server and client disagree on stall detection.
  */
 export const WS_FAST_RPC_TIMEOUT_MS = 5_000;
+export const WS_MEDIUM_RPC_TIMEOUT_MS = 10_000;
 export const WS_COMMAND_DEFAULT_TIMEOUT_MS = 15_000;
 export const WS_STALL_DETECTION_MS = 30_000;
+export const WS_HEAVY_RPC_TIMEOUT_MS = 45_000;
+export const WS_BATCH_TIMEOUT_MS = 60_000;
 export const WS_REFRESH_VARIABLES_TIMEOUT_MS = 300_000;
 
 export interface WebSocketServerOptions {

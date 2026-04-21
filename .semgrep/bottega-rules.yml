@@ -7,3 +7,24 @@ rules:
     message: "Usa @ts-expect-error con commento invece di @ts-ignore"
     severity: ERROR
     languages: [typescript]
+
+  - id: no-magic-ws-timeout
+    patterns:
+      - pattern: $SERVER.sendCommand($METHOD, $PARAMS, $LITERAL, ...)
+      - metavariable-regex:
+          metavariable: $LITERAL
+          regex: '^\d+$'
+    message: >-
+      Non passare un literal numerico come timeout a sendCommand. Usa una
+      costante WS_*_TIMEOUT_MS esportata da src/figma/websocket-server.ts
+      (WS_FAST_RPC_TIMEOUT_MS, WS_COMMAND_DEFAULT_TIMEOUT_MS,
+      WS_STALL_DETECTION_MS, WS_REFRESH_VARIABLES_TIMEOUT_MS) così che il
+      bridge ui.html (codegen via scripts/sync-bridge-constants.mjs) resti
+      allineato. Se serve una soglia nuova, aggiungi un export in
+      websocket-server.ts invece di hardcodarlo.
+    severity: ERROR
+    languages: [typescript]
+    paths:
+      include:
+        - '**/src/figma/'
+        - '**/src/main/'

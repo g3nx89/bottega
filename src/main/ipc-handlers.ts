@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { type BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { createChildLogger } from '../figma/logger.js';
+import { WS_MEDIUM_RPC_TIMEOUT_MS } from '../figma/websocket-server.js';
 import {
   type AgentInfra,
   AVAILABLE_MODELS,
@@ -42,6 +43,7 @@ import {
   type UsageTracker,
 } from './remote-logger.js';
 import { extractRenderableMessages, type RenderableTurn } from './renderable-messages.js';
+import { registerRewindIpc } from './rewind/ipc.js';
 import { safeSend } from './safe-send.js';
 import { ScopedConnector } from './scoped-connector.js';
 import { checkSendPreconditions } from './send-gates.js';
@@ -592,6 +594,7 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
   // ── Guardrails config + confirm response ──────────
   // registerGuardrailsIpc() wires 'guardrails:confirm-response' (idempotent).
   registerGuardrailsIpc();
+  registerRewindIpc(ipcMain, infra.rewindManager);
   ipcMain.handle('guardrails:get-settings', () => {
     return loadGuardrailsSettings();
   });
@@ -807,7 +810,12 @@ export function setupIpcHandlers(deps: SetupIpcDeps): IpcController {
         return JSON.stringify({ pageId: p.id, pageName: p.name });
       })()`;
       const targetKey = fileKey || infra.wsServer.getConnectedFileInfo()?.fileKey;
-      return await infra.wsServer.sendCommand('EXECUTE_CODE', { code, timeout: 10000 }, 12000, targetKey || undefined);
+      return await infra.wsServer.sendCommand(
+        'EXECUTE_CODE',
+        { code, timeout: WS_MEDIUM_RPC_TIMEOUT_MS },
+        WS_MEDIUM_RPC_TIMEOUT_MS + 2_000,
+        targetKey || undefined,
+      );
     } catch (err: any) {
       log.warn({ err }, 'figma:clear-page failed');
       return { error: err.message };

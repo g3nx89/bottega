@@ -7,39 +7,30 @@ Residual follow-ups from `fix-pattern-hardening.md` execution and subsequent cri
 - ✅ **FIX 3 `onTabCreated` + `onTabUpdated` direct writes** — now advance `getTabGuard(slotId)` at handler entry so stale async callbacks bound to the previous tab state are superseded before mutations.
 - ✅ **FIX 2 residual magic `5000`** — extracted `WS_FAST_RPC_TIMEOUT_MS` and applied to `setLayoutSizing`, `getNodeData`, `getAnnotationCategories`, `setOpacity`, `setCornerRadius`. Drift test extended.
 - ✅ **rewind-modal.js fallback hardening** — fallback guard now preserves supersede semantics (incrementing counter) instead of `isCurrent: () => true`, and logs to `console.error` if `generation-guard.js` failed to load.
+- ✅ **Cross-layer constants codegen** — `scripts/sync-bridge-constants.mjs` now regenerates the sentinel blocks in `figma-desktop-bridge/ui.html` from the TS sources (`src/shared/plugin-protocol.ts` + `src/figma/websocket-server.ts`). Wired into `npm run build`; `--check` mode available for CI. Drift tests remain as belt-and-suspenders.
+- ✅ **All `sendCommand` magic timeouts eliminated** — added `WS_MEDIUM_RPC_TIMEOUT_MS (10s)`, `WS_HEAVY_RPC_TIMEOUT_MS (45s)`, `WS_BATCH_TIMEOUT_MS (60s)` and migrated every call site in `websocket-connector.ts`, `index.ts`, `ipc-handlers.ts`. Timeouts test covers the full 7-class monotonic ordering invariant.
+- ✅ **Semgrep lint against magic timeouts** — `no-magic-ws-timeout` rule in `.semgrep/bottega-rules.yml` flags any numeric literal passed as the timeout arg to `sendCommand` inside `src/figma/` or `src/main/`. Runs via `npm run lint:arch` and passes clean on the current tree.
 
 ## Open — worth doing later
 
-### Cross-layer constants: build-time single source of truth
-Drift tests catch divergence at test time; they don't prevent it. The infrastructure for esbuild `define` is already in `scripts/build.mjs` (used for `__APP_VERSION__`, `BOTTEGA_AGENT_TEST`). A follow-up can pipe `figma-desktop-bridge/ui.html` through a codegen step that injects `PLUGIN_PROTOCOL_VERSION` and the four `WS_*_TIMEOUT_MS` values from the shared module — eliminating the hand-mirrored block in `ui.html` and the drift tests becoming belt-and-suspenders.
-
 ### Global `mockReset: true`
-FIX 5 applied `.mockReset().mock*Value(default)` pattern in 3 test files. The same anti-pattern exists in ~20 other test files using `vi.clearAllMocks()` on module-scoped spies. Root-cause fix: flip `mockReset: true` in `vitest.config.ts`. Will expose suites that relied on persistent `mockImplementation` across cases — migrate those to set defaults in each `beforeEach`.
+Attempted in this pass but reverted: flipping the flag fails 51 tests across 10 files (orchestrator, ipc-handlers, jsx-render, judge-harness, session-factory, agent-playbook). These suites rely on persistent `mockImplementation` set at `vi.mock(...)` factory time. Migration requires moving those defaults into `beforeEach` in every affected file — a multi-hour job worth its own commit.
 
 ### Renderer fire-and-forget audit
-Only `syncEffortToTab` received the generation guard directly. Other candidates in `app.js` that match the same "kick off IPC, overwrite shared state on resolve" shape:
+Only `syncEffortToTab` + the two tab-lifecycle handlers received the generation guard. Other candidates in `app.js` that match the same "kick off IPC, overwrite shared state on resolve" shape:
 - `app.js:445` — `.catch(() => {})` on `activateTab` error path
 - `app.js:807` — model status cache fill (`refreshModelStatusCache`)
 - `app.js:309` — effort caps reconciliation
 Each should be audited for stale-write risk and guarded if applicable.
 
 ### `UNDO_TTL_MS` drift test
-`src/renderer/rewind-modal.js:51-54` comment says "Must match UNDO_TTL_MS in src/main/rewind/manager.ts" but no drift test exists (unlike the plugin-protocol and WS-timeout drift tests). Add `tests/unit/main/rewind/undo-ttl-sync.test.ts` that reads both values and asserts equality.
-
-### Semgrep lint against magic timeouts
-Add a semgrep rule:
-```yaml
-pattern: $SERVER.sendCommand($METHOD, $PARAMS, $LITERAL)
-where:
-  - metavariable-regex:
-      metavariable: $LITERAL
-      regex: '^\d+$'
-message: Use a WS_*_TIMEOUT_MS constant from websocket-server.ts
-```
-Prevents future re-introduction of magic numbers at `sendCommand` call sites.
+`src/renderer/rewind-modal.js:51-54` comment says "Must match UNDO_TTL_MS in src/main/rewind/manager.ts" but no drift test exists (unlike the plugin-protocol and WS-timeout drift tests). Add `tests/unit/main/rewind/undo-ttl-sync.test.ts` that reads both values and asserts equality, or migrate `UNDO_TTL_MS` into the codegen sentinel block.
 
 ### `IFigmaConnector.setNodeFills` typing
 `figma-connector.ts:78` still types `fills: any[]`. Tighten to a shared `FigmaPaint[]` type and thread through `src/figma/types.ts`.
+
+### Orchestrator test shuffle fragility
+`tests/unit/main/subagent/orchestrator-integration.test.ts > full batch flow > runs pre-fetch → spawn → parallel execution → aggregate for single agent` fails when run with `--sequence.shuffle`. Pre-existing issue, not caused by any fix in this series — but worth tracing since it reveals a cross-test dependency.
 
 ## Process deltas (for next prompt execution)
 

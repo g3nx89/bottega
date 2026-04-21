@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, crashReporter, dialog, ipcMain, safeStorage } from 'electron';
 import { createChildLogger, logFilePath, logger, sessionUid } from '../figma/logger.js';
 import { DEFAULT_WS_PORT } from '../figma/port-discovery.js';
+import { WS_STALL_DETECTION_MS } from '../figma/websocket-server.js';
 import { type AgentInfra, buildAuthAdapter, createAgentInfra, DEFAULT_MODEL, OAUTH_PROVIDER_MAP } from './agent.js';
 import { AppStatePersistence } from './app-state-persistence.js';
 import { readMeta, writeMeta } from './auth-meta.js';
@@ -28,7 +29,10 @@ import {
 import { MetricsRegistry } from './metrics-registry.js';
 import { ModelProbe } from './model-probe.js';
 import { loadDiagnosticsConfig, UsageTracker } from './remote-logger.js';
+import { RewindManager } from './rewind/manager.js';
+import { registerTestRewindIpc } from './rewind/test-ipc.js';
 import { safeSend, safeWc } from './safe-send.js';
+import { ScopedConnector } from './scoped-connector.js';
 import { SessionStore } from './session-store.js';
 import { SlotManager } from './slot-manager.js';
 import { runStartupAuth } from './startup-auth.js';
@@ -253,6 +257,9 @@ if (!gotTheLock) {
         const tmpDir = app.getPath('temp');
         const sessionManager = SessionManager.create(tmpDir, path.join(tmpDir, '.bottega-test-sessions'));
 
+        const queueManager = new OperationQueueManager();
+        const metricsRegistry = new MetricsRegistry();
+        const activeFigmaCore = figmaCore;
         infra = {
           authStorage,
           modelRegistry,
@@ -263,12 +270,19 @@ if (!gotTheLock) {
           compressionExtensionFactory: () => ({}),
           taskExtensionFactory: () => ({}),
           workflowExtensionFactory: () => ({}),
+          rewindManager: new RewindManager({
+            wsServer: figmaCore.wsServer,
+            metrics: metricsRegistry,
+            getWebContents: () => mainWindow?.webContents ?? null,
+            getQueue: (fileKey) => queueManager.getQueue(fileKey),
+            getConnector: (fileKey) => new ScopedConnector(activeFigmaCore.wsServer, fileKey),
+          }),
           setActiveTaskStore: () => {},
           setWorkflowContext: () => {},
           wsServer: figmaCore.wsServer,
           figmaAPI: figmaCore.figmaAPI,
-          queueManager: new OperationQueueManager(),
-          metricsRegistry: new MetricsRegistry(),
+          queueManager,
+          metricsRegistry,
           modelProbe: new ModelProbe(buildAuthAdapter(authStorage)),
           getImageGenerator: () => imageGenState.generator,
         };
@@ -294,6 +308,12 @@ if (!gotTheLock) {
           // user is here to configure credentials. Each stub field is cast
           // individually so adding a new field to AgentInfra still surfaces a
           // type error in the spread, instead of being hidden by `as any`.
+          const stubQueueManager = {
+            getQueue: () => ({ execute: <T>(fn: () => Promise<T>) => fn() }),
+            removeQueue: () => {},
+          } as unknown as AgentInfra['queueManager'];
+          const stubMetricsRegistry = new MetricsRegistry();
+          const stubActiveFigmaCore = figmaCore;
           infra = {
             authStorage: {
               get: () => null,
@@ -323,15 +343,19 @@ if (!gotTheLock) {
             compressionExtensionFactory: () => ({}),
             taskExtensionFactory: () => ({}),
             workflowExtensionFactory: () => ({}),
+            rewindManager: new RewindManager({
+              wsServer: figmaCore.wsServer,
+              metrics: stubMetricsRegistry,
+              getWebContents: () => mainWindow?.webContents ?? null,
+              getQueue: (fileKey) => stubQueueManager.getQueue(fileKey),
+              getConnector: (fileKey) => new ScopedConnector(stubActiveFigmaCore.wsServer, fileKey),
+            }),
             setActiveTaskStore: () => {},
             setWorkflowContext: () => {},
             wsServer: figmaCore.wsServer,
             figmaAPI: figmaCore.figmaAPI,
-            queueManager: {
-              getQueue: () => ({ execute: <T>(fn: () => Promise<T>) => fn() }),
-              removeQueue: () => {},
-            } as unknown as AgentInfra['queueManager'],
-            metricsRegistry: new MetricsRegistry(),
+            queueManager: stubQueueManager,
+            metricsRegistry: stubMetricsRegistry,
             modelProbe: new ModelProbe({ getApiKey: async () => undefined }),
             getImageGenerator: () => imageGenState.generator,
           };
@@ -585,6 +609,12 @@ if (!gotTheLock) {
           appState.infra.metricsRegistry.reset();
           return { ok: true };
         });
+
+        registerTestRewindIpc(ipcMain, {
+          getRewindManager: () => appState.infra?.rewindManager ?? null,
+          getMetricsRegistry: () => appState.infra?.metricsRegistry ?? null,
+          getMainWindow: () => mainWindow,
+        });
       }
 
       // 7. Auto-updater (GitHub Releases)
@@ -678,7 +708,7 @@ if (!gotTheLock) {
               // Warmup: fire a low-res screenshot to prime Figma's rendering pipeline.
               // Fire-and-forget — failure is harmless.
               figmaCore?.wsServer
-                .sendCommand('CAPTURE_SCREENSHOT', { nodeId: '', scale: 0.25 }, 30000, info.fileKey)
+                .sendCommand('CAPTURE_SCREENSHOT', { nodeId: '', scale: 0.25 }, WS_STALL_DETECTION_MS, info.fileKey)
                 .catch((err: any) => log.debug({ err, fileKey: info.fileKey }, 'Screenshot warmup failed'));
               log.debug({ fileKey: info.fileKey }, 'Screenshot warmup triggered');
             })
