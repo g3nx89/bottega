@@ -91,6 +91,7 @@ describe('MetricsRegistry', () => {
       expect(snap).toHaveProperty('judge');
       expect(snap).toHaveProperty('tools');
       expect(snap).toHaveProperty('turns');
+      expect(snap).toHaveProperty('rewind');
       expect(snap).toHaveProperty('ws');
     });
 
@@ -108,10 +109,27 @@ describe('MetricsRegistry', () => {
           'tools',
           'turns',
           'guardrails',
+          'rewind',
           'ws',
         ].sort(),
       );
       expect(Object.keys(snap.guardrails).sort()).toEqual(['evaluated', 'noMatch', 'probeFailed', 'byRule'].sort());
+      expect(Object.keys(snap.rewind).sort()).toEqual(
+        [
+          'captured',
+          'skipped',
+          'created',
+          'nonRestorable',
+          'restorableRatio',
+          'pruned',
+          'pluginProbeFailed',
+          'probeDeferred',
+          'restoreStarted',
+          'restoreCompleted',
+          'restoreFailed',
+          'undoRestore',
+        ].sort(),
+      );
       expect(Object.keys(snap.judge).sort()).toEqual(
         ['inProgressSlotIds', 'triggeredTotal', 'skippedTotal', 'skippedByReason', 'verdictCounts'].sort(),
       );
@@ -143,6 +161,20 @@ describe('MetricsRegistry', () => {
       expect(snap.tools.byName).toEqual({});
       expect(snap.turns.totalStarted).toBe(0);
       expect(snap.turns.totalEnded).toBe(0);
+      expect(snap.rewind).toEqual({
+        captured: 0,
+        skipped: 0,
+        created: 0,
+        nonRestorable: 0,
+        restorableRatio: 0,
+        pruned: 0,
+        pluginProbeFailed: 0,
+        probeDeferred: 0,
+        restoreStarted: 0,
+        restoreCompleted: 0,
+        restoreFailed: 0,
+        undoRestore: { success: 0, noToken: 0, expired: 0 },
+      });
     });
   });
 
@@ -278,6 +310,53 @@ describe('MetricsRegistry', () => {
       reg.reset();
       const snap = reg.snapshot(makeDeps());
       expect(snap.guardrails).toEqual({ evaluated: 0, noMatch: 0, probeFailed: 0, byRule: {} });
+    });
+  });
+
+  describe('rewind counters', () => {
+    it('captures skipped, pruned and probe failures independently', () => {
+      const reg = new MetricsRegistry();
+      reg.recordRewindCaptured();
+      reg.recordRewindCaptured();
+      reg.recordRewindSkipped();
+      reg.recordRewindCheckpointCreated(false);
+      reg.recordRewindCheckpointCreated(true);
+      reg.recordRewindPruned(3);
+      reg.recordRewindPluginProbeFailed();
+      reg.recordRewindProbeDeferred();
+      reg.recordRewindRestoreStarted('file-1');
+      reg.recordRewindRestoreCompleted('file-1', 2, 1, 30);
+      reg.recordRewindRestoreFailed('file-1', 'node-not-found');
+      reg.recordRewindUndoRestore('file-1', 'success');
+      reg.recordRewindUndoRestore('file-1', 'expired');
+
+      const snap = reg.snapshot(makeDeps());
+      expect(snap.rewind).toEqual({
+        captured: 2,
+        skipped: 1,
+        created: 2,
+        nonRestorable: 1,
+        restorableRatio: 0.5,
+        pruned: 3,
+        pluginProbeFailed: 1,
+        probeDeferred: 1,
+        restoreStarted: 1,
+        restoreCompleted: 1,
+        restoreFailed: 1,
+        undoRestore: { success: 1, noToken: 0, expired: 1 },
+      });
+    });
+
+    it('computes created, nonRestorable and restorableRatio from 3 checkpoints', () => {
+      const reg = new MetricsRegistry();
+      reg.recordRewindCheckpointCreated(false);
+      reg.recordRewindCheckpointCreated(false);
+      reg.recordRewindCheckpointCreated(true);
+
+      const snap = reg.snapshot(makeDeps());
+      expect(snap.rewind.created).toBe(3);
+      expect(snap.rewind.nonRestorable).toBe(1);
+      expect(snap.rewind.restorableRatio).toBeCloseTo(2 / 3, 3);
     });
   });
 

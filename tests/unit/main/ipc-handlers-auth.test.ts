@@ -111,6 +111,13 @@ describe('setupAuthHandlers', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // vi.clearAllMocks() keeps custom mockImplementation set by prior tests —
+    // explicitly reset module-scoped spies and re-install their defaults so a
+    // trailing impl from another test doesn't leak into the next one.
+    _touchMeta.mockReset();
+    _removeMeta.mockReset();
+    _recordLogout.mockReset();
+    _refresherRefresh.mockReset().mockResolvedValue({ outcome: 'ok' });
     authStorage = makeAuthStorage();
     infra = makeInfra(authStorage);
     mainWindow = { webContents: {} };

@@ -19,6 +19,10 @@ describe('buildSystemPrompt', () => {
     expect(result).toContain('figma_execute');
   });
 
+  it('should nudge dedicated tools over figma_execute for reversible atomic operations', () => {
+    expect(buildSystemPrompt('Test Model')).toMatch(/preferisci il tool dedicato rispetto a figma_execute/i);
+  });
+
   it('should include Action Bias section', () => {
     const result = buildSystemPrompt('Test Model');
     expect(result).toContain('## Action Bias');

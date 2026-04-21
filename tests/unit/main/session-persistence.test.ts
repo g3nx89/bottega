@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -120,6 +120,10 @@ describe('Session persistence IPC', () => {
     (app.getPath as any).mockReturnValue('/mock/userData');
     (app.getAppPath as any).mockReturnValue('/mock/appPath');
     (process as any).resourcesPath = '/mock/resources';
+    // vi.clearAllMocks() keeps custom mockImplementation set by prior tests —
+    // explicitly reset fs spies so a trailing impl from another suite doesn't
+    // leak into the next test (pattern mirrors ipc-handlers.test.ts).
+    (cpSync as any).mockReset();
 
     tmpDir = makeTmpDir();
     mockSession = createMockSession();

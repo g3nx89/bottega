@@ -69,7 +69,7 @@ describe('createAxiomTransport', () => {
     expect(transport).not.toBeNull();
     expect(transport!.target).toBe('@axiomhq/pino');
     expect(transport!.level).toBe('info');
-    expect(transport!.options).toHaveProperty('dataset', 'bottega-logs');
+    expect(transport!.options).toHaveProperty('dataset', 'bottega-logs-v2');
     expect(transport!.options).toHaveProperty('token');
   });
 });

@@ -55,12 +55,20 @@ describe('ScopedConnector', () => {
   // fileKey is always passed as targetFileKey
   // ============================================================================
 
-  it('setNodeFills passes fileKey as targetFileKey', async () => {
+  it('setNodeFills passes fileKey as targetFileKey and preserves the raw flag', async () => {
     const fills = [{ type: 'SOLID', color: { r: 1, g: 0, b: 0 } }];
     await connector.setNodeFills('node1', fills);
     expect(mockWsServer.sendCommand).toHaveBeenCalledWith(
       'SET_NODE_FILLS',
-      { nodeId: 'node1', fills },
+      { nodeId: 'node1', fills, preserveRaw: false },
+      undefined,
+      FILE_KEY,
+    );
+    mockWsServer.sendCommand.mockClear();
+    await connector.setNodeFills('node1', fills, true);
+    expect(mockWsServer.sendCommand).toHaveBeenCalledWith(
+      'SET_NODE_FILLS',
+      { nodeId: 'node1', fills, preserveRaw: true },
       undefined,
       FILE_KEY,
     );

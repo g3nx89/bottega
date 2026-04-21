@@ -185,6 +185,14 @@ describe('setupIpcHandlers', () => {
     // Restore electron app mocks (clearAllMocks strips return values)
     (app.getPath as any).mockReturnValue('/mock/userData');
     (app.getAppPath as any).mockReturnValue('/mock/appPath');
+    // vi.clearAllMocks() keeps custom mockImplementation set by prior tests —
+    // explicitly reset the fs mocks so a trailing impl from the Figma-plugin
+    // suite doesn't leak into the next test's default behaviour.
+    (readFileSync as any).mockReset().mockReturnValue('{}');
+    (existsSync as any).mockReset().mockReturnValue(false);
+    (statSync as any).mockReset().mockReturnValue({ size: 0, mtimeMs: 0 });
+    (cpSync as any).mockReset();
+    (writeFileSync as any).mockReset();
     // Restore execFile default: pgrep fails (no Figma running)
     (execFile as any).mockImplementation((...args: any[]) => {
       const cb = args[args.length - 1];
@@ -759,7 +767,13 @@ describe('setupIpcHandlers', () => {
       (existsSync as any)
         .mockReturnValueOnce(false) // packaged path: no manifest
         .mockReturnValueOnce(true); // dev path: manifest found
-      // subsequent existsSync calls (Figma settings check) return default false
+      // Simulate absent Figma settings.json so ensurePluginRegistered returns
+      // 'failed' → autoRegistered=false (the scenario these assertions target).
+      (readFileSync as any).mockImplementation(() => {
+        const err = new Error('ENOENT: no such file') as NodeJS.ErrnoException;
+        err.code = 'ENOENT';
+        throw err;
+      });
 
       const result = await invokeHandler('plugin:install');
 
@@ -782,7 +796,12 @@ describe('setupIpcHandlers', () => {
     it('plugin:install uses packaged path when manifest exists there', async () => {
       // getPluginSourcePath: packaged manifest found on first candidate
       (existsSync as any).mockReturnValueOnce(true); // packaged manifest exists
-      // subsequent existsSync calls (Figma settings check) return default false
+      // Simulate absent Figma settings.json — same rationale as the sibling test.
+      (readFileSync as any).mockImplementation(() => {
+        const err = new Error('ENOENT: no such file') as NodeJS.ErrnoException;
+        err.code = 'ENOENT';
+        throw err;
+      });
 
       const result = await invokeHandler('plugin:install');
 
@@ -845,8 +864,15 @@ describe('setupIpcHandlers', () => {
     it('does not auto-register when Figma is not running but settings.json missing', async () => {
       (existsSync as any).mockReturnValueOnce(true); // source found
       (existsSync as any).mockReturnValueOnce(false); // dest manifest missing → needs sync
-      // isFigmaRunning: default mock (pgrep fails → not running)
-      // ensurePluginRegistered: settings.json does NOT exist (default false)
+      // Make every settings.json read throw ENOENT so both isPluginRegistered
+      // and ensurePluginRegistered treat the file as missing. Default '{}' would
+      // have been a valid empty settings object, which ensurePluginRegistered
+      // happily populates — exactly the opposite of what this case exercises.
+      (readFileSync as any).mockImplementation(() => {
+        const err = new Error('ENOENT: no such file') as NodeJS.ErrnoException;
+        err.code = 'ENOENT';
+        throw err;
+      });
 
       const result = await syncFigmaPlugin();
 
@@ -859,20 +885,22 @@ describe('setupIpcHandlers', () => {
     it('detects already registered plugin', async () => {
       (existsSync as any).mockReturnValueOnce(true); // source found
       (existsSync as any).mockReturnValueOnce(false); // dest manifest missing → needs sync
-      // isFigmaRunning: pgrep fails → not running (default mock)
-      // ensurePluginRegistered: settings.json exists
-      (existsSync as any).mockReturnValueOnce(true);
-      (readFileSync as any).mockReturnValueOnce(
-        JSON.stringify({
-          localFileExtensions: [
-            {
-              id: 1,
-              manifestPath: '/some/path/manifest.json',
-              lastKnownPluginId: 'bottega-bridge',
-              fileMetadata: { type: 'manifest', codeFileId: 2, uiFileIds: [3] },
-            },
-          ],
-        }),
+      (existsSync as any).mockReturnValueOnce(true); // settings.json exists
+
+      // Use path-keyed mock so pluginNeedsSync byte compares don't consume the
+      // registered-plugin payload meant for settings.json reads.
+      const registeredSettings = JSON.stringify({
+        localFileExtensions: [
+          {
+            id: 1,
+            manifestPath: '/some/path/manifest.json',
+            lastKnownPluginId: 'bottega-bridge',
+            fileMetadata: { type: 'manifest', codeFileId: 2, uiFileIds: [3] },
+          },
+        ],
+      });
+      (readFileSync as any).mockImplementation((p: string) =>
+        typeof p === 'string' && p.endsWith('settings.json') ? registeredSettings : '{}',
       );
 
       const result = await syncFigmaPlugin();
@@ -909,23 +937,22 @@ describe('setupIpcHandlers', () => {
     it('reports alreadyRegistered even when Figma is running', async () => {
       (existsSync as any).mockReturnValueOnce(true); // source found
       (existsSync as any).mockReturnValueOnce(false); // dest manifest missing → needs sync
-      // isPluginRegistered: settings.json exists with plugin entry
-      (existsSync as any).mockReturnValueOnce(true);
-      (readFileSync as any).mockReturnValueOnce(
-        JSON.stringify({
-          localFileExtensions: [
-            {
-              id: 1,
-              manifestPath: '/mock/userData/figma-plugin/manifest.json',
-              lastKnownPluginId: 'bottega-bridge',
-              fileMetadata: { type: 'manifest', codeFileId: 2, uiFileIds: [3] },
-            },
-          ],
-        }),
+      (existsSync as any).mockReturnValueOnce(true); // settings.json exists
+
+      const registeredSettings = JSON.stringify({
+        localFileExtensions: [
+          {
+            id: 1,
+            manifestPath: '/mock/userData/figma-plugin/manifest.json',
+            lastKnownPluginId: 'bottega-bridge',
+            fileMetadata: { type: 'manifest', codeFileId: 2, uiFileIds: [3] },
+          },
+        ],
+      });
+      (readFileSync as any).mockImplementation((p: string) =>
+        typeof p === 'string' && p.endsWith('settings.json') ? registeredSettings : '{}',
       );
       // isFigmaRunning: pgrep succeeds → Figma IS running
-      // Generic promisify resolves single-arg callbacks as-is, so pass an object
-      // with { stdout } to match the destructuring in isFigmaRunning.
       (execFile as any).mockImplementationOnce((...args: any[]) => {
         const cb = args[args.length - 1];
         if (typeof cb === 'function') cb(null, { stdout: '12345\n', stderr: '' });
@@ -949,7 +976,19 @@ describe('setupIpcHandlers', () => {
         .mockReturnValueOnce({ size: 500 }) // src manifest size
         .mockReturnValueOnce({ size: 500 }) // dest manifest size
         .mockReturnValueOnce({ size: 10000 }) // src code.js size
-        .mockReturnValueOnce({ size: 10000 }); // dest code.js size
+        .mockReturnValueOnce({ size: 10000 }) // dest code.js size
+        .mockReturnValueOnce({ size: 800 }) // src ui.html size
+        .mockReturnValueOnce({ size: 800 }); // dest ui.html size
+      // pluginNeedsSync byte-compares via Buffer.equals — default mock returns
+      // a string '{}' whose .equals is undefined and throws. Return identical
+      // Buffers for plugin files so the compare succeeds and sync is skipped.
+      const identical = Buffer.from('identical bytes');
+      (readFileSync as any).mockImplementation((p: string) => {
+        if (typeof p === 'string' && (p.endsWith('.json') || p.endsWith('.js') || p.endsWith('.html'))) {
+          return identical;
+        }
+        return '{}';
+      });
 
       const result = await syncFigmaPlugin();
 

@@ -140,12 +140,14 @@ describe('SlotManager', () => {
     wsServer = { getConnectedFiles: vi.fn().mockReturnValue([]), isFileConnected: vi.fn().mockReturnValue(false) };
     infra = makeInfra({ wsServer });
 
-    // Re-apply mocks cleared by vi.clearAllMocks()
-    (createScopedTools as ReturnType<typeof vi.fn>).mockReturnValue({
+    // vi.clearAllMocks() keeps custom mockImplementation set by prior tests —
+    // use .mockReset() to wipe impl, then re-apply defaults. Avoids the case
+    // where an earlier test's .mockImplementation(() => { throw ... }) leaks.
+    (createScopedTools as ReturnType<typeof vi.fn>).mockReset().mockReturnValue({
       tools: [{ name: 'mock_tool' }],
       connector: {},
     });
-    (createFigmaAgentRuntimeForSlot as ReturnType<typeof vi.fn>).mockResolvedValue(makeMockRuntime());
+    (createFigmaAgentRuntimeForSlot as ReturnType<typeof vi.fn>).mockReset().mockResolvedValue(makeMockRuntime());
 
     manager = new SlotManager(infra, sessionStore, appState, wsServer as any);
   });
