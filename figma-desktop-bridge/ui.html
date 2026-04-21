@@ -517,7 +517,9 @@
     (function() {
       // Fixed port for Bottega Bridge (distinct from figma-console-mcp 9223-9232)
       var WS_PORT = 9280;
-      // Must be >= REQUIRED_PLUGIN_VERSION in src/figma/websocket-server.ts
+      // MUST match PLUGIN_PROTOCOL_VERSION in src/shared/plugin-protocol.ts.
+      // The build-time drift check in tests/unit/shared/plugin-protocol.test.ts
+      // fails the suite if these get out of sync.
       var PLUGIN_VERSION = 2;
 
       // Single-connection state: Bottega is a single-instance app on a fixed port.

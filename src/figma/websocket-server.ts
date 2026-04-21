@@ -15,13 +15,20 @@
 
 import { EventEmitter } from 'node:events';
 import { WebSocket, WebSocketServer as WSServer } from 'ws';
+import { PLUGIN_PROTOCOL_VERSION } from '../shared/plugin-protocol.js';
 import { createChildLogger } from './logger.js';
 import type { ConsoleLogEntry } from './types.js';
 
 const logger = createChildLogger({ component: 'websocket-server' });
 
-/** Minimum plugin version this server accepts. Bump together with PLUGIN_VERSION in figma-desktop-bridge/ui.html. */
-const REQUIRED_PLUGIN_VERSION = 2;
+/**
+ * Minimum plugin version this server accepts.
+ * Re-exported from the shared protocol module so main-process code can
+ * import from here as before; the authoritative source is
+ * `src/shared/plugin-protocol.ts`, which must stay in sync with
+ * `figma-desktop-bridge/ui.html#PLUGIN_VERSION`.
+ */
+export const REQUIRED_PLUGIN_VERSION = PLUGIN_PROTOCOL_VERSION;
 
 /** WebSocket close code for version-incompatible plugins (RFC 6455 private-use range 4000-4999). */
 const WS_CLOSE_VERSION_MISMATCH = 4001;
