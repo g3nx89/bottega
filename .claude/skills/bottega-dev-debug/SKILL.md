@@ -519,6 +519,23 @@ Known real bugs:
 
 After fixing: `npx tsc --noEmit && npm test`
 
+### Dev vs installed app — CRITICAL gotcha
+
+`/Applications/Bottega.app` holds the single-instance lock. Launching `npx electron dist/main.js` while the installed `.app` is running **silently exits** (exit 0, no window) because the second instance hits `requestSingleInstanceLock()` and quits — you end up testing the OLD installed code, not your latest `dist/`.
+
+Before dev testing:
+```bash
+pgrep -fl "Applications/Bottega.app" && pkill -9 -f "Applications/Bottega.app" && sleep 2
+npx electron dist/main.js > /tmp/bottega-dev.log 2>&1 &
+```
+
+To verify which binary is actually running:
+```bash
+pgrep -lf "electron.*dist/main\|Applications/Bottega.app"
+```
+
+Detection heuristic: if a feature visible in the renderer is missing but grep confirms it in `dist/main.js`, check if the installed `.app` is up — it's the most likely cause.
+
 ## WebSocket Bridge
 
 Quick check: `node -e "const ws=new(require('ws'))('ws://127.0.0.1:9280');const t=setTimeout(()=>{console.log('TIMEOUT');process.exit(1)},3000);ws.on('open',()=>{console.log('WS OK');clearTimeout(t);ws.close()});ws.on('error',e=>{console.log('WS ERROR:',e.message);clearTimeout(t);process.exit(1)})"`

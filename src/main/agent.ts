@@ -30,6 +30,8 @@ import type { ImageGenerator } from './image-gen/image-generator.js';
 import { MetricsRegistry } from './metrics-registry.js';
 import { ModelProbe } from './model-probe.js';
 import type { OperationQueueManager } from './operation-queue-manager.js';
+import { createRewindExtensionFactory } from './rewind/extension-factory.js';
+import { RewindManager } from './rewind/manager.js';
 import { ScopedConnector } from './scoped-connector.js';
 import { buildSystemPrompt, type DsBlockData } from './system-prompt.js';
 import { createTaskExtensionFactory } from './tasks/extension-factory.js';
@@ -304,6 +306,7 @@ export interface AgentInfra {
   compressionExtensionFactory: (pi: any) => void;
   taskExtensionFactory: (pi: any) => void;
   workflowExtensionFactory: (pi: any) => void;
+  rewindManager: RewindManager;
   setActiveTaskStore: (store: TaskStore | undefined) => void;
   /** Update the current user message and fileKey for workflow intent resolution. */
   setWorkflowContext: (message: string, fileKey: string) => void;
@@ -533,6 +536,14 @@ export async function createAgentInfra(
   const sessionManager = SessionManager.create(os.tmpdir(), opts.sessionsDir || DEFAULT_SESSIONS_DIR);
   const { OperationQueueManager: OQM } = await import('./operation-queue-manager.js');
   const queueManager = new OQM();
+  const metricsRegistry = new MetricsRegistry();
+  const rewindManager = new RewindManager({
+    wsServer: figmaCore.wsServer,
+    metrics: metricsRegistry,
+    getWebContents: opts.getWebContentsForSlot,
+    getQueue: (fileKey) => queueManager.getQueue(fileKey),
+    getConnector: (fileKey) => new ScopedConnector(figmaCore.wsServer, fileKey),
+  });
 
   return {
     authStorage,
@@ -544,6 +555,7 @@ export async function createAgentInfra(
     compressionExtensionFactory,
     taskExtensionFactory,
     workflowExtensionFactory,
+    rewindManager,
     setActiveTaskStore: (s) => {
       if (_activeTaskStore !== s) {
         _activeTaskStore = s;
@@ -563,7 +575,7 @@ export async function createAgentInfra(
     wsServer: figmaCore.wsServer,
     figmaAPI: figmaCore.figmaAPI,
     queueManager,
-    metricsRegistry: new MetricsRegistry(),
+    metricsRegistry,
     // F11: telemetry wired later via setModelProbeTelemetry() to avoid a
     // circular dep on UsageTracker.
     modelProbe: new ModelProbe(buildAuthAdapter(authStorage)),
@@ -660,6 +672,15 @@ function createSlotRuntimeFactory(
           getFileKey: () => guardrailsRefs.fileKey,
           getSlotId: () => guardrailsRefs.slotIdRef.current,
           metrics: infra.metricsRegistry,
+        }),
+      );
+      extensionFactories.push(
+        createRewindExtensionFactory({
+          isEnabled: () => infra.rewindManager.isEnabled(),
+          getConnector: () => guardrailsRefs.connector,
+          getFileKey: () => guardrailsRefs.fileKey,
+          getSlotId: () => guardrailsRefs.slotIdRef.current,
+          manager: infra.rewindManager,
         }),
       );
     }

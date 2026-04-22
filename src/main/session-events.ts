@@ -76,6 +76,7 @@ export function beginTurn(
 ): void {
   const promptId = randomUUID();
   slot.turnIndex += 1;
+  infra?.rewindManager?.onTurnBegin(slot.id, slot.fileKey ?? '', text, slot.turnIndex, promptId);
   slot.currentPromptId = promptId;
   slot.promptStartTime = Date.now();
   infra?.metricsRegistry?.recordTurnStart();

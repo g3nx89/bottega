@@ -452,6 +452,148 @@ describe('rewind-modal', () => {
     expect(document.getElementById('rewind-count')?.textContent).toBe('1');
   });
 
+  it('Enter on a restorable rewind item triggers restore; Space also triggers; non-restorable item ignores both', async () => {
+    const api = makeApi();
+    api.checkpoint.list.mockResolvedValue([
+      {
+        id: 'cp-restorable',
+        fileKey: 'file-1',
+        slotId: 'slot-1',
+        turnIndex: 1,
+        prompt: 'rename layer',
+        timestamp: Date.now(),
+        restorableCount: 1,
+        nonRestorableCount: 0,
+        executeTouched: false,
+      },
+      {
+        id: 'cp-exec',
+        fileKey: 'file-1',
+        slotId: 'slot-1',
+        turnIndex: 2,
+        prompt: 'executed',
+        timestamp: Date.now() - 1000,
+        restorableCount: 0,
+        nonRestorableCount: 1,
+        executeTouched: true,
+      },
+    ]);
+    api.checkpoint.restore.mockResolvedValue({
+      success: true,
+      restoredMutations: 1,
+      skippedMutations: 0,
+      undoToken: 'tok-kb',
+    });
+
+    const controller = RewindModal.initRewindController(api, document);
+    await controller.bindActiveFileKey('file-1');
+    await controller.open('file-1');
+
+    const items = document.querySelectorAll<HTMLElement>('.rewind-item');
+    expect(items).toHaveLength(2);
+    const restorable = items[0];
+    const nonRestorable = items[1];
+
+    // Enter on restorable → restore called
+    restorable.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(api.checkpoint.restore).toHaveBeenCalledTimes(1);
+    expect(api.checkpoint.restore).toHaveBeenLastCalledWith('file-1', 'cp-restorable', 'to-checkpoint');
+
+    // Space on restorable → restore called again
+    restorable.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(api.checkpoint.restore).toHaveBeenCalledTimes(2);
+
+    // Enter on non-restorable → guard blocks restore (button disabled)
+    const callsBefore = api.checkpoint.restore.mock.calls.length;
+    nonRestorable.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(api.checkpoint.restore.mock.calls.length).toBe(callsBefore);
+  });
+
+  it('Escape in the overlay closes the modal', async () => {
+    const api = makeApi();
+    api.checkpoint.list.mockResolvedValue([
+      {
+        id: 'cp-1',
+        fileKey: 'file-1',
+        slotId: 'slot-1',
+        turnIndex: 1,
+        prompt: 'paint',
+        timestamp: Date.now(),
+        restorableCount: 1,
+        nonRestorableCount: 0,
+        executeTouched: false,
+      },
+    ]);
+
+    const controller = RewindModal.initRewindController(api, document);
+    await controller.bindActiveFileKey('file-1');
+    await controller.open('file-1');
+    expect(document.getElementById('rewind-overlay')?.classList.contains('hidden')).toBe(false);
+
+    const overlay = document.getElementById('rewind-overlay')!;
+    overlay.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(overlay.classList.contains('hidden')).toBe(true);
+    expect(overlay.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('Tab focus trap: Tab from the last focusable wraps to the first; Shift+Tab from the first wraps to the last', async () => {
+    const api = makeApi();
+    api.checkpoint.list.mockResolvedValue([
+      {
+        id: 'cp-1',
+        fileKey: 'file-1',
+        slotId: 'slot-1',
+        turnIndex: 1,
+        prompt: 'paint',
+        timestamp: Date.now(),
+        restorableCount: 1,
+        nonRestorableCount: 0,
+        executeTouched: false,
+      },
+    ]);
+
+    const controller = RewindModal.initRewindController(api, document);
+    await controller.bindActiveFileKey('file-1');
+    await controller.open('file-1');
+
+    const overlay = document.getElementById('rewind-overlay')!;
+    const focusables = Array.from(
+      overlay.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]'),
+    ).filter((n) => !n.classList.contains('hidden'));
+    expect(focusables.length).toBeGreaterThanOrEqual(2);
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+
+    // Focus last, Tab → should wrap to first.
+    last.focus();
+    let prevented = false;
+    const tabEvent = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    const origPreventDefault = tabEvent.preventDefault.bind(tabEvent);
+    tabEvent.preventDefault = () => {
+      prevented = true;
+      origPreventDefault();
+    };
+    overlay.dispatchEvent(tabEvent);
+    expect(prevented).toBe(true);
+    expect(document.activeElement).toBe(first);
+
+    // Focus first, Shift+Tab → should wrap to last.
+    first.focus();
+    const shiftTab = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true });
+    let shiftPrevented = false;
+    const origShiftPrevent = shiftTab.preventDefault.bind(shiftTab);
+    shiftTab.preventDefault = () => {
+      shiftPrevented = true;
+      origShiftPrevent();
+    };
+    overlay.dispatchEvent(shiftTab);
+    expect(shiftPrevented).toBe(true);
+    expect(document.activeElement).toBe(last);
+  });
+
   it('three rapid tab switches: only the last bind wins, intermediate binds are discarded', async () => {
     const api = makeApi();
     const deferrals = new Map<string, (v: unknown) => void>();

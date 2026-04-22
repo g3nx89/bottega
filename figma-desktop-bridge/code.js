@@ -228,6 +228,170 @@ function hexToFigmaRGB(hex) {
   return { r: r, g: g, b: b, a: a };
 }
 
+function jsonClone(value) {
+  if (value === undefined) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    console.warn('jsonClone failed', error);
+    return null;
+  }
+}
+
+function pushUniqueFont(fonts, fontName) {
+  if (!fontName || fontName === figma.mixed) return;
+  var key = fontName.family + '::' + fontName.style;
+  for (var i = 0; i < fonts.length; i++) {
+    if (fonts[i].family + '::' + fonts[i].style === key) return;
+  }
+  fonts.push({ family: fontName.family, style: fontName.style });
+}
+
+function collectFontsToLoad(node) {
+  var fonts = [];
+  if (!node || node.type !== 'TEXT') return fonts;
+  if (node.fontName !== figma.mixed) {
+    pushUniqueFont(fonts, node.fontName);
+    return fonts;
+  }
+  var segments = node.getStyledTextSegments(['fontName']);
+  for (var i = 0; i < segments.length; i++) {
+    pushUniqueFont(fonts, segments[i].fontName);
+  }
+  return fonts;
+}
+
+function serializeNodeParent(node) {
+  var parent = node && node.parent ? node.parent : null;
+  if (!parent) return null;
+  return {
+    id: parent.id,
+    name: parent.name,
+    type: parent.type,
+    layoutMode: 'layoutMode' in parent ? parent.layoutMode : null
+  };
+}
+
+var DEFAULT_GET_NODE_DATA_FIELDS = ['name', 'fills', 'strokes', 'position', 'size', 'layoutSizing', 'constraints', 'opacity', 'cornerRadius', 'parent', 'children'];
+var MAX_GET_NODE_DATA_DEPTH = 3;
+var MAX_GET_NODE_DATA_CHILDREN = 200;
+
+function clampPositiveInt(value, fallback, maxValue) {
+  if (typeof value !== 'number' || !isFinite(value) || value <= 0) return fallback;
+  return Math.min(Math.floor(value), maxValue);
+}
+
+function summarizeTruncatedNode(node) {
+  return {
+    id: node.id,
+    type: node.type,
+    name: node.name,
+    truncated: true
+  };
+}
+
+function normalizeNodeDataOptions(options) {
+  var opts = options && typeof options === 'object' ? options : {};
+  return {
+    depth: clampPositiveInt(opts.depth, MAX_GET_NODE_DATA_DEPTH, MAX_GET_NODE_DATA_DEPTH),
+    maxChildren: clampPositiveInt(opts.maxChildren, MAX_GET_NODE_DATA_CHILDREN, MAX_GET_NODE_DATA_CHILDREN)
+  };
+}
+
+function serializeNodeChildren(node, requested, options, currentDepth) {
+  if (!('children' in node) || !node.children) return { children: [], truncated: false };
+
+  var childNodes = node.children.slice(0, options.maxChildren);
+  var truncated = node.children.length > options.maxChildren;
+
+  if (currentDepth >= options.depth) {
+    return {
+      children: childNodes.map(function(child) { return summarizeTruncatedNode(child); }),
+      truncated: truncated || node.children.length > 0
+    };
+  }
+
+  var serialized = childNodes.map(function(child) {
+    return buildNodeData(child, requested, options, currentDepth + 1);
+  });
+  for (var i = 0; i < serialized.length; i++) {
+    if (serialized[i] && serialized[i].truncated === true) {
+      truncated = true;
+      break;
+    }
+  }
+  return { children: serialized, truncated: truncated };
+}
+
+function buildNodeData(node, fields, options, currentDepth) {
+  var requested = Array.isArray(fields) && fields.length > 0 ? fields : DEFAULT_GET_NODE_DATA_FIELDS;
+  var limits = normalizeNodeDataOptions(options);
+  var depth = typeof currentDepth === 'number' ? currentDepth : 0;
+  var data = {
+    id: node.id,
+    type: node.type
+  };
+
+  if (requested.indexOf('name') !== -1) {
+    data.name = node.name;
+  }
+  if (requested.indexOf('fills') !== -1) {
+    data.fills = 'fills' in node ? jsonClone(node.fills) || [] : [];
+  }
+  if (requested.indexOf('strokes') !== -1) {
+    data.strokes = 'strokes' in node ? jsonClone(node.strokes) || [] : [];
+  }
+  if (requested.indexOf('text') !== -1) {
+    if (node.type !== 'TEXT') {
+      data.text = null;
+    } else {
+      data.text = {
+        characters: node.characters,
+        fontName: node.fontName === figma.mixed ? 'mixed' : jsonClone(node.fontName),
+        fontSize: node.fontSize === figma.mixed ? null : node.fontSize,
+        fontsToLoad: collectFontsToLoad(node)
+      };
+    }
+  }
+  if (requested.indexOf('position') !== -1) {
+    data.position = 'x' in node ? { x: node.x, y: node.y } : null;
+  }
+  if (requested.indexOf('parent') !== -1) {
+    data.parent = serializeNodeParent(node);
+  }
+  if (requested.indexOf('size') !== -1) {
+    data.size = 'width' in node ? { width: node.width, height: node.height } : null;
+  }
+  if (requested.indexOf('layoutSizing') !== -1) {
+    data.layoutSizing = {
+      horizontal: 'layoutSizingHorizontal' in node ? node.layoutSizingHorizontal : null,
+      vertical: 'layoutSizingVertical' in node ? node.layoutSizingVertical : null
+    };
+  }
+  if (requested.indexOf('constraints') !== -1) {
+    data.constraints = 'constraints' in node ? jsonClone(node.constraints) : null;
+  }
+  if (requested.indexOf('opacity') !== -1) {
+    data.opacity = 'opacity' in node ? node.opacity : null;
+  }
+  if (requested.indexOf('cornerRadius') !== -1) {
+    if ('cornerRadius' in node) {
+      data.cornerRadius = node.cornerRadius === figma.mixed ? null : node.cornerRadius;
+    } else {
+      data.cornerRadius = null;
+    }
+  }
+  if (requested.indexOf('children') !== -1) {
+    var childData = serializeNodeChildren(node, requested, limits, depth);
+    data.children = childData.children;
+    if (childData.truncated) {
+      data.truncated = true;
+    }
+  }
+
+  return data;
+}
+
 // ============================================================================
 // JSX RENDER HELPERS - Used by CREATE_FROM_JSX handler
 // ============================================================================
@@ -1724,19 +1888,19 @@ figma.ui.onmessage = async (msg) => {
         throw new Error('Node type ' + node.type + ' does not support fills');
       }
 
-      // Process fills - convert hex colors if needed
-      var processedFills = msg.fills.map(function(fill) {
-        if (fill.type === 'SOLID' && typeof fill.color === 'string') {
-          // Convert hex to RGB
-          var rgb = hexToFigmaRGB(fill.color);
-          return {
-            type: 'SOLID',
-            color: { r: rgb.r, g: rgb.g, b: rgb.b },
-            opacity: rgb.a !== undefined ? rgb.a : (fill.opacity !== undefined ? fill.opacity : 1)
-          };
-        }
-        return fill;
-      });
+      var processedFills = msg.preserveRaw === true
+        ? msg.fills
+        : msg.fills.map(function(fill) {
+            if (fill.type === 'SOLID' && typeof fill.color === 'string') {
+              var rgb = hexToFigmaRGB(fill.color);
+              return {
+                type: 'SOLID',
+                color: { r: rgb.r, g: rgb.g, b: rgb.b },
+                opacity: rgb.a !== undefined ? rgb.a : (fill.opacity !== undefined ? fill.opacity : 1)
+              };
+            }
+            return fill;
+          });
 
       node.fills = processedFills;
 
@@ -1754,6 +1918,43 @@ figma.ui.onmessage = async (msg) => {
       console.error('🌉 [Desktop Bridge] Set fills error:', errorMsg);
       figma.ui.postMessage({
         type: 'SET_NODE_FILLS_RESULT',
+        requestId: msg.requestId,
+        success: false,
+        error: errorMsg
+      });
+    }
+  }
+
+  // ============================================================================
+  // SET_LAYOUT_SIZING - Restore auto-layout sizing modes after resize
+  // ============================================================================
+  else if (msg.type === 'SET_LAYOUT_SIZING') {
+    try {
+      console.log('🌉 [Desktop Bridge] Setting layout sizing on node:', msg.nodeId);
+
+      var node = await figma.getNodeByIdAsync(msg.nodeId);
+      if (!node) {
+        throw new Error('Node not found: ' + msg.nodeId);
+      }
+
+      if ('layoutSizingHorizontal' in node && msg.layoutSizingHorizontal != null) {
+        node.layoutSizingHorizontal = msg.layoutSizingHorizontal;
+      }
+      if ('layoutSizingVertical' in node && msg.layoutSizingVertical != null) {
+        node.layoutSizingVertical = msg.layoutSizingVertical;
+      }
+
+      figma.ui.postMessage({
+        type: 'SET_LAYOUT_SIZING_RESULT',
+        requestId: msg.requestId,
+        success: true,
+        node: { id: node.id, name: node.name }
+      });
+    } catch (error) {
+      var errorMsg = error && error.message ? error.message : String(error);
+      console.error('🌉 [Desktop Bridge] Set layout sizing error:', errorMsg);
+      figma.ui.postMessage({
+        type: 'SET_LAYOUT_SIZING_RESULT',
         requestId: msg.requestId,
         success: false,
         error: errorMsg
@@ -2066,6 +2267,36 @@ figma.ui.onmessage = async (msg) => {
   }
 
   // ============================================================================
+  // GET_NODE_DATA - Return request-driven node state for rewind pre-capture
+  // ============================================================================
+  else if (msg.type === 'GET_NODE_DATA') {
+    try {
+      console.log('🌉 [Desktop Bridge] Reading node data:', msg.nodeId, msg.fields || []);
+
+      var node = await figma.getNodeByIdAsync(msg.nodeId);
+      if (!node) {
+        throw new Error('Node not found: ' + msg.nodeId);
+      }
+
+      figma.ui.postMessage({
+        type: 'GET_NODE_DATA_RESULT',
+        requestId: msg.requestId,
+        success: true,
+        data: buildNodeData(node, msg.fields, { depth: msg.depth, maxChildren: msg.maxChildren }, 0)
+      });
+    } catch (error) {
+      var errorMsg = error && error.message ? error.message : String(error);
+      console.error('🌉 [Desktop Bridge] Get node data error:', errorMsg);
+      figma.ui.postMessage({
+        type: 'GET_NODE_DATA_RESULT',
+        requestId: msg.requestId,
+        success: false,
+        error: errorMsg
+      });
+    }
+  }
+
+  // ============================================================================
   // FLATTEN_LAYERS - Collapse single-child wrapper frames to reduce nesting
   // ============================================================================
   else if (msg.type === 'FLATTEN_LAYERS') {
@@ -2174,8 +2405,20 @@ figma.ui.onmessage = async (msg) => {
         throw new Error('Node must be a TEXT node. Got: ' + node.type);
       }
 
-      // Load the font first
-      await figma.loadFontAsync(node.fontName);
+      if (Array.isArray(msg.fontsToLoad) && msg.fontsToLoad.length > 0) {
+        for (var i = 0; i < msg.fontsToLoad.length; i++) {
+          var fontToLoad = msg.fontsToLoad[i];
+          if (fontToLoad && fontToLoad.family && fontToLoad.style) {
+            await figma.loadFontAsync({ family: fontToLoad.family, style: fontToLoad.style });
+          }
+        }
+      } else {
+        await figma.loadFontAsync(node.fontName);
+      }
+
+      if (msg.fontFamily && msg.fontStyle) {
+        node.fontName = { family: msg.fontFamily, style: msg.fontStyle };
+      }
 
       node.characters = msg.text;
 

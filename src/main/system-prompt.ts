@@ -205,6 +205,7 @@ See **figma-execute-safety** reference for: auto-layout property table, node cre
 13. \`figma.currentPage = page\` does NOT work — use \`await figma.setCurrentPageAsync(page)\`
 14. \`getPluginData()/setPluginData()\` not available — use \`setSharedPluginData(namespace, key, value)\`
 15. ALWAYS return JSON with ALL created/mutated node IDs from figma_execute — never return void
+16. Per operazioni atomiche e reversibili (rename, move, resize, set_fills, set_text, set_strokes, set_effects, set_opacity, set_corner_radius), preferisci il tool dedicato rispetto a figma_execute. I tool dedicati creano checkpoint restorable che l'utente può annullare; figma_execute crea checkpoint non-restorable che non si possono rewindare.
 
 ## Anti-Patterns (AVOID)
 

@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { REQUIRED_PLUGIN_VERSION } from '../../src/figma/websocket-server.js';
 
 /**
  * Test helper that connects to the FigmaWebSocketServer,
@@ -9,7 +10,12 @@ export class WsTestClient {
   private received: any[] = [];
   private commandHandlers = new Map<string, (params: any) => any>();
 
-  async connect(port: number, fileKey: string, fileName: string, pluginVersion = 1): Promise<void> {
+  async connect(
+    port: number,
+    fileKey: string,
+    fileName: string,
+    pluginVersion = REQUIRED_PLUGIN_VERSION,
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(`ws://localhost:${port}`);
       this.ws.on('open', () => {

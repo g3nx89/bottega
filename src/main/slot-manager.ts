@@ -206,6 +206,11 @@ export class SlotManager {
 
     this.slots.set(slot.id, slot);
     if (fileKey) this.fileKeyIndex.set(fileKey, slot.id);
+    this.infra.rewindManager?.onSlotReady(
+      slot.id,
+      fileKey || UNBOUND_FILE_KEY,
+      String((runtime.session as any).sessionId ?? slot.id),
+    );
 
     if (this._activeSlotId === null) {
       this._activeSlotId = slot.id;
@@ -263,6 +268,7 @@ export class SlotManager {
       slot.promptQueue.clear();
     }
 
+    this.infra.rewindManager?.onSlotClose(slotId);
     this.infra.queueManager.removeQueue(slot.fileKey || UNBOUND_FILE_KEY);
     this.slots.delete(slotId);
     if (slot.fileKey) this.fileKeyIndex.delete(slot.fileKey);
@@ -321,6 +327,11 @@ export class SlotManager {
       void priorRuntime.dispose().catch((err) => log.warn({ err, slotId }, 'runtime.dispose failed'));
       slot._providerRef.current = modelConfig.provider;
       slot.suggester = new PromptSuggester(this.infra.authStorage);
+      this.infra.rewindManager?.onSlotReady(
+        slot.id,
+        slot.fileKey || UNBOUND_FILE_KEY,
+        String((runtime.session as AgentSessionLike as any).sessionId ?? slot.id),
+      );
       if (slot.thinkingLevel !== DEFAULT_THINKING_LEVEL) {
         slot.session.setThinkingLevel?.(slot.thinkingLevel);
       }

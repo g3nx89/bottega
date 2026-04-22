@@ -18,6 +18,7 @@
 
 import type { FigmaWebSocketServer } from '../figma/websocket-server.js';
 import type { RuleId } from './guardrails/types.js';
+import type { RewindMetrics } from './rewind/metrics.js';
 import type { SlotManager } from './slot-manager.js';
 
 // ─── Public types ──────────────────────────────────────────────────────
@@ -77,6 +78,20 @@ export interface MetricsSnapshot {
     probeFailed: number;
     byRule: Record<string, { evaluated: number; blocked: number; allowed: number }>;
   };
+  rewind: {
+    captured: number;
+    skipped: number;
+    created: number;
+    nonRestorable: number;
+    restorableRatio: number;
+    pruned: number;
+    pluginProbeFailed: number;
+    probeDeferred: number;
+    restoreStarted: number;
+    restoreCompleted: number;
+    restoreFailed: number;
+    undoRestore: { success: number; noToken: number; expired: number };
+  };
   ws: {
     activeFileKey: string | null;
     connectedFiles: Array<{ fileKey: string | null; fileName: string; isActive: boolean }>;
@@ -97,7 +112,7 @@ interface ToolCounters {
   totalDurationMs: number;
 }
 
-export class MetricsRegistry {
+export class MetricsRegistry implements RewindMetrics {
   // Counters owned by the registry. Snapshot reads are O(#slots + #tools).
   private judgeTriggered = 0;
   private judgeSkipped = 0;
@@ -112,6 +127,17 @@ export class MetricsRegistry {
   private guardrailsNoMatch = 0;
   private guardrailsProbeFailed = 0;
   private guardrailsByRule = new Map<string, { evaluated: number; blocked: number; allowed: number }>();
+  private rewindCaptured = 0;
+  private rewindSkipped = 0;
+  private rewindCheckpointsCreated = 0;
+  private rewindCheckpointsNonRestorable = 0;
+  private rewindPruned = 0;
+  private rewindPluginProbeFailed = 0;
+  private rewindProbeDeferred = 0;
+  private rewindRestoreStarted = 0;
+  private rewindRestoreCompleted = 0;
+  private rewindRestoreFailed = 0;
+  private rewindUndoRestore = { success: 0, noToken: 0, expired: 0 };
 
   recordJudgeTriggered(): void {
     this.judgeTriggered += 1;
@@ -178,6 +204,49 @@ export class MetricsRegistry {
     this.guardrailsProbeFailed += 1;
   }
 
+  recordRewindCaptured(): void {
+    this.rewindCaptured += 1;
+  }
+
+  recordRewindSkipped(): void {
+    this.rewindSkipped += 1;
+  }
+
+  recordRewindCheckpointCreated(nonRestorable: boolean): void {
+    this.rewindCheckpointsCreated += 1;
+    if (nonRestorable) this.rewindCheckpointsNonRestorable += 1;
+  }
+
+  recordRewindPruned(count = 1): void {
+    this.rewindPruned += count;
+  }
+
+  recordRewindPluginProbeFailed(): void {
+    this.rewindPluginProbeFailed += 1;
+  }
+
+  recordRewindProbeDeferred(): void {
+    this.rewindProbeDeferred += 1;
+  }
+
+  recordRewindRestoreStarted(_fileKey: string): void {
+    this.rewindRestoreStarted += 1;
+  }
+
+  recordRewindRestoreCompleted(_fileKey: string, _restored: number, _skipped: number, _ms: number): void {
+    this.rewindRestoreCompleted += 1;
+  }
+
+  recordRewindRestoreFailed(_fileKey: string, _reason: string): void {
+    this.rewindRestoreFailed += 1;
+  }
+
+  recordRewindUndoRestore(_fileKey: string, outcome: 'success' | 'no-token' | 'expired'): void {
+    if (outcome === 'success') this.rewindUndoRestore.success += 1;
+    else if (outcome === 'no-token') this.rewindUndoRestore.noToken += 1;
+    else this.rewindUndoRestore.expired += 1;
+  }
+
   reset(): void {
     this.judgeTriggered = 0;
     this.judgeSkipped = 0;
@@ -192,6 +261,17 @@ export class MetricsRegistry {
     this.guardrailsNoMatch = 0;
     this.guardrailsProbeFailed = 0;
     this.guardrailsByRule.clear();
+    this.rewindCaptured = 0;
+    this.rewindSkipped = 0;
+    this.rewindCheckpointsCreated = 0;
+    this.rewindCheckpointsNonRestorable = 0;
+    this.rewindPruned = 0;
+    this.rewindPluginProbeFailed = 0;
+    this.rewindProbeDeferred = 0;
+    this.rewindRestoreStarted = 0;
+    this.rewindRestoreCompleted = 0;
+    this.rewindRestoreFailed = 0;
+    this.rewindUndoRestore = { success: 0, noToken: 0, expired: 0 };
   }
 
   snapshot(deps: MetricsRegistryDeps): MetricsSnapshot {
@@ -233,6 +313,8 @@ export class MetricsRegistry {
     }
 
     const connectedFiles = deps.wsServer.getConnectedFiles();
+    const restorableRatio =
+      this.rewindCheckpointsCreated > 0 ? 1 - this.rewindCheckpointsNonRestorable / this.rewindCheckpointsCreated : 0;
 
     return {
       schemaVersion: 1,
@@ -267,6 +349,20 @@ export class MetricsRegistry {
         noMatch: this.guardrailsNoMatch,
         probeFailed: this.guardrailsProbeFailed,
         byRule: Object.fromEntries([...this.guardrailsByRule.entries()].map(([k, v]) => [k, { ...v }])),
+      },
+      rewind: {
+        captured: this.rewindCaptured,
+        skipped: this.rewindSkipped,
+        created: this.rewindCheckpointsCreated,
+        nonRestorable: this.rewindCheckpointsNonRestorable,
+        restorableRatio,
+        pruned: this.rewindPruned,
+        pluginProbeFailed: this.rewindPluginProbeFailed,
+        probeDeferred: this.rewindProbeDeferred,
+        restoreStarted: this.rewindRestoreStarted,
+        restoreCompleted: this.rewindRestoreCompleted,
+        restoreFailed: this.rewindRestoreFailed,
+        undoRestore: { ...this.rewindUndoRestore },
       },
       ws: {
         activeFileKey: deps.wsServer.getActiveFileKey(),

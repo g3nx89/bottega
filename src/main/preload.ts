@@ -35,6 +35,32 @@ interface FigmaAuthSetResultDTO {
   status?: number;
 }
 
+interface RewindCheckpointEventDTO {
+  id: string;
+  total: number;
+}
+
+interface RewindRestoreResultDTO {
+  success: boolean;
+  restoredMutations: number;
+  skippedMutations: number;
+  undoToken?: string;
+  error?: string;
+}
+
+interface RewindTestCheckpointDTO {
+  fileKey: string;
+  checkpointId?: string;
+  slotId?: string;
+  sessionId?: string;
+  turnIndex?: number;
+  prompt?: string;
+  executeTouched?: boolean;
+  restorableCount?: number;
+  nonRestorableCount?: number;
+  timestamp?: number;
+}
+
 contextBridge.exposeInMainWorld('api', {
   // ── Agent (per-slot) ─────────────────────
   sendPrompt: (slotId: string, text: string) => ipcRenderer.invoke('agent:prompt', slotId, text),
@@ -207,6 +233,38 @@ contextBridge.exposeInMainWorld('api', {
   },
   onJudgeRetryStart: (cb: (slotId: string, attempt: number, max: number) => void) => {
     ipcRenderer.on('judge:retry-start', (_event, slotId, attempt, max) => cb(slotId, attempt, max));
+  },
+
+  checkpoint: {
+    list: (fileKey: string) => ipcRenderer.invoke('checkpoint:list', fileKey),
+    preview: (fileKey: string, checkpointId: string) => ipcRenderer.invoke('checkpoint:preview', fileKey, checkpointId),
+    restore: (fileKey: string, checkpointId: string, scope: 'last-turn' | 'to-checkpoint') =>
+      ipcRenderer.invoke('checkpoint:restore', fileKey, checkpointId, scope),
+    undoRestore: (fileKey: string, undoToken: string) =>
+      ipcRenderer.invoke('checkpoint:undo-restore', fileKey, undoToken),
+    clear: (fileKey: string) => ipcRenderer.invoke('checkpoint:clear', fileKey),
+  },
+  onRewindCheckpointAdded: (cb: (fileKey: string, summary: RewindCheckpointEventDTO) => void) => {
+    ipcRenderer.on('rewind:checkpoint-added', (_event, fileKey: string, summary: RewindCheckpointEventDTO) =>
+      cb(fileKey, summary),
+    );
+  },
+  onRewindRestored: (cb: (fileKey: string, result: RewindRestoreResultDTO) => void) => {
+    ipcRenderer.on('rewind:restored', (_event, fileKey: string, result: RewindRestoreResultDTO) => cb(fileKey, result));
+  },
+  onRewindPluginOutdated: (cb: (fileKey: string | null) => void) => {
+    ipcRenderer.on('rewind:plugin-outdated', (_event, payload: { fileKey?: string | null } | null) => {
+      if (payload && typeof payload === 'object' && 'fileKey' in payload) {
+        cb(payload.fileKey ?? null);
+        return;
+      }
+      cb(null);
+    });
+  },
+  onRewindCheckpointPruned: (cb: (fileKey: string, payload: { prunedCount: number }) => void) => {
+    ipcRenderer.on('rewind:checkpoint-pruned', (_event, fileKey: string, payload: { prunedCount: number } | null) => {
+      cb(fileKey, payload && typeof payload === 'object' ? payload : { prunedCount: 0 });
+    });
   },
 
   // ── Judge control ──────────────────────────
@@ -386,6 +444,14 @@ contextBridge.exposeInMainWorld('api', {
           ipcRenderer.invoke('test:figma-execute', code, timeoutMs, fileKey),
         __testGetMetrics: () => ipcRenderer.invoke('test:get-metrics'),
         __testResetMetrics: () => ipcRenderer.invoke('test:reset-metrics'),
+        __testSeedRewindCheckpoint: (checkpoint: RewindTestCheckpointDTO) =>
+          ipcRenderer.invoke('test:rewind-seed-checkpoint', checkpoint),
+        __testSimulateRewindRestore: (fileKey: string, result?: Partial<RewindRestoreResultDTO>) =>
+          ipcRenderer.invoke('test:rewind-simulate-restore', fileKey, result),
+        __testSimulateRewindUndo: (fileKey: string, result?: Partial<RewindRestoreResultDTO>) =>
+          ipcRenderer.invoke('test:rewind-simulate-undo', fileKey, result),
+        __testEmitRewindPluginOutdated: (fileKey?: string | null) =>
+          ipcRenderer.invoke('test:rewind-plugin-outdated', fileKey ?? null),
       }
     : {}),
 });
