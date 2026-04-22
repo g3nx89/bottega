@@ -101,9 +101,10 @@ return (async () => {
 - Fills/strokes arrays are **IMMUTABLE** — clone, modify, reassign
 - **Set \`layoutMode\` BEFORE any layout props**
 - **\`appendChild\` BEFORE setting \`FILL\`**
+- **Discover fonts BEFORE loading** — call \`figma.listAvailableFontsAsync()\`; style names vary per file ("SemiBold" vs "Semi Bold")
 - **Load fonts BEFORE text**
 - **Use \`getNodeByIdAsync\`** — sync variant throws in dynamic-page mode
-- figma_execute is **ATOMIC**: if a script fails, NO changes are made`,
+- figma_execute is **NOT atomic** — partial mutations persist on failure; inspect with \`figma_get_file_data\` before retry`,
 
   'design-system-discovery': `# Design System Discovery Guide
 
@@ -371,6 +372,59 @@ Create matching Figma variable modes: \`"Light"\` and \`"Dark"\`.
 - [ ] Dark mode overrides
 - [ ] CSS \`box-shadow\` → Effect Styles
 - [ ] Typography: font-family, font-size, font-weight`,
+
+  'variant-system-patterns': `# Variant System Patterns
+
+Advanced patterns for large component sets, variant grids, mode-bound variables, and font discovery.
+
+## When This Applies
+
+- 10+ variants (size × state × theme matrices)
+- Variants bound to variable collection modes (dark/light, compact/comfortable)
+- Font-heavy designs requiring fallback strategies
+
+## Pattern 1 — ComponentSet Grid Layout
+
+\`combineAsVariants()\` stacks children at (0,0). Manual grid layout required.
+
+1. Parse variant \`name\` → \`{ Size, State, ... }\` props
+2. Assign primary prop → column, secondary → row
+3. \`child.x = col * (w + gap); child.y = row * (h + gap)\`
+4. After combine: \`set.resizeWithoutConstraints(maxX + pad, maxY + pad)\`
+
+## Pattern 2 — Variant × Variable Mode Binding
+
+1. Variable collection with modes (Light, Dark)
+2. For each variant: \`variant.setExplicitVariableModeForCollection(collection, modeId)\`
+3. Children: \`setBoundVariableForPaint()\` on fills
+4. Never hardcode modeId — read from \`collection.modes[i].modeId\`
+
+## Pattern 3 — Font Discovery & Fallback
+
+Style names vary per file. Always discover.
+
+\`\`\`js
+const all = await figma.listAvailableFontsAsync();
+const familyFonts = all.filter(f => f.fontName.family === family);
+// Match preferredStyles in order; fallback to first available, then Inter Regular
+\`\`\`
+
+Common variants: Regular↔Roman↔Book, SemiBold↔Semi Bold↔Demi, ExtraBold↔Extra Bold↔Heavy, Italic↔Oblique.
+
+## Pattern 4 — Batched Variant Generation
+
+For 50+ variants:
+- Per-call budget: ≤ 20 creations, ≤ 3s wall time
+- Return IDs each call, retrieve next via \`getNodeByIdAsync\`
+- \`combineAsVariants\` ONLY at end — never mid-sequence (corrupts set)
+
+## Failure Modes
+
+1. All variants overlap at (0,0) — skipped grid layout after combine
+2. Variant switch doesn't change colors — missed \`setExplicitVariableModeForCollection\`
+3. "Font unavailable" — assumed style name instead of discovery
+4. ComponentSet 0×0 — didn't resize from child bounds
+5. Variants absent in property panel — missing \`Prop=Value\` naming convention`,
 };
 /* eslint-enable */
 
@@ -390,6 +444,7 @@ const ID_TO_FILE: Record<string, string> = {
   'token-architecture': 'token-architecture.md',
   'variable-binding': 'variable-binding.md',
   'codebase-token-extraction': 'codebase-token-extraction.md',
+  'variant-system-patterns': 'variant-system-patterns.md',
 };
 
 let _referencesDir = '';

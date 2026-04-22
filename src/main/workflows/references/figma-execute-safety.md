@@ -139,7 +139,9 @@ if (existing) return JSON.stringify({ id: existing.id, reused: true });
 - New nodes appear at (0,0) — scan parent children for maxX, position with offset to avoid overlap
 
 ### Text
+- **Discover fonts BEFORE loading** — font style names vary per file ("SemiBold" vs "Semi Bold" are distinct strings). Call `await figma.listAvailableFontsAsync()` to inspect exact style names. Do NOT guess.
 - **Load fonts BEFORE text** — `await figma.loadFontAsync({family, style})` before any `.characters` assignment
+- **Font fallback chain** — if `loadFontAsync` throws `"font unavailable"`, fall back: listAvailable → filter by family → pick closest style → else Inter Regular. Never assume a style exists.
 - **Set `fontName` BEFORE `characters`** — on text nodes: `fontName = {family, style}` → then `characters = "text"`
 - `lineHeight` and `letterSpacing` must be **objects**: `{ value: 1.5, unit: "PIXELS" }`, not plain numbers
 
@@ -165,7 +167,8 @@ if (existing) return JSON.stringify({ id: existing.id, reused: true });
 
 ## Error Recovery
 
-- figma_execute is **ATOMIC**: if a script fails, NO changes are made. Retry after fix is safe.
+- figma_execute is **NOT atomic**: if a script throws mid-way, prior mutations in the same call PERSIST on canvas. Partial state is possible.
+- Before retrying after a failure: call `figma_get_file_data` (mode 'structure') to inspect what was already created; delete orphans or skip already-done steps. Do NOT blindly re-run the same script — it may duplicate nodes.
 - On error: STOP → Read error message → If unclear, inspect state with `figma_get_file_data` → Fix → Retry
 - **Recoverable**: layout issues, naming, missing font, wrong variable binding — fix and retry
 - **Structural corruption**: component cycles, wrong `combineAsVariants` input — clean up, restart from scratch

@@ -108,7 +108,7 @@ export const CAPABILITIES: Record<WorkflowCapabilityId, WorkflowCapability> = {
       afterMutation: [],
       afterMilestone: [{ type: 'structural', description: 'Confirm component was reused not recreated' }],
     },
-    referenceDocIds: [],
+    referenceDocIds: ['component-reuse', 'variant-system-patterns'],
   },
 
   'library-fork': {

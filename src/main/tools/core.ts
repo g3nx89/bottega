@@ -2,7 +2,12 @@ import { StringEnum } from '@mariozechner/pi-ai';
 import type { ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
+import { createChildLogger } from '../../figma/logger.js';
+import { hashFileKey } from '../usage-tracker.js';
 import { type ToolDeps, textResult } from './index.js';
+import { runPreflightLint } from './plugin-api-linter.js';
+
+const lintLog = createChildLogger({ component: 'plugin-api-linter' });
 
 /**
  * AI vision processing limits per provider (max px on longest side).
@@ -43,6 +48,22 @@ export function createCoreTools(deps: ToolDeps): ToolDefinition[] {
         timeout: Type.Optional(Type.Number({ description: 'Timeout in ms (default: 30000)', default: 30000 })),
       }),
       async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+        const preflight = runPreflightLint(
+          params.code,
+          {
+            codeLength: params.code?.length ?? 0,
+            fileKeyHash: deps.fileKey ? hashFileKey(deps.fileKey) : undefined,
+          },
+          lintLog,
+        );
+        if (!preflight.allowed) {
+          return textResult({
+            success: false,
+            error: 'pre-flight lint failed',
+            lintReport: preflight.report,
+            errors: preflight.result.errors,
+          });
+        }
         return operationQueue.execute(async () => {
           const result = await connector.executeCodeViaUI(params.code, params.timeout ?? 30000);
           return textResult(result);
