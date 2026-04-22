@@ -33,6 +33,7 @@ export function createMockConnector() {
     'resizeNode',
     'moveNode',
     'setNodeFills',
+    'setLayoutSizing',
     'setNodeStrokes',
     'setNodeOpacity',
     'setNodeCornerRadius',
@@ -42,6 +43,7 @@ export function createMockConnector() {
     'flattenLayers',
     'setTextContent',
     'createChildNode',
+    'getNodeData',
     'captureScreenshot',
     'setInstanceProperties',
     'setImageFill',
@@ -154,6 +156,81 @@ export function createMockConfigManager() {
     getActiveProfile: vi.fn().mockReturnValue('balanced'),
     getProfiles: vi.fn().mockReturnValue([]),
     setProfile: vi.fn(),
+  } as any;
+}
+
+/**
+ * IFigmaConnector mock that rejects every async call with a descriptive error.
+ * Use for testing error-path branches — connector methods that surface transport
+ * failures, timeouts, or WS disconnect.
+ */
+export function createFailingConnector(defaultError: Error = new Error('mock: connector failure')) {
+  const mock = createMockConnector();
+  for (const key of Object.keys(mock)) {
+    if (typeof mock[key] !== 'function') continue;
+    if (key === 'getTransportType' || key === 'clearFrameCache') continue;
+    mock[key] = vi.fn().mockRejectedValue(defaultError);
+  }
+  return mock;
+}
+
+/**
+ * IFigmaConnector mock that simulates WS timeout — async methods return a
+ * promise that rejects after `timeoutMs` with a timeout error. Mirrors real
+ * `ws: command timed out` behavior.
+ */
+export function createTimingOutConnector(timeoutMs = 50) {
+  const mock = createMockConnector();
+  for (const key of Object.keys(mock)) {
+    if (typeof mock[key] !== 'function') continue;
+    if (key === 'getTransportType' || key === 'clearFrameCache') continue;
+    mock[key] = vi
+      .fn()
+      .mockImplementation(
+        () => new Promise((_, reject) => setTimeout(() => reject(new Error(`mock: ${key} timed out`)), timeoutMs)),
+      );
+  }
+  return mock;
+}
+
+/**
+ * WebSocket server mock with every connection predicate returning false and
+ * sendCommand rejecting. Simulates "plugin not loaded" or "Figma closed" state.
+ */
+export function createDisconnectedWsServer() {
+  return {
+    sendCommand: vi.fn().mockRejectedValue(new Error('mock: no client connected')),
+    isClientConnected: vi.fn().mockReturnValue(false),
+    isFileConnected: vi.fn().mockReturnValue(false),
+    isStarted: vi.fn().mockReturnValue(true),
+    getConnectedFileInfo: vi.fn().mockReturnValue(null),
+    getConnectedFiles: vi.fn().mockReturnValue([]),
+    getCurrentSelection: vi.fn().mockReturnValue({ nodes: [], count: 0 }),
+    getActiveFileKey: vi.fn().mockReturnValue(null),
+    address: vi.fn().mockReturnValue({ port: 9280 }),
+    on: vi.fn(),
+    emit: vi.fn(),
+  } as any;
+}
+
+/**
+ * FigmaAPI mock whose methods reject with an Error carrying a `.status` field
+ * that mimics fetch response status codes (401/429/500/etc).
+ */
+export function createFailingFigmaAPI(status = 500, body = 'mock: API failure') {
+  const err = Object.assign(new Error(body), { status });
+  return {
+    getFile: vi.fn().mockRejectedValue(err),
+    getComponents: vi.fn().mockRejectedValue(err),
+    getComponentSets: vi.fn().mockRejectedValue(err),
+    searchComponents: vi.fn().mockRejectedValue(err),
+    getLocalVariables: vi.fn().mockRejectedValue(err),
+    getPublishedVariables: vi.fn().mockRejectedValue(err),
+    getAllVariables: vi.fn().mockRejectedValue(err),
+    getNodes: vi.fn().mockRejectedValue(err),
+    getStyles: vi.fn().mockRejectedValue(err),
+    getImages: vi.fn().mockRejectedValue(err),
+    getComponentData: vi.fn().mockRejectedValue(err),
   } as any;
 }
 
