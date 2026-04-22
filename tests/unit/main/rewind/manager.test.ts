@@ -104,6 +104,71 @@ describe('RewindManager', () => {
     );
   });
 
+  it('disables rewind when the connected file reports no currentPageId (missing probe node)', async () => {
+    const metrics = makeMetrics();
+    const connector = { getNodeData: vi.fn() };
+    const manager = new RewindManager({
+      metrics,
+      wsServer: {
+        getConnectedFiles: () => [
+          {
+            fileKey: 'file-1',
+            currentPageId: undefined,
+            fileName: 'Demo',
+            pluginVersion: 2,
+            connectedAt: Date.now(),
+            isActive: true,
+          },
+        ],
+        isFileConnected: () => true,
+        sendCommand: vi.fn(),
+      },
+    });
+
+    await manager.onSessionStart('slot-1', 'file-1', connector as never);
+
+    expect(connector.getNodeData).not.toHaveBeenCalled();
+    expect(metrics.recordRewindPluginProbeFailed).toHaveBeenCalledTimes(1);
+    expect(manager.isEnabled()).toBe(false);
+  });
+
+  it('disables rewind when the probe getNodeData hangs past PROBE_TIMEOUT_MS', async () => {
+    const metrics = makeMetrics();
+    // getNodeData returns a promise that never resolves — the Promise.race
+    // inside onSessionStart must reject with the timeout branch.
+    const connector = { getNodeData: vi.fn(() => new Promise(() => {})) };
+    const manager = new RewindManager({
+      metrics,
+      wsServer: {
+        getConnectedFiles: () => [
+          {
+            fileKey: 'file-1',
+            currentPageId: '0:1',
+            fileName: 'Demo',
+            pluginVersion: 2,
+            connectedAt: Date.now(),
+            isActive: true,
+          },
+        ],
+        isFileConnected: () => true,
+        sendCommand: vi.fn(),
+      },
+    });
+
+    vi.useFakeTimers();
+    try {
+      const probe = manager.onSessionStart('slot-1', 'file-1', connector as never);
+      await vi.advanceTimersByTimeAsync(2500);
+      await probe;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(connector.getNodeData).toHaveBeenCalledTimes(1);
+    expect(metrics.recordRewindPluginProbeFailed).toHaveBeenCalledTimes(1);
+    expect(manager.isEnabled()).toBe(false);
+  });
+
   it('fails last-turn restore when checkpointId does not match the most recent checkpoint', async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), 'rewind-manager-'));
     const store = new RewindStore(root);
