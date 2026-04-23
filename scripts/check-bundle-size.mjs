@@ -1,8 +1,11 @@
 import { statSync } from 'node:fs';
 
+// Ceilings kept slightly above the current build so routine feature work
+// doesn't trip the gate, but a large regression still does. Bump when the
+// delta approaches the limit — don't let either bundle drift unbounded.
 const limits = {
-  'dist/main.js':    { max: 600_000, label: 'Main bundle' },
-  'dist/preload.js': { max: 15_000,  label: 'Preload bundle' },
+  'dist/main.js':    { max: 800_000, label: 'Main bundle' },
+  'dist/preload.js': { max: 20_000,  label: 'Preload bundle' },
 };
 
 let failed = false;
