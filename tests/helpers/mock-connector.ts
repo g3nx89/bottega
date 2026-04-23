@@ -122,6 +122,9 @@ export function createMockFigmaAPI() {
     getStyles: vi.fn().mockResolvedValue({}),
     getImages: vi.fn().mockResolvedValue({ images: {} }),
     getComponentData: vi.fn().mockResolvedValue({}),
+    getMe: vi.fn().mockResolvedValue({ id: 'user-1', handle: 'mock-user' }),
+    getFileVersions: vi.fn().mockResolvedValue({ versions: [] }),
+    getDevResources: vi.fn().mockResolvedValue({ dev_resources: [] }),
   } as any;
 }
 
@@ -231,6 +234,9 @@ export function createFailingFigmaAPI(status = 500, body = 'mock: API failure') 
     getStyles: vi.fn().mockRejectedValue(err),
     getImages: vi.fn().mockRejectedValue(err),
     getComponentData: vi.fn().mockRejectedValue(err),
+    getMe: vi.fn().mockRejectedValue(err),
+    getFileVersions: vi.fn().mockRejectedValue(err),
+    getDevResources: vi.fn().mockRejectedValue(err),
   } as any;
 }
 

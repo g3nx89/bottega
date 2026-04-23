@@ -32,8 +32,8 @@
 | spacing `figma.mixed` | No guard | `n[spProp] !== figma.mixed` guard added | Edge case: cornerRadius can be mixed |
 | Hex color helper | Inline `Math.round(c.r*255).toString(16)...` repeated 5x | Shared `figmaRGBToHex(c)` function | DRY: reduces duplication |
 
-## figma-use (additional handlers)
-- Repo: https://github.com/dannote/figma-use
-- Commit: 3971ea8
+## figma-use handlers (legacy, no longer tracked upstream)
+- Historical source: https://github.com/dannote/figma-use (commit 3971ea8 at time of import)
 - Code ported: CREATE_FROM_JSX handler (from rpc.ts), CREATE_ICON, BIND_VARIABLE
 - Modifications: simplified shorthand expansion, removed Widget API dependency
+- **Status**: Now maintained locally as Bottega-specific handlers. Upstream repo is no longer monitored for updates. Do not confuse with Figma's `use_figma` API/tool — unrelated.

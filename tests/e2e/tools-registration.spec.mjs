@@ -57,10 +57,15 @@ test.describe('Tool expansion stability', () => {
     expect(loaded.success).toBe(true);
   });
 
-  test('figma_get_file_data tool is registered with mode parameter', async () => {
-    // The tool registration happens at startup. If the app launched, tools are registered.
-    // We verify via the main process that the discovery tools include figma_get_file_data.
-    const title = await window.title();
-    expect(title).toBeTruthy(); // App is running — tools loaded successfully including refactored discovery.ts
-  });
+  for (const name of [
+    'figma_get_file_data',
+    'figma_whoami',
+    'figma_get_file_versions',
+    'figma_get_dev_resources',
+  ]) {
+    test(`${name} is registered`, async () => {
+      const names = await app.evaluate(() => globalThis.__BOTTEGA_TOOL_NAMES__ ?? []);
+      expect(names).toContain(name);
+    });
+  }
 });

@@ -1,11 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('../../../src/figma/logger.js', () => ({
+  createChildLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+  registerSecret: vi.fn(),
+  unregisterSecret: vi.fn(),
+}));
+
+import { HttpError } from '../../../src/figma/errors.js';
 import {
   extractFigmaUrlInfo,
   extractFileKey,
+  FigmaAPI,
   formatComponentData,
   formatVariables,
   withTimeout,
 } from '../../../src/figma/figma-api.js';
+import { captureRejection, mockResponse, setupFetchMock } from '../../helpers/mock-response.js';
 
 describe('extractFileKey', () => {
   it('should extract key from /design/ URL', () => {
@@ -177,5 +187,115 @@ describe('withTimeout', () => {
     vi.advanceTimersByTime(51);
     await expect(race).rejects.toThrow('slowOp timed out after 50ms');
     vi.useRealTimers();
+  });
+});
+
+function lastCallUrl(mock: ReturnType<typeof vi.fn>): string {
+  const [input] = mock.mock.calls[mock.mock.calls.length - 1]!;
+  return typeof input === 'string' ? input : String(input);
+}
+
+describe('FigmaAPI REST endpoints — new surface', () => {
+  const h = setupFetchMock();
+  // Each test body accesses the live mock via `h.fetchMock` — the helper
+  // refreshes it in beforeEach so the reference is per-test.
+
+  it('getMe hits /v1/me', async () => {
+    h.fetchMock.mockResolvedValue(mockResponse(200, { id: 'u1', handle: 'alice' }));
+    await new FigmaAPI('figd_test_token').getMe();
+    expect(lastCallUrl(h.fetchMock)).toBe('https://api.figma.com/v1/me');
+  });
+
+  it('getFileVersions without opts emits no query string', async () => {
+    h.fetchMock.mockResolvedValue(mockResponse(200, { versions: [] }));
+    await new FigmaAPI('tok').getFileVersions('fk');
+    expect(lastCallUrl(h.fetchMock)).toBe('https://api.figma.com/v1/files/fk/versions');
+  });
+
+  it('getFileVersions with all opts emits page_size + before + after', async () => {
+    h.fetchMock.mockResolvedValue(mockResponse(200, { versions: [] }));
+    await new FigmaAPI('tok').getFileVersions('fk', { page_size: 10, before: 100, after: 50 });
+    const url = lastCallUrl(h.fetchMock);
+    expect(url).toContain('/v1/files/fk/versions?');
+    expect(url).toContain('page_size=10');
+    expect(url).toContain('before=100');
+    expect(url).toContain('after=50');
+  });
+
+  it('getDevResources without nodeIds emits no query string', async () => {
+    h.fetchMock.mockResolvedValue(mockResponse(200, { dev_resources: [] }));
+    await new FigmaAPI('tok').getDevResources('fk');
+    expect(lastCallUrl(h.fetchMock)).toBe('https://api.figma.com/v1/files/fk/dev_resources');
+  });
+
+  it('getDevResources with empty nodeIds list emits no query string', async () => {
+    h.fetchMock.mockResolvedValue(mockResponse(200, { dev_resources: [] }));
+    await new FigmaAPI('tok').getDevResources('fk', []);
+    expect(lastCallUrl(h.fetchMock)).toBe('https://api.figma.com/v1/files/fk/dev_resources');
+  });
+
+  it('getDevResources forwards node_ids when list is non-empty', async () => {
+    h.fetchMock.mockResolvedValue(mockResponse(200, { dev_resources: [] }));
+    await new FigmaAPI('tok').getDevResources('fk', ['1:2', '3:4']);
+    expect(lastCallUrl(h.fetchMock)).toContain('node_ids=1%3A2%2C3%3A4');
+  });
+});
+
+describe("FigmaAPI.getNodes — missingNodePolicy: 'throw' truncation", () => {
+  const h = setupFetchMock();
+  // Each test body accesses the live mock via `h.fetchMock` — the helper
+  // refreshes it in beforeEach so the reference is per-test.
+
+  it('lists up to 5 missing nodeIds and appends (+N more)', async () => {
+    const ids = ['a:1', 'a:2', 'a:3', 'a:4', 'a:5', 'a:6'];
+    const nodes: Record<string, null> = {};
+    for (const id of ids) nodes[id] = null;
+    h.fetchMock.mockResolvedValue(mockResponse(200, { nodes }));
+
+    const caught = (await captureRejection(
+      new FigmaAPI('tok').getNodes('fk', ids, { missingNodePolicy: 'throw' }),
+    )) as HttpError;
+
+    expect(caught).toBeInstanceOf(HttpError);
+    expect(caught.status).toBe(404);
+    expect(caught.message).toContain('a:1, a:2, a:3, a:4, a:5');
+    expect(caught.message).toContain('(+1 more)');
+    expect(caught.message).not.toContain('a:6,');
+  });
+});
+
+describe('FigmaAPI — when token is rotated mid-flight (B4 epoch guard)', () => {
+  const h = setupFetchMock();
+  // Each test body accesses the live mock via `h.fetchMock` — the helper
+  // refreshes it in beforeEach so the reference is per-test.
+
+  it('stale in-flight 403s do NOT disable the new token', async () => {
+    const api = new FigmaAPI('figd_oldtoken1234567890a');
+
+    // Hold the 3 in-flight requests open while we rotate.
+    const deferred: Array<(res: Response) => void> = [];
+    h.fetchMock.mockImplementation(() => new Promise<Response>((resolve) => deferred.push(resolve)));
+
+    const p1 = api.getFile('k1').catch((e) => e);
+    const p2 = api.getFile('k2').catch((e) => e);
+    const p3 = api.getFile('k3').catch((e) => e);
+
+    // Poll with a bounded timeout instead of a microtask-ordering hack —
+    // survives future refactors that add pre-fetch `await`s to request().
+    await vi.waitFor(() => expect(deferred).toHaveLength(3), { timeout: 1000, interval: 5 });
+
+    // Rotate BEFORE the stale 403s land.
+    api.setAccessToken('figd_newtoken1234567890a');
+
+    for (const resolve of deferred) {
+      resolve(mockResponse(403, '{"err":"Invalid token"}'));
+    }
+    await Promise.all([p1, p2, p3]);
+
+    // Post-rotation call must succeed — the breaker must not have tripped.
+    h.fetchMock.mockReset();
+    h.fetchMock.mockResolvedValueOnce(mockResponse(200, { ok: true }));
+    const res = await api.getFile('k-post-rotation');
+    expect(res).toEqual({ ok: true });
   });
 });

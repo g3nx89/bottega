@@ -10,6 +10,7 @@ import { readMeta, writeMeta } from './auth-meta.js';
 import { readSnapshot, writeSnapshot } from './auth-snapshot.js';
 import { decideAutoFallback } from './auto-fallback.js';
 import { initAutoUpdater } from './auto-updater.js';
+import { isTestMode } from './constants.js';
 import { cleanOldLogs, collectSystemInfo } from './diagnostics.js';
 import { FigmaAuthStore } from './figma-auth-store.js';
 import { createFigmaCore } from './figma-core.js';
@@ -198,10 +199,10 @@ if (!gotTheLock) {
       // Clean up log files older than 30 days (async, fire-and-forget — don't block startup)
       cleanOldLogs().catch(() => {});
 
-      const isTestMode = !!process.env.BOTTEGA_TEST_MODE;
+      const testMode = isTestMode();
 
       // 1. Start Figma core (WebSocket server — port 0 in test mode for auto-assign)
-      const wsPort = isTestMode ? 0 : DEFAULT_WS_PORT;
+      const wsPort = testMode ? 0 : DEFAULT_WS_PORT;
       const figmaAuthStore = new FigmaAuthStore();
       const savedFigmaToken = figmaAuthStore.getToken();
       log.info({ hasFigmaToken: !!savedFigmaToken }, 'Figma REST API auth state loaded');
@@ -236,7 +237,7 @@ if (!gotTheLock) {
       //    In test mode, use stub infra.
       let infra: Awaited<ReturnType<typeof createAgentInfra>>;
 
-      if (isTestMode) {
+      if (testMode) {
         log.info('Test mode: using stub agent infra');
         const { CompressionConfigManager } = await import('./compression/compression-config.js');
         const { DesignSystemCache } = await import('./compression/design-system-cache.js');

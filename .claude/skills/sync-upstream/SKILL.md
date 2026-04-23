@@ -1,6 +1,6 @@
 ---
 name: sync-upstream
-description: Sync src/figma/ and figma-desktop-bridge/ with their upstream repositories (figma-console-mcp, figma-use). Checks for new commits, diffs changes, applies patches, and updates UPSTREAM.md. Use when the user asks to "sync upstream", "check upstream", "update figma core", or "pull upstream changes".
+description: Sync src/figma/ and figma-desktop-bridge/ with their upstream repository (figma-console-mcp). Checks for new commits, diffs changes, applies patches, and updates UPSTREAM.md. Use when the user asks to "sync upstream", "check upstream", "update figma core", or "pull upstream changes".
 disable-model-invocation: true
 ---
 
@@ -8,12 +8,14 @@ disable-model-invocation: true
 
 Synchronize embedded/forked code with upstream repositories.
 
+> **Note**: Historically the plugin also imported handlers from `dannote/figma-use` (CREATE_FROM_JSX, CREATE_ICON, BIND_VARIABLE). That fork is **no longer monitored** — handlers are now maintained locally as Bottega-specific additions. Do not confuse `figma-use` (legacy repo name) with Figma's `use_figma` API/tool.
+
 ## Upstream Sources
 
 | Local Path | Upstream Repo | Tracking File |
 |-----------|---------------|---------------|
 | `src/figma/` | [southleft/figma-console-mcp](https://github.com/southleft/figma-console-mcp) | `src/figma/UPSTREAM.md` |
-| `figma-desktop-bridge/` | [southleft/figma-console-mcp](https://github.com/southleft/figma-console-mcp) (plugin) + [dannote/figma-use](https://github.com/dannote/figma-use) | `figma-desktop-bridge/UPSTREAM.md` |
+| `figma-desktop-bridge/` | [southleft/figma-console-mcp](https://github.com/southleft/figma-console-mcp) (plugin) | `figma-desktop-bridge/UPSTREAM.md` |
 
 ## Workflow
 
@@ -21,7 +23,7 @@ Synchronize embedded/forked code with upstream repositories.
 
 Read both UPSTREAM.md files to get the currently tracked commits:
 - `src/figma/UPSTREAM.md` — pinned commit for the core library
-- `figma-desktop-bridge/UPSTREAM.md` — pinned commits for both figma-console-mcp plugin and figma-use
+- `figma-desktop-bridge/UPSTREAM.md` — pinned commit for the figma-console-mcp plugin
 
 ### Step 2: Check for New Upstream Commits
 
@@ -30,9 +32,6 @@ For each upstream repo, check what changed since the pinned commit:
 ```bash
 # figma-console-mcp — check for new commits
 gh api repos/southleft/figma-console-mcp/commits?per_page=10 --jq '.[].sha[:7] + " " + (.commit.message | split("\n")[0])'
-
-# figma-use — check for new commits
-gh api repos/dannote/figma-use/commits?per_page=10 --jq '.[].sha[:7] + " " + (.commit.message | split("\n")[0])'
 ```
 
 Compare the latest commit with the pinned commit in UPSTREAM.md. If they match, report "already up to date" and stop.
@@ -57,15 +56,6 @@ git diff $PINNED_COMMIT..HEAD -- src/websocket-server.ts src/websocket-connector
 ```bash
 # Diff plugin files
 git diff $PINNED_COMMIT..HEAD -- figma-plugin/code.js figma-plugin/ui.html figma-plugin/manifest.json
-```
-
-**For figma-use handlers:**
-```bash
-PINNED_COMMIT=$(grep -A1 'figma-use' figma-desktop-bridge/UPSTREAM.md | grep -oP 'Commit: \K\w+')
-TMPDIR2=$(mktemp -d)
-git clone --depth=50 https://github.com/dannote/figma-use.git "$TMPDIR2/upstream"
-cd "$TMPDIR2/upstream"
-git diff $PINNED_COMMIT..HEAD -- src/rpc.ts
 ```
 
 ### Step 4: Present Changes for Review

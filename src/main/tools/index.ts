@@ -6,6 +6,7 @@ import type { FigmaWebSocketServer } from '../../figma/websocket-server.js';
 import type { CompressionConfigManager } from '../compression/compression-config.js';
 import type { DesignSystemCache } from '../compression/design-system-cache.js';
 import { toYaml } from '../compression/yaml-emitter.js';
+import { isTestMode } from '../constants.js';
 
 const log = createChildLogger({ component: 'tool' });
 
@@ -126,5 +127,12 @@ export function createFigmaTools(deps: ToolDeps): ToolDefinition[] {
     ...createAnnotationTools(deps),
     ...(deps.getImageGenerator ? createImageGenTools(deps) : []),
   ];
+  // E2E introspection: publish the tool surface when running under test harness
+  // so Playwright can assert the registered tool names without string-parsing
+  // logs or inventing private stubs. Gated on BOTTEGA_TEST_MODE to avoid any
+  // runtime cost (or global-pollution surface) in production.
+  if (isTestMode()) {
+    globalThis.__BOTTEGA_TOOL_NAMES__ = tools.map((t) => t.name);
+  }
   return tools.map(withAbortCheck);
 }

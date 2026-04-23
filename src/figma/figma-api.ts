@@ -1,9 +1,41 @@
 /**
  * Figma REST API Client
- * Handles HTTP calls to Figma's REST API for file data, variables, components, and styles
+ * Handles HTTP calls to Figma's REST API for file data, variables, components, and styles.
+ *
+ * Error surfacing adapted from Figma-Context-MCP (MIT, © 2025 Graham Lipsman)
+ * commits 12280ba and 334ae2b. See src/figma/errors.ts for the HttpError and
+ * ErrorCategory types.
  */
 
-import { createChildLogger } from './logger.js';
+import { FIGMA_OAUTH_PREFIX } from './constants.js';
+import {
+  annotateError,
+  buildForbiddenMessage,
+  buildMissingNodeMessage,
+  buildNotFoundMessage,
+  buildRateLimitMessage,
+  extractFigmaErr,
+  getConnectionErrorCode,
+  HttpError,
+  httpStatusCategory,
+  redactAndTruncateBody,
+  redactErrorStrings,
+} from './errors.js';
+import { createChildLogger, registerSecret, unregisterSecret } from './logger.js';
+
+/**
+ * Figma `err` strings (returned as the `err` field of a 403 body) that
+ * indicate the access token itself is invalid — distinct from file/scope
+ * permission errors. Matching any of these trips the circuit breaker.
+ * Substring-matching on the whole error body was too loose and missed
+ * rotated/expired-token cases that use different phrasing.
+ */
+const AUTH_INVALIDATION_ERRS: ReadonlySet<string> = new Set([
+  'Invalid token',
+  'Token expired',
+  'Token revoked',
+  'Invalid API key',
+]);
 
 const logger = createChildLogger({ component: 'figma-api' });
 
@@ -31,6 +63,50 @@ export interface FigmaUrlInfo {
   fileKey: string;
   branchId?: string;
   nodeId?: string;
+}
+
+/**
+ * Authenticated user identity returned by GET /v1/me.
+ *
+ * `email` is intentionally NOT declared: Figma returns it, but Bottega must
+ * never surface it to the agent (PII). If a future caller legitimately needs
+ * email (e.g. user-visible UI only), narrow the raw response at that call
+ * site — do NOT add `email` here.
+ */
+export interface FigmaUser {
+  id: string;
+  handle: string;
+  img_url?: string;
+}
+
+/** Single entry in GET /v1/files/:key/versions. */
+export interface FigmaFileVersion {
+  id: string;
+  created_at: string;
+  label: string | null;
+  description: string | null;
+  user: { id: string; handle: string; img_url?: string };
+  thumbnail_url?: string;
+}
+
+/** Response shape of GET /v1/files/:key/versions. */
+export interface FigmaVersionsResponse {
+  versions: FigmaFileVersion[];
+  pagination?: { prev_page?: string; next_page?: string };
+}
+
+/** Single Dev Mode resource attached to a node. */
+export interface FigmaDevResource {
+  id: string;
+  name: string;
+  url: string;
+  file_key: string;
+  node_id: string;
+}
+
+/** Response shape of GET /v1/files/:key/dev_resources. */
+export interface FigmaDevResourcesResponse {
+  dev_resources: FigmaDevResource[];
 }
 
 /**
@@ -85,9 +161,22 @@ export class FigmaAPI {
   private accessToken: string;
   private consecutive403Count = 0;
   private apiDisabled = false;
+  /**
+   * Monotonic counter incremented on every `setAccessToken()` call. `request()`
+   * captures the epoch at start; post-fetch mutations to
+   * `consecutive403Count`/`apiDisabled` and error-path redaction are gated on
+   * epoch equality so a stale in-flight response can't disable a newly
+   * rotated token or leak the old secret through redaction done with the new
+   * `this.accessToken`.
+   */
+  private tokenEpoch = 0;
   private static readonly MAX_403_BEFORE_DISABLE = 3;
-  /** W-002: Transient HTTP codes eligible for retry with backoff. */
-  private static readonly RETRYABLE_CODES = new Set([429, 500, 502, 503]);
+  /**
+   * W-002: Transient HTTP codes eligible for retry with backoff. Includes
+   * 408 (Request Timeout) and 504 (Gateway Timeout) which flaky corporate
+   * proxies commonly produce — matches upstream figma-developer-mcp parity.
+   */
+  private static readonly RETRYABLE_CODES = new Set([408, 429, 500, 502, 503, 504]);
   private static readonly MAX_RETRIES = 2;
   private static readonly BACKOFF_BASE_MS = 1_000;
   private static readonly BACKOFF_MAX_MS = 10_000;
@@ -96,6 +185,7 @@ export class FigmaAPI {
 
   constructor(accessToken?: string) {
     this.accessToken = accessToken || '';
+    registerSecret(this.accessToken);
   }
 
   /**
@@ -113,7 +203,25 @@ export class FigmaAPI {
    * Do NOT refactor this to a plain setter without preserving that behavior.
    */
   setAccessToken(token: string): void {
-    this.accessToken = token || '';
+    // Register new token BEFORE unregistering old one so the global secret set
+    // never has an empty transient window during rotation — in-flight error
+    // serialization that runs during this call still scrubs both.
+    // Skip the register/unregister dance if the token didn't actually change —
+    // otherwise `register(same)` is a Set no-op and the subsequent
+    // `unregister(previous)` would silently drop the token from the scrub
+    // registry, defeating redaction on future logs.
+    const previous = this.accessToken;
+    const next = token || '';
+    if (next !== previous) {
+      this.accessToken = next;
+      registerSecret(this.accessToken);
+      unregisterSecret(previous);
+      // tokenEpoch tracks token-identity changes, not setter-call count. If the
+      // token did not actually change, incrementing would cause in-flight
+      // requests (epochAtStart = previousEpoch) to be treated as stale — their
+      // legitimate 403s would be silently ignored by the epoch-gated breaker.
+      this.tokenEpoch++;
+    }
     this.consecutive403Count = 0;
     this.apiDisabled = false;
     logger.info({ hasToken: !!this.accessToken }, 'Figma API access token updated');
@@ -174,29 +282,13 @@ export class FigmaAPI {
    * W-002: Retries transient errors (429, 5xx) with exponential backoff.
    */
   private async request(endpoint: string, options: RequestInit = {}): Promise<any> {
-    if (this.apiDisabled) {
-      throw new Error('Figma REST API disabled: invalid token (3 consecutive 403s)');
-    }
-    if (!this.accessToken) {
-      // Fast-fail: previously we'd proceed with an empty `X-Figma-Token` header
-      // and wait for 3 fresh 403s before disabling. After a Clear token click,
-      // in-flight tools must stop immediately — not waste 3 round-trips.
-      throw new Error('Figma REST API token not configured');
-    }
-
+    this.assertApiEnabled();
     const url = `${FIGMA_API_BASE}${endpoint}`;
-    const isOAuthToken = this.accessToken.startsWith('figu_');
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...((options.headers as Record<string, string>) || {}),
-    };
-
-    if (isOAuthToken) {
-      headers.Authorization = `Bearer ${this.accessToken}`;
-    } else {
-      headers['X-Figma-Token'] = this.accessToken;
-    }
+    const { headers, isOAuthToken } = this.buildRequestHeaders(options);
+    // Snapshot both at request start so an in-flight rotation (setAccessToken)
+    // can't poison the breaker or leak the OLD token through error redaction.
+    const epochAtStart = this.tokenEpoch;
+    const secretAtStart = this.accessToken;
 
     for (let attempt = 0; attempt <= FigmaAPI.MAX_RETRIES; attempt++) {
       logger.info(
@@ -210,24 +302,41 @@ export class FigmaAPI {
         'Making Figma API request',
       );
 
-      const response = await fetch(url, {
-        ...options,
-        headers,
-      });
+      const response = await this.fetchWithNetworkTagging(url, options, headers, secretAtStart);
 
       if (response.ok) {
-        // Reset 403 counter on success
-        this.consecutive403Count = 0;
+        if (epochAtStart === this.tokenEpoch) this.consecutive403Count = 0;
         return await response.json();
       }
 
-      const errorText = await response.text();
+      // Body-read can throw with the request URL or a fragment of the token
+      // embedded in the error message (undici stream errors, interrupted TLS).
+      // Redact that message with `secretAtStart` before rethrowing so a
+      // rotated-away token doesn't leak through the global set after
+      // `unregisterSecret` has already run for the old value.
+      //
+      // Tag as `network` (not `figma_api`): the HTTP response arrived but the
+      // body stream aborted — socket/TLS class of failure. `http_status` is
+      // preserved as context so dashboards can still see which response the
+      // read failed on.
+      let errorText: string;
+      try {
+        errorText = await response.text();
+      } catch (readErr) {
+        const msg = redactErrorStrings((readErr as { message?: string })?.message, [secretAtStart]);
+        // `is_retryable: false` — the response arrived, so retrying the same
+        // request is unlikely to self-heal a persistent body-stream failure.
+        // Tagging retryable would risk upstream retry-storms on TLS-MITM or
+        // corporate-proxy truncation paths.
+        throw annotateError(Object.assign(readErr as Error, { message: typeof msg === 'string' ? msg : String(msg) }), {
+          category: 'network',
+          http_status: response.status,
+          is_retryable: false,
+        });
+      }
 
-      // W-002: Retry transient errors with exponential backoff + jitter
       if (FigmaAPI.RETRYABLE_CODES.has(response.status) && attempt < FigmaAPI.MAX_RETRIES) {
-        const baseDelay = Math.min(FigmaAPI.BACKOFF_BASE_MS * 2 ** attempt, FigmaAPI.BACKOFF_MAX_MS);
-        const jitter = Math.random() * FigmaAPI.BACKOFF_JITTER_MS;
-        const delay = baseDelay + jitter;
+        const delay = FigmaAPI.computeBackoffDelay(attempt);
         logger.warn(
           { status: response.status, attempt, delay: Math.round(delay) },
           'Figma API transient error — retrying with backoff',
@@ -236,28 +345,162 @@ export class FigmaAPI {
         continue;
       }
 
-      // Non-retryable or exhausted retries — log and throw
+      const redactedBody = redactAndTruncateBody(errorText, [secretAtStart]);
       logger.error(
-        { status: response.status, statusText: response.statusText, body: errorText },
+        { status: response.status, statusText: response.statusText, body: redactedBody },
         'Figma API request failed',
       );
 
-      // Only count 403s that indicate a genuinely invalid token (not file-level permission errors)
-      if (response.status === 403 && errorText.includes('Invalid token')) {
-        this.consecutive403Count++;
-        if (this.consecutive403Count >= FigmaAPI.MAX_403_BEFORE_DISABLE) {
-          this.apiDisabled = true;
-          logger.warn('Figma REST API disabled: invalid token (3 consecutive 403s)');
-        }
-      } else if (response.status !== 403) {
-        this.consecutive403Count = 0;
+      const figmaErr = extractFigmaErr(errorText);
+      if (epochAtStart === this.tokenEpoch) {
+        this.update403CircuitBreaker(response.status, figmaErr);
       }
 
-      throw new Error(`Figma API error (${response.status}): ${errorText}`);
+      throw FigmaAPI.buildErrorFromResponse(response, errorText, endpoint, secretAtStart);
     }
 
-    // Should not be reached, but satisfies TypeScript
-    throw new Error(`Figma API error: max retries exceeded for ${endpoint}`);
+    // Unreachable — every loop iteration exits via return/continue/throw.
+    // This final throw exists so TS sees a total function and so the
+    // invariant is explicit if future refactors break the loop contract.
+    throw new HttpError(`Figma API error: max retries exceeded for ${endpoint}`, {
+      status: 0,
+      meta: { category: 'internal', is_retryable: false },
+    });
+  }
+
+  /** Fast-fail if the client is disabled or missing a token. */
+  private assertApiEnabled(): void {
+    if (this.apiDisabled) {
+      // Throw HttpError (not plain Error) so downstream type guards and the
+      // err-serializer see uniform shape for auth failures. Status 0 denotes
+      // "no request was sent" — the circuit breaker fired locally.
+      throw new HttpError('Figma REST API disabled: invalid token (3 consecutive 403s)', {
+        status: 0,
+        meta: { category: 'auth', is_retryable: false },
+      });
+    }
+    if (!this.accessToken) {
+      throw new HttpError('Figma REST API token not configured', {
+        status: 0,
+        meta: { category: 'auth', is_retryable: false },
+      });
+    }
+  }
+
+  /**
+   * Build request headers with the correct Figma auth scheme. OAuth tokens
+   * (`figu_*`) use Authorization: Bearer; PATs use X-Figma-Token.
+   */
+  private buildRequestHeaders(options: RequestInit): {
+    headers: Record<string, string>;
+    isOAuthToken: boolean;
+  } {
+    const isOAuthToken = this.accessToken.startsWith(FIGMA_OAUTH_PREFIX);
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...((options.headers as Record<string, string>) || {}),
+    };
+    if (isOAuthToken) {
+      headers.Authorization = `Bearer ${this.accessToken}`;
+    } else {
+      headers['X-Figma-Token'] = this.accessToken;
+    }
+    return { headers, isOAuthToken };
+  }
+
+  /** Exponential backoff with jitter, capped at BACKOFF_MAX_MS. */
+  private static computeBackoffDelay(attempt: number): number {
+    const baseDelay = Math.min(FigmaAPI.BACKOFF_BASE_MS * 2 ** attempt, FigmaAPI.BACKOFF_MAX_MS);
+    const jitter = Math.random() * FigmaAPI.BACKOFF_JITTER_MS;
+    return baseDelay + jitter;
+  }
+
+  /**
+   * Wrap `fetch()` to tag network-layer failures with a `network` category
+   * for Axiom, redacting any token that leaked into the error message/stack
+   * before logging. Non-network errors are tagged `internal`.
+   */
+  private async fetchWithNetworkTagging(
+    url: string,
+    options: RequestInit,
+    headers: Record<string, string>,
+    secretAtStart: string,
+  ): Promise<Response> {
+    try {
+      return await fetch(url, { ...options, headers });
+    } catch (err) {
+      const networkCode = getConnectionErrorCode(err);
+      const redactedMessage = redactErrorStrings((err as { message?: string })?.message, [secretAtStart]);
+      if (networkCode) {
+        logger.warn({ url, networkCode, errMessage: redactedMessage }, 'Figma API network error');
+        throw annotateError(err, {
+          category: 'network',
+          network_code: networkCode,
+          is_retryable: true,
+        });
+      }
+      throw annotateError(err, { category: 'internal', is_retryable: false });
+    }
+  }
+
+  /**
+   * Increment the 403 circuit breaker on auth-invalidation errors so
+   * rotated/expired/revoked tokens stop the app from hammering a dead
+   * credential. Matches the `figmaErr` field (the parsed Figma `err`),
+   * not arbitrary substring of the whole body, so the breaker reacts to
+   * every phrasing Figma uses — not just the literal "Invalid token".
+   */
+  private update403CircuitBreaker(status: number, figmaErr: string | undefined): void {
+    if (status === 403 && figmaErr && AUTH_INVALIDATION_ERRS.has(figmaErr)) {
+      this.consecutive403Count++;
+      if (this.consecutive403Count >= FigmaAPI.MAX_403_BEFORE_DISABLE) {
+        this.apiDisabled = true;
+        logger.warn('Figma REST API disabled: auth token invalidated (3 consecutive 403s)');
+      }
+    } else if (status !== 403) {
+      this.consecutive403Count = 0;
+    }
+  }
+
+  /**
+   * Build a structured HttpError from a non-ok Response. Extracted so the
+   * retry loop body stays readable and so the error-construction logic is
+   * unit-testable in isolation.
+   */
+  private static buildErrorFromResponse(
+    response: Response,
+    errorText: string,
+    endpoint: string,
+    accessToken: string,
+  ): HttpError {
+    const figmaErr = extractFigmaErr(errorText);
+    const responseBody = redactAndTruncateBody(errorText, [accessToken]);
+    const responseHeaders = Object.fromEntries(response.headers);
+
+    // Message prefix `Figma API error (<status>)` is load-bearing: existing
+    // tests and tool callers parse it. For 403/404/429 we append the
+    // actionable remediation hint so the agent can self-heal.
+    let message: string;
+    if (response.status === 403) {
+      message = buildForbiddenMessage(endpoint, figmaErr);
+    } else if (response.status === 404) {
+      message = buildNotFoundMessage(endpoint, figmaErr);
+    } else if (response.status === 429) {
+      message = buildRateLimitMessage(endpoint, responseHeaders['retry-after']);
+    } else {
+      message = `Figma API error (${response.status}): ${responseBody}`;
+    }
+
+    return new HttpError(message, {
+      status: response.status,
+      responseBody,
+      responseHeaders,
+      figmaErr,
+      meta: {
+        category: httpStatusCategory(response.status),
+        is_retryable: FigmaAPI.RETRYABLE_CODES.has(response.status),
+      },
+    });
   }
 
   /**
@@ -358,6 +601,18 @@ export class FigmaAPI {
       depth?: number;
       geometry?: 'paths' | 'screen';
       plugin_data?: string;
+      /**
+       * Policy for nodes that resolve to `null` in the 200 response (valid-
+       * format ID that doesn't exist in the file).
+       * - `'tolerate'` (default): return the partial response unchanged. Used
+       *   by `getComponentData` and tools that render mixed-validity siblings.
+       * - `'throw'`: raise `HttpError(404)` listing the missing IDs. Opt in
+       *   when the caller cannot meaningfully proceed with a partial result.
+       *
+       * String union (not boolean) so future states like `'warn'` or
+       * `'partial'` are additive instead of breaking.
+       */
+      missingNodePolicy?: 'tolerate' | 'throw';
     },
   ): Promise<any> {
     let endpoint = `/files/${fileKey}/nodes`;
@@ -371,7 +626,26 @@ export class FigmaAPI {
 
     endpoint += `?${params.toString()}`;
 
-    return this.request(endpoint);
+    const response = await this.request(endpoint);
+
+    if (options?.missingNodePolicy === 'throw' && response && typeof response === 'object' && response.nodes) {
+      const nodesMap = response.nodes as Record<string, unknown>;
+      // Use `hasOwn` + explicit `=== null` so "key absent" and "key present
+      // with null value" aren't conflated; in practice Figma always returns
+      // the key, but the distinction keeps the error message truthful.
+      const missing = nodeIds.filter((id) => !Object.hasOwn(nodesMap, id) || nodesMap[id] === null);
+      if (missing.length > 0) {
+        throw new HttpError(buildMissingNodeMessage(fileKey, missing), {
+          status: 404,
+          meta: {
+            category: 'not_found',
+            is_retryable: false,
+          },
+        });
+      }
+    }
+
+    return response;
   }
 
   /**
@@ -515,6 +789,38 @@ export class FigmaAPI {
     const components = meta?.components || [];
 
     return components.filter((comp: any) => comp.name?.toLowerCase().includes(searchTerm.toLowerCase()));
+  }
+
+  /**
+   * GET /v1/me — authenticated user identity.
+   */
+  async getMe(): Promise<FigmaUser> {
+    return this.request('/me');
+  }
+
+  /**
+   * GET /v1/files/:file_key/versions — file version history (paginated).
+   */
+  async getFileVersions(
+    fileKey: string,
+    options?: { page_size?: number; before?: number; after?: number },
+  ): Promise<FigmaVersionsResponse> {
+    const params = new URLSearchParams();
+    if (options?.page_size !== undefined) params.set('page_size', String(options.page_size));
+    if (options?.before !== undefined) params.set('before', String(options.before));
+    if (options?.after !== undefined) params.set('after', String(options.after));
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/files/${fileKey}/versions${query}`);
+  }
+
+  /**
+   * GET /v1/files/:file_key/dev_resources — Dev Mode resource links on a file.
+   */
+  async getDevResources(fileKey: string, nodeIds?: string[]): Promise<FigmaDevResourcesResponse> {
+    const params = new URLSearchParams();
+    if (nodeIds && nodeIds.length > 0) params.set('node_ids', nodeIds.join(','));
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return this.request(`/files/${fileKey}/dev_resources${query}`);
   }
 }
 

@@ -16,6 +16,8 @@ vi.mock('../../../src/figma/logger.js', () => ({
     debug: vi.fn(),
     fatal: vi.fn(),
   }),
+  registerSecret: vi.fn(),
+  unregisterSecret: vi.fn(),
 }));
 
 import { FigmaAPI } from '../../../src/figma/figma-api.js';
@@ -39,8 +41,9 @@ describe('FigmaAPI.setAccessToken', () => {
       ok: false,
       status: 403,
       statusText: 'Forbidden',
-      text: async () => 'Invalid token',
-      json: async () => ({}),
+      headers: new Headers(),
+      text: async () => '{"err":"Invalid token"}',
+      json: async () => ({ err: 'Invalid token' }),
     });
   }
 
@@ -49,6 +52,7 @@ describe('FigmaAPI.setAccessToken', () => {
       ok: true,
       status: 200,
       statusText: 'OK',
+      headers: new Headers(),
       json: async () => body,
       text: async () => JSON.stringify(body),
     });

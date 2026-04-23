@@ -193,7 +193,7 @@ See **figma-execute-safety** reference for: auto-layout property table, node cre
 1. Colors use 0-1 range, NOT 0-255: \`{ r: 0.65, g: 0.35, b: 1.0 }\` for purple
 2. Fills/strokes arrays are IMMUTABLE — clone, modify, reassign: \`node.fills = [...node.fills.map(f => ({...f, ...changes}))]\`
 3. \`setBoundVariableForPaint()\` returns a NEW paint object — capture the return value and reassign to fills/strokes array
-4. COLOR variable values include alpha \`{r,g,b,a}\`, paint colors do NOT \`{r,g,b}\` — handle the difference
+4. COLOR variable values include alpha \`{r,g,b,a}\`, paint colors do NOT. **Paint \`color\` must be \`{r,g,b}\` only** — adding \`a\` throws \`"Unrecognized key(s) in object: 'a' at [0].color"\`. Put alpha at the paint level: \`{ type: "SOLID", color: {r,g,b}, opacity: 0.5 }\`
 5. Variable scopes: NEVER use \`ALL_SCOPES\` — set specific scopes per variable type
 6. \`counterAxisAlignItems\` does NOT support \`'STRETCH'\` — use \`'MIN'\` + child \`layoutSizingHorizontal = "FILL"\`
 7. \`detachInstance()\` invalidates ancestor IDs — re-discover nodes by traversal after detaching
@@ -206,6 +206,10 @@ See **figma-execute-safety** reference for: auto-layout property table, node cre
 14. \`getPluginData()/setPluginData()\` not available — use \`setSharedPluginData(namespace, key, value)\`
 15. ALWAYS return JSON with ALL created/mutated node IDs from figma_execute — never return void
 16. Per operazioni atomiche e reversibili (rename, move, resize, set_fills, set_text, set_strokes, set_effects, set_opacity, set_corner_radius), preferisci il tool dedicato rispetto a figma_execute. I tool dedicati creano checkpoint restorable che l'utente può annullare; figma_execute crea checkpoint non-restorable che non si possono rewindare.
+17. **\`width\` and \`height\` are READ-ONLY** — \`node.width = 100\` throws \`"no setter for property"\`. Use \`node.resize(w, h)\` or \`node.resizeWithoutConstraints(w, h)\`. \`x\` and \`y\` ARE writable directly.
+18. **Guard type-specific methods** — \`getStyledTextSegments\`, \`setRangeFontName/Size/Fills/TextStyleId\` require \`node.type === "TEXT"\`; \`createVariant\` requires \`COMPONENT_SET\`; \`addComponentProperty\` requires \`COMPONENT\`/\`COMPONENT_SET\`. Calling on wrong type throws \`"not a function"\`. Always check \`node.type\` first.
+19. **Invalid property writes throw \`"object is not extensible"\`** — node objects are non-extensible. \`node.strokeDashes = [...]\` throws (the property is \`dashPattern\`); \`node.customColor = ...\` throws (invented property). Grep the plugin-api typings before assigning properties you're unsure about.
+20. **\`resize()\` resets \`primaryAxisSizingMode\` and \`counterAxisSizingMode\` to FIXED** — call \`resize()\` FIRST, then set sizing modes. Reversing the order silently locks the frame to the resized pixel dimensions.
 
 ## Anti-Patterns (AVOID)
 
@@ -223,6 +227,9 @@ See **figma-execute-safety** reference for: auto-layout property table, node cre
 - **Calling group.remove() after moving all children** — GROUP auto-deletes when empty; explicit remove() throws
 - **Monolithic figma_execute scripts** — break into single-responsibility calls
 - **Building from scratch when cloning is possible** — use figma_clone to preserve image fills and visual properties
+- **Assigning \`node.width\` / \`node.height\`** — READ-ONLY. Throws. Always use \`resize()\`
+- **Paint \`color: {r,g,b,a}\`** — \`a\` inside paint color throws validation error. Move alpha to paint-level \`opacity\`
+- **Calling \`getStyledTextSegments\` / \`setRange*\` / \`createVariant\` / \`addComponentProperty\` without a type guard** — throws \`"not a function"\` if the node isn't the required type
 
 ## Validation Policy
 

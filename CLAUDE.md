@@ -41,16 +41,23 @@ Electron Main Process (src/main/)
 ├── compression/          — Context compression (config, extension-factory, design-system-cache, mutation-compressor, metrics, color-utils, execute-enricher, project-tree)
 ├── image-gen/            — Gemini-based image generation (config, generator, prompt builders)
 ├── subagent/             — Read-only parallel subagents (types, config, read-only-tools, system-prompts, session-factory, context-prefetch, orchestrator, judge-harness, session-logger)
-└── tools/                — 39 ToolDefinition[] for Pi SDK (TypeBox schemas)
-    ├── index.ts          — Aggregator, ToolDeps interface, textResult helper, abort-check wrapper
-    ├── core.ts           — execute, screenshot, status, get_selection
-    ├── discovery.ts      — get_file_data, search_components, get_library_components, get_component_details, get_component_deep, analyze_component_set, design_system
-    ├── components.ts     — instantiate, set_instance_properties, arrange_component_set
-    ├── manipulation.ts   — set_fills, set_strokes, set_text, set_image_fill, resize, move, create_child, clone, delete, rename
-    ├── tokens.ts         — setup_tokens, lint
-    ├── annotations.ts    — get_annotations, set_annotations, get_annotation_categories
-    ├── jsx-render.ts     — render_jsx, create_icon, bind_variable
-    └── image-gen.ts      — generate_image, edit_image, restore_image, generate_icon, generate_pattern, generate_story, generate_diagram
+└── tools/                — 58 ToolDefinition[] for Pi SDK (TypeBox schemas)
+    ├── index.ts              — Aggregator, ToolDeps interface, textResult helper, abort-check wrapper
+    ├── plugin-api-linter.ts  — Pre-flight regex linter for figma_execute code (hard errors + warnings)
+    ├── core.ts               — execute, screenshot, status, get_selection
+    ├── discovery.ts          — get_file_data, search_components, get_library_components, get_component_details, get_component_deep, analyze_component_set, design_system, scan_text_nodes, whoami (REST), get_file_versions (REST), get_dev_resources (REST)
+    ├── components.ts         — instantiate, set_instance_properties, arrange_component_set, create_component, set_variant
+    ├── batch.ts              — batch_set_text, batch_set_fills, batch_transform, batch_rename
+    ├── manipulation.ts       — set_fills, set_strokes, set_text, set_image_fill, resize, move, create_child, clone, delete, rename, flatten_layers
+    ├── layout.ts             — auto_layout
+    ├── layout-sizing.ts      — set_layout_sizing
+    ├── style.ts              — set_text_style, set_effects, set_opacity, set_corner_radius
+    ├── tokens.ts             — setup_tokens, batch_bind_variable
+    ├── lint.ts               — lint (design-system conformance)
+    ├── ds-page.ts            — update_ds_page
+    ├── annotations.ts        — get_annotations, set_annotations, get_annotation_categories
+    ├── jsx-render.ts         — render_jsx, create_icon, bind_variable
+    └── image-gen.ts          — generate_image, edit_image, restore_image, generate_icon, generate_pattern, generate_story, generate_diagram
 
 Figma Core (src/figma/)           — Embedded from figma-console-mcp (MIT), cloud relay removed
 ├── websocket-server.ts           — WS server on port 9280, sendCommand with Promise correlation
@@ -142,21 +149,25 @@ node tests/electron-smoke.mjs
 - **Pi SDK system prompt**: Injected via `DefaultResourceLoader({ systemPrompt })` with `noExtensions/noSkills/noPromptTemplates/noThemes: true`.
 - **Tool params typed via `defineTool()`**: Tools use Pi SDK's `defineTool({...})` wrapper to preserve TypeBox inference. Params in `execute` are typed from `Static<TParams>` — no `any` casts.
 - **Upstream sync**: `src/figma/` and `figma-desktop-bridge/` are embedded/forked. Track in respective `UPSTREAM.md` files.
+- **Plugin API execution — local only**: Bottega runs Plugin API code via `figma_execute` through the Desktop Bridge WebSocket on port 9280. It does **not** connect to Figma's remote MCP server (`https://mcp.figma.com/mcp`) — Pi SDK has no MCP client support under `DefaultResourceLoader({ noSkills: true })`. Remote-MCP-only features (Code Connect suggestions, `generate_figma_design`, cross-library `search_design_system`) are out of scope until a client wrapper is added. REST API calls go through `figma-api.ts` (PAT or OAuth `figu_` Bearer). See `mcp-server-guide` skills for equivalent Plugin API patterns that Bottega implements locally.
 - **Context compression**: `compression/` profiles tune how verbose tool results are. Active profile switchable at runtime via IPC; the extension factory reads live config on every `tool_result`.
 - **Image generation**: `image-gen/` wraps Gemini API (`@google/genai`). Tools can generate, edit, and restore images on Figma nodes. Requires a Gemini API key configured in Settings.
 - **Prompt suggester**: After each agent turn, `prompt-suggester.ts` generates follow-up suggestions via a lightweight LLM call, forwarded as clickable chips in the renderer.
 - **Read-only subagents**: `subagent/` provides parallel read-only agent sessions (scout, analyst, auditor, judge). They share a `ScopedConnector` with the parent but only get discovery/screenshot tools. The orchestrator pre-fetches common context once and runs subagents via `Promise.allSettled`. Results are structurally aggregated — no semantic deduplication. The judge harness auto-triggers after mutating turns (configurable: off/auto/ask) with optional retry loop.
 
-## Tool Categories (49 tools)
+## Tool Categories (58 tools)
 
 - **Core** (4): `figma_execute`, `figma_screenshot`, `figma_status`, `figma_get_selection`
-- **Discovery** (8): `figma_get_file_data`, `figma_search_components`, `figma_get_library_components`, `figma_get_component_details`, `figma_get_component_deep`, `figma_analyze_component_set`, `figma_design_system`, `figma_scan_text_nodes`
-- **Batch** (3): `figma_batch_set_text`, `figma_batch_set_fills`, `figma_batch_transform`
-- **Components** (4): `figma_instantiate`, `figma_set_instance_properties`, `figma_arrange_component_set`, `figma_set_variant`
-- **Manipulation** (10): `figma_set_fills`, `figma_set_strokes`, `figma_set_text`, `figma_set_image_fill`, `figma_resize`, `figma_move`, `figma_create_child`, `figma_clone`, `figma_delete`, `figma_rename`
+- **Discovery** (11): `figma_get_file_data`, `figma_search_components`, `figma_get_library_components`, `figma_get_component_details`, `figma_get_component_deep`, `figma_analyze_component_set`, `figma_design_system`, `figma_scan_text_nodes`, `figma_whoami` (REST), `figma_get_file_versions` (REST), `figma_get_dev_resources` (REST)
+- **Batch** (4): `figma_batch_set_text`, `figma_batch_set_fills`, `figma_batch_transform`, `figma_batch_rename`
+- **Components** (5): `figma_instantiate`, `figma_set_instance_properties`, `figma_arrange_component_set`, `figma_create_component`, `figma_set_variant`
+- **Manipulation** (11): `figma_set_fills`, `figma_set_strokes`, `figma_set_text`, `figma_set_image_fill`, `figma_resize`, `figma_move`, `figma_create_child`, `figma_clone`, `figma_delete`, `figma_rename`, `figma_flatten_layers`
 - **Layout** (1): `figma_auto_layout`
+- **Layout Sizing** (1): `figma_set_layout_sizing`
 - **Style** (4): `figma_set_text_style`, `figma_set_effects`, `figma_set_opacity`, `figma_set_corner_radius`
-- **Tokens** (2): `figma_setup_tokens`, `figma_lint`
+- **Tokens** (2): `figma_setup_tokens`, `figma_batch_bind_variable`
+- **Lint** (1): `figma_lint`
+- **DS Page** (1): `figma_update_ds_page`
 - **Annotations** (3): `figma_get_annotations`, `figma_set_annotations`, `figma_get_annotation_categories`
 - **JSX Render** (3): `figma_render_jsx`, `figma_create_icon`, `figma_bind_variable`
 - **Image Gen** (7): `figma_generate_image`, `figma_edit_image`, `figma_restore_image`, `figma_generate_icon`, `figma_generate_pattern`, `figma_generate_story`, `figma_generate_diagram`

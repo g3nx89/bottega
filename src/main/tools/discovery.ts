@@ -3,7 +3,25 @@ import { defineTool } from '@mariozechner/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { extractTree } from '../compression/project-tree.js';
 import { MODE_EXTRACTORS, MODE_WALK, type SemanticMode } from '../compression/semantic-modes.js';
+import { UNBOUND_FILE_KEY } from '../constants.js';
 import { type ToolDeps, textResult } from './index.js';
+
+/**
+ * Resolve a REST tool's target fileKey: prefer explicit param, fall back to
+ * the currently-connected file. Returns an error `textResult` when neither is
+ * available (or when the slot is unbound). Shared by every REST-only discovery
+ * tool that operates on a file.
+ */
+function resolveRestFileKey(
+  paramKey: string | undefined,
+  connectedKey: string,
+): { ok: true; key: string } | { ok: false; error: ReturnType<typeof textResult> } {
+  const key = paramKey ?? connectedKey;
+  if (!key || key === UNBOUND_FILE_KEY) {
+    return { ok: false, error: textResult({ error: 'No fileKey provided and no file is currently connected' }) };
+  }
+  return { ok: true, key };
+}
 
 /**
  * Plugin code that walks the Figma document tree.
@@ -291,6 +309,63 @@ export function createDiscoveryTools(deps: ToolDeps): ToolDefinition[] {
       async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         // Read-only — no operationQueue needed
         const result = await connector.scanTextNodes(params.nodeId, params.maxDepth, params.maxResults);
+        return textResult(result);
+      },
+    }),
+    defineTool({
+      name: 'figma_whoami',
+      label: 'Whoami (Figma user)',
+      description:
+        'Get the authenticated Figma user identity (handle, id). REST-only — uses the Figma REST API token/OAuth configured in Settings. Use to confirm auth state or show the active user.',
+      promptSnippet: 'figma_whoami: get authenticated Figma user identity (REST)',
+      parameters: Type.Object({}),
+      async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
+        const me = await figmaAPI.getMe();
+        // PII: `email` is already excluded from the `FigmaUser` type returned
+        // by `getMe()` (see figma-api.ts). Keep this explicit projection as a
+        // defense-in-depth layer — do NOT shortcut to `return textResult(me)`.
+        return textResult({ id: me.id, handle: me.handle, img_url: me.img_url });
+      },
+    }),
+    defineTool({
+      name: 'figma_get_file_versions',
+      label: 'Get File Versions',
+      description:
+        'Get the version history of a Figma file (labelled versions + autosaves). Paginated. Use to inspect prior states, locate a named version, or inform rewind/restore flows.',
+      promptSnippet: 'figma_get_file_versions: list file version history (REST, paginated)',
+      parameters: Type.Object({
+        fileKey: Type.Optional(Type.String({ description: 'File key. Defaults to the currently-connected file.' })),
+        pageSize: Type.Optional(
+          Type.Number({ description: 'Results per page (1–50, default 30).', minimum: 1, maximum: 50 }),
+        ),
+        before: Type.Optional(Type.Number({ description: 'Version id upper bound for pagination.' })),
+        after: Type.Optional(Type.Number({ description: 'Version id lower bound for pagination.' })),
+      }),
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+        const resolved = resolveRestFileKey(params.fileKey, fileKey);
+        if (!resolved.ok) return resolved.error;
+        const result = await figmaAPI.getFileVersions(resolved.key, {
+          page_size: params.pageSize,
+          before: params.before,
+          after: params.after,
+        });
+        return textResult(result);
+      },
+    }),
+    defineTool({
+      name: 'figma_get_dev_resources',
+      label: 'Get Dev Resources',
+      description:
+        'List Dev Mode resources (external links attached to nodes) on a file. Optionally filter by node IDs. Use to discover code/doc links designers have attached to specific components.',
+      promptSnippet: 'figma_get_dev_resources: list Dev Mode links on a file (REST)',
+      parameters: Type.Object({
+        fileKey: Type.Optional(Type.String({ description: 'File key. Defaults to the currently-connected file.' })),
+        nodeIds: Type.Optional(Type.Array(Type.String(), { description: 'Filter resources to these node IDs.' })),
+      }),
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+        const resolved = resolveRestFileKey(params.fileKey, fileKey);
+        if (!resolved.ok) return resolved.error;
+        const result = await figmaAPI.getDevResources(resolved.key, params.nodeIds);
         return textResult(result);
       },
     }),

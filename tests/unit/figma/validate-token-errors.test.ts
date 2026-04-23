@@ -3,6 +3,8 @@ import { FigmaAPI } from '../../../src/figma/figma-api.js';
 
 vi.mock('../../../src/figma/logger.js', () => ({
   createChildLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+  registerSecret: vi.fn(),
+  unregisterSecret: vi.fn(),
 }));
 
 describe('FigmaAPI.validateToken — abort + malformed response branches', () => {

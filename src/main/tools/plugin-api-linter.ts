@@ -173,6 +173,16 @@ interface Rule {
   pluginApiSince?: string;
 }
 
+// Intentionally NOT enforced here (from mcp-server-guide v2.1.7 gotchas):
+// `"object is not extensible"` — thrown when assigning to a node property that
+// doesn't exist on that type (e.g. `strokeDashes` instead of `dashPattern`, or
+// any invented property). A regex rule would require an allowlist of ~300
+// Plugin API properties per node type to avoid churning on legitimate code,
+// and that allowlist would drift across Plugin API releases. The behavioral
+// guidance (grep the typings before assigning unfamiliar properties) lives in
+// system-prompt Rule 19 instead — the agent learns the pattern declaratively
+// rather than being blocked at pre-flight.
+
 // HARD ERRORS — pattern will throw at runtime, caller refuses to execute
 export const HARD_ERROR_RULES: Rule[] = [
   {
@@ -225,6 +235,26 @@ export const HARD_ERROR_RULES: Rule[] = [
     message: '`primaryAxisSizingMode = "FILL"` is INVALID — enum only accepts "FIXED" / "AUTO"',
     hint: 'On the frame use "AUTO" or "FIXED"; on children use `child.layoutSizingHorizontal = "FILL"`',
   },
+  {
+    id: 'paint-color-alpha',
+    kind: 'syntactic',
+    // Match `color: { ..., a: ... }` inside paint objects.
+    // `[^{}]*` excludes nested braces so we only flag flat paint-color literals,
+    // not unrelated outer structures that happen to contain `color:` and `a:`.
+    // Variable values use top-level `{r,g,b,a}` (no `color:` prefix) and are unaffected.
+    //
+    // Known limitation: `GradientPaint.gradientStops[].color` legally accepts
+    // `{r,g,b,a}`, but we can't distinguish "gradient stop context" from
+    // "solid paint context" with a regex alone — both use the same `color:`
+    // key. `severity: warning` (not `error`) so legitimate gradient code
+    // still proceeds; the hint surfaces the variable-value / gradient-stop
+    // exceptions so the agent can correct solid-paint mistakes while
+    // gradient code passes through.
+    pattern: /\bcolor\s*:\s*\{[^{}]*\ba\s*:/,
+    severity: 'warning',
+    message: 'Paint `color` must not include `a` — throws "Unrecognized key(s) in object: \'a\'"',
+    hint: 'Use `opacity` at the paint level: `{ type: "SOLID", color: {r,g,b}, opacity: 0.5 }`. Variable values with `{r,g,b,a}` are the only exception — those do NOT live under a `color:` key.',
+  },
 ];
 
 // WARNINGS — pattern is likely a bug but not always fatal; never blocks.
@@ -247,6 +277,22 @@ export const WARNING_RULES: Rule[] = [
     pattern: /\.\s*fills\s*\[[^\]]+\]\s*\.\s*color\s*\.\s*[rgba]\s*=(?!=)/,
     message: 'Direct mutation `fills[i].color.X = ...` silently fails (fills array is immutable)',
     hint: 'Clone and reassign: `node.fills = node.fills.map(f => ({...f, color: {...f.color, r: 0.5}}))`',
+  },
+  {
+    id: 'type-specific-method-without-guard',
+    kind: 'syntactic',
+    severity: 'warning',
+    // TEXT: getStyledTextSegments / setRange*
+    // COMPONENT_SET: createVariant
+    // COMPONENT/COMPONENT_SET: addComponentProperty
+    // Warning only — a guard may exist earlier in the flow that regex can't see.
+    // MAINTENANCE: update the alternation list when Plugin API adds new
+    // node-type-specific methods. Cross-reference:
+    //   https://www.figma.com/plugin-docs/api/nodes/
+    pattern:
+      /\.(getStyledTextSegments|setRangeFontName|setRangeFontSize|setRangeFills|setRangeTextStyleId|createVariant|addComponentProperty)\s*\(/,
+    message: 'Type-specific method call — throws "not a function" if node type is wrong',
+    hint: 'Guard first: `if (node?.type !== "TEXT") return`. TEXT: setRange*, getStyledTextSegments. COMPONENT_SET: createVariant. COMPONENT/COMPONENT_SET: addComponentProperty.',
   },
 ];
 

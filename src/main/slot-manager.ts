@@ -14,6 +14,7 @@ import {
   type ThinkingLevel,
 } from './agent.js';
 import { type AppState, AppStatePersistence } from './app-state-persistence.js';
+import { UNBOUND_FILE_KEY } from './constants.js';
 import type { AgentSessionLike } from './ipc-handlers.js';
 import { PromptQueue } from './prompt-queue.js';
 import { PromptSuggester } from './prompt-suggester.js';
@@ -23,10 +24,13 @@ import { abortActiveJudge } from './subagent/judge-harness.js';
 import type { TaskStore } from './tasks/store.js';
 import { hashFileKey, type UsageTracker } from './usage-tracker.js';
 
+// Re-exported for backward compatibility with existing callers that imported
+// `UNBOUND_FILE_KEY` from slot-manager before it was extracted to constants.js.
+export { UNBOUND_FILE_KEY };
+
 const log = createChildLogger({ component: 'slot-manager' });
 
 export const MAX_SLOTS = 4;
-export const UNBOUND_FILE_KEY = '__unbound__'; // nosemgrep: hard-coded-password — sentinel value, not a password
 
 /** Per-turn analytics correlation state, grouped for clarity. */
 export interface TurnTracking {

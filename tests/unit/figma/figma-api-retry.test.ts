@@ -2,21 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/figma/logger.js', () => ({
   createChildLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+  registerSecret: vi.fn(),
+  unregisterSecret: vi.fn(),
 }));
 
 import { FigmaAPI } from '../../../src/figma/figma-api.js';
-
-// Helper to create a mock Response
-function mockResponse(status: number, body: any = {}, statusText = ''): Response {
-  const isOk = status >= 200 && status < 300;
-  return {
-    ok: isOk,
-    status,
-    statusText,
-    json: vi.fn().mockResolvedValue(body),
-    text: vi.fn().mockResolvedValue(typeof body === 'string' ? body : JSON.stringify(body)),
-  } as unknown as Response;
-}
+import { mockResponse } from '../../helpers/mock-response.js';
 
 describe('FigmaAPI retry with exponential backoff (W-002)', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
@@ -106,7 +97,7 @@ describe('FigmaAPI retry with exponential backoff (W-002)', () => {
 
   // 7. No retry on 403
   it('should throw immediately on 403 without retrying and increment 403 counter', async () => {
-    fetchMock.mockResolvedValueOnce(mockResponse(403, 'Invalid token'));
+    fetchMock.mockResolvedValueOnce(mockResponse(403, '{"err":"Invalid token"}'));
 
     const api = new FigmaAPI('test-token');
     await expect(api.getFile('fileKey123')).rejects.toThrow('Figma API error (403)');
@@ -124,7 +115,7 @@ describe('FigmaAPI retry with exponential backoff (W-002)', () => {
 
   // 9. Circuit breaker: three 403s with "Invalid token" → apiDisabled
   it('should disable API after three consecutive 403s with "Invalid token"', async () => {
-    fetchMock.mockResolvedValue(mockResponse(403, 'Invalid token'));
+    fetchMock.mockResolvedValue(mockResponse(403, '{"err":"Invalid token"}'));
 
     const api = new FigmaAPI('test-token');
 
@@ -146,13 +137,13 @@ describe('FigmaAPI retry with exponential backoff (W-002)', () => {
   // 9b. Circuit breaker resets on success
   it('should reset 403 counter on successful response', async () => {
     fetchMock
-      .mockResolvedValueOnce(mockResponse(403, 'Invalid token'))
-      .mockResolvedValueOnce(mockResponse(403, 'Invalid token'))
+      .mockResolvedValueOnce(mockResponse(403, '{"err":"Invalid token"}'))
+      .mockResolvedValueOnce(mockResponse(403, '{"err":"Invalid token"}'))
       // Success resets counter
       .mockResolvedValueOnce(mockResponse(200, { ok: true }))
       // Start counting again
-      .mockResolvedValueOnce(mockResponse(403, 'Invalid token'))
-      .mockResolvedValueOnce(mockResponse(403, 'Invalid token'));
+      .mockResolvedValueOnce(mockResponse(403, '{"err":"Invalid token"}'))
+      .mockResolvedValueOnce(mockResponse(403, '{"err":"Invalid token"}'));
 
     const api = new FigmaAPI('test-token');
 

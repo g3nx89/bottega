@@ -105,6 +105,24 @@ describe('plugin-api-linter', () => {
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => e.ruleId === 'primary-axis-sizing-fill')).toBe(true);
     });
+
+    it('paint-color-alpha does NOT fire on variable setValueForMode', () => {
+      const code = `
+        const v = figma.variables.createVariable("bg", coll, "COLOR");
+        v.setValueForMode(modeId, { r: 1, g: 0, b: 0, a: 1 });
+        return null;
+      `;
+      const result = lintPluginCode(code);
+      expect(result.warnings.some((w) => w.ruleId === 'paint-color-alpha')).toBe(false);
+    });
+
+    it('paint-color-alpha does NOT fire on color without alpha', () => {
+      const code = `
+        node.fills = [{ type: "SOLID", color: { r: 1, g: 0, b: 0 }, opacity: 0.5 }];
+        return null;
+      `;
+      expect(lintPluginCode(code).ok).toBe(true);
+    });
   });
 
   describe('regex specificity', () => {
@@ -143,6 +161,110 @@ describe('plugin-api-linter', () => {
         return null;
       `);
       expect(result.warnings.some((w) => w.ruleId === 'direct-fill-color-mutation')).toBe(true);
+    });
+
+    it('warns on getStyledTextSegments without type guard', () => {
+      const result = lintPluginCode(`
+        const n = await figma.getNodeByIdAsync("1:2");
+        const segs = n.getStyledTextSegments(["hyperlink"]);
+        return segs;
+      `);
+      expect(result.warnings.some((w) => w.ruleId === 'type-specific-method-without-guard')).toBe(true);
+    });
+
+    it('warns on setRangeFontName', () => {
+      const result = lintPluginCode(`
+        node.setRangeFontName(0, 5, { family: "Inter", style: "Bold" });
+        return null;
+      `);
+      expect(result.warnings.some((w) => w.ruleId === 'type-specific-method-without-guard')).toBe(true);
+    });
+
+    it('warns on createVariant', () => {
+      const result = lintPluginCode(`
+        const v = compSet.createVariant();
+        return v.id;
+      `);
+      expect(result.warnings.some((w) => w.ruleId === 'type-specific-method-without-guard')).toBe(true);
+    });
+
+    it('warns on addComponentProperty', () => {
+      const result = lintPluginCode(`
+        comp.addComponentProperty("Label", "TEXT", "Button");
+        return null;
+      `);
+      expect(result.warnings.some((w) => w.ruleId === 'type-specific-method-without-guard')).toBe(true);
+    });
+
+    it('warns on paint color with alpha field', () => {
+      const result = lintPluginCode(`
+        node.fills = [{ type: "SOLID", color: { r: 1, g: 0, b: 0, a: 0.5 } }];
+        return null;
+      `);
+      expect(result.ok).toBe(true);
+      expect(result.warnings.some((w) => w.ruleId === 'paint-color-alpha')).toBe(true);
+    });
+
+    it('warns on paint color with alpha — strokes', () => {
+      const result = lintPluginCode(`
+        node.strokes = [{ type: "SOLID", color: {r: 0, g: 0, b: 0, a: 1} }];
+        return null;
+      `);
+      expect(result.ok).toBe(true);
+      expect(result.warnings.some((w) => w.ruleId === 'paint-color-alpha')).toBe(true);
+    });
+
+    it('paint-color-alpha warns on gradient-stop color (known false positive)', () => {
+      // Known regex limitation: GradientPaint.gradientStops[].color legally
+      // accepts {r,g,b,a} but we can't distinguish stop-context from paint-
+      // context with a regex alone. Warning severity keeps execution flowing.
+      const code = `
+        node.fills = [{
+          type: "GRADIENT_LINEAR",
+          gradientStops: [{ position: 0, color: { r: 1, g: 0, b: 0, a: 0.5 } }],
+        }];
+        return null;
+      `;
+      const result = lintPluginCode(code);
+      expect(result.ok).toBe(true);
+      expect(result.warnings.some((w) => w.ruleId === 'paint-color-alpha')).toBe(true);
+    });
+
+    it('paint-color-alpha does NOT match quoted keys (syntactic rule, lock behavior)', () => {
+      // String contents are blanked in syntactic stripping, so `"color"` and
+      // `"a"` quoted-key JSON literals slip past the rule. Documented here as
+      // a known limitation — update this test if the stripper stops blanking
+      // quoted property keys.
+      const code = `
+        node.fills = [{ type: "SOLID", "color": { "r": 1, "g": 0, "b": 0, "a": 0.5 } }];
+        return null;
+      `;
+      const result = lintPluginCode(code);
+      expect(result.warnings.some((w) => w.ruleId === 'paint-color-alpha')).toBe(false);
+    });
+
+    it('type-specific-method-without-guard fires even with same-expression guard (known limitation)', () => {
+      const code = `
+        return node.type === "TEXT" ? node.getStyledTextSegments(["hyperlink"]) : null;
+      `;
+      const result = lintPluginCode(code);
+      expect(result.warnings.some((w) => w.ruleId === 'type-specific-method-without-guard')).toBe(true);
+    });
+
+    it('does NOT match invented or similarly-named methods (negative regression)', () => {
+      const code1 = 'node.setRangeFontFace("Arial"); return null;';
+      const code2 = 'compSet.createVariantInstance(); return null;';
+      expect(lintPluginCode(code1).warnings.some((w) => w.ruleId === 'type-specific-method-without-guard')).toBe(false);
+      expect(lintPluginCode(code2).warnings.some((w) => w.ruleId === 'type-specific-method-without-guard')).toBe(false);
+    });
+
+    it('type-method rule does NOT fire on bare method names (no call)', () => {
+      const code = `
+        const methodName = "setRangeFontName";
+        return methodName;
+      `;
+      expect(lintPluginCode(code).ok).toBe(true);
+      expect(lintPluginCode(code).warnings).toHaveLength(0);
     });
   });
 
