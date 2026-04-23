@@ -42,7 +42,7 @@ let cached: GuardrailsSettings | null = null;
 
 export function loadGuardrailsSettings(): GuardrailsSettings {
   if (cached) return cached;
-  const raw = readJsonOrQuarantine<unknown>(CONFIG_PATH, (v): v is unknown => v !== null && typeof v === 'object');
+  const raw = readJsonOrQuarantine(CONFIG_PATH, (v): v is unknown => v !== null && typeof v === 'object');
   cached = validate(raw);
   return cached;
 }

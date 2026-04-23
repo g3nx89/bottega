@@ -110,7 +110,7 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
       }),
       async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
-          const nodeId = String(params.nodeId).replace(/[^0-9:]/g, '');
+          const nodeId = params.nodeId.replace(/[^0-9:]/g, '');
           const cols = Math.max(1, Math.floor(Number(params.columns) || 4));
           // nosemgrep: missing-template-string-indicator — code generation: builds plugin code sent to Figma
           const code = `
@@ -160,9 +160,9 @@ export function createComponentTools(deps: ToolDeps): ToolDefinition[] {
       }),
       async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
-          const name = String(params.name);
-          const fromFrameId = params.fromFrameId ? String(params.fromFrameId).replace(/[^0-9:;]/g, '') : undefined;
-          const parentId = params.parentId ? String(params.parentId).replace(/[^0-9:;]/g, '') : undefined;
+          const name = params.name;
+          const fromFrameId = params.fromFrameId ? params.fromFrameId.replace(/[^0-9:;]/g, '') : undefined;
+          const parentId = params.parentId ? params.parentId.replace(/[^0-9:;]/g, '') : undefined;
           const width = params.width ?? 100;
           const height = params.height ?? 100;
 

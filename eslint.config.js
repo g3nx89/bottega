@@ -79,6 +79,15 @@ export default tseslint.config(
       'src/main/diagnostics.ts',
       'src/main/startup-guards.ts',
       'src/main/safe-send.ts',
+      // Feature-scoped IPC modules — each owns its own ipcMain.handle surface
+      // for cohesion, rather than funnelling everything through ipc-handlers.ts.
+      'src/main/figma-plugin-sync.ts',
+      'src/main/guardrails/confirm-bus.ts',
+      'src/main/rewind/ipc.ts',
+      'src/main/rewind/test-ipc.ts',
+      // agent.ts instantiates BrowserWindow-bound extensions (guardrails,
+      // rewind) and needs WebContents typing for focus-routing.
+      'src/main/agent.ts',
     ],
     rules: {
       'no-restricted-imports': 'off',

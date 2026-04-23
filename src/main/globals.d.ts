@@ -6,6 +6,5 @@
 export {};
 
 declare global {
-  // eslint-disable-next-line no-var
   var __BOTTEGA_TOOL_NAMES__: readonly string[] | undefined;
 }

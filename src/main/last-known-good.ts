@@ -60,7 +60,7 @@ export function recordLastGood(
   filePath: string = DEFAULT_PATH,
   now: number = Date.now(),
 ): void {
-  const existing = readLastGood(filePath) ?? { version: 1 as 1, providers: {} };
+  const existing = readLastGood(filePath) ?? { version: 1 as const, providers: {} };
   const current = existing.providers[provider];
   if (current && current.modelId === modelId) return; // no-op
   existing.providers[provider] = { modelId, updatedAt: new Date(now).toISOString() };

@@ -666,7 +666,7 @@ function createSlotRuntimeFactory(
       };
       extensionFactories.push(
         createGuardrailsExtensionFactory({
-          isEnabled: () => loadGuardrailsSettings().enabled !== false,
+          isEnabled: () => loadGuardrailsSettings().enabled ?? true,
           getWebContents: resolveWebContents,
           getConnector: () => guardrailsRefs.connector,
           getFileKey: () => guardrailsRefs.fileKey,

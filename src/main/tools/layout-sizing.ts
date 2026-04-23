@@ -30,7 +30,7 @@ export function createLayoutSizingTools(deps: ToolDeps): ToolDefinition[] {
       }),
       async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
         return operationQueue.execute(async () => {
-          const nodeId = String(params.nodeId).replace(/[^0-9:;]/g, '');
+          const nodeId = params.nodeId.replace(/[^0-9:;]/g, '');
           const horizontal = params.horizontal;
           const vertical = params.vertical;
 
