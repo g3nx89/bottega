@@ -28,6 +28,9 @@
     "package": "npm run build && npx electron-builder --mac",
     "prepare": "husky"
   },
+  "overrides": {
+    "protobufjs": ">=7.5.5"
+  },
   "dependencies": {
     "@axiomhq/pino": "^1.5.0",
     "@google/genai": "^1.46.0",
